@@ -38,7 +38,7 @@ make run                      # терминал 2: http://localhost:8000
 сама вызывает инструменты `get_diagnosis`, `vehicle_history`, `search_manual`, `draft_ticket`, `fleet_summary`.
 Заявка уходит в ТОиР только кнопкой «Отправить» под показанным черновиком. Под каждым ответом — свёрнутая трасса:
 инструменты, токены, ₽. Журнал и память по машинам — SQLite (`STATE_DB`, по умолчанию `.state/agent.db`).
-Лимит расходов — `LLM_BUDGET_RUB`, цены — `LLM_PRICE_IN_RUB` / `LLM_PRICE_OUT_RUB` (₽ за 1 млн токенов).
+Лимиты расходов — `LLM_BUDGET_DAY_RUB` (сутки по Москве, 100 ₽) и `LLM_BUDGET_TOTAL_RUB` (всего, 1 000 ₽), цены — `LLM_PRICE_IN_RUB` / `LLM_PRICE_OUT_RUB` (₽ за 1 млн токенов). Карточки и отправка показанной заявки работают и после исчерпания лимита.
 
 ## Проверки
 

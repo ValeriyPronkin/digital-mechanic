@@ -44,7 +44,8 @@ def agent() -> Agent:
         searcher=default_searcher(),
         store=store(),
         fleet=fleet(),
-        budget_rub=float(os.environ.get("LLM_BUDGET_RUB", "300")),
+        budget_day_rub=float(os.environ.get("LLM_BUDGET_DAY_RUB", "100")),
+        budget_total_rub=float(os.environ.get("LLM_BUDGET_TOTAL_RUB", "1000")),
     )
 
 

@@ -90,8 +90,9 @@ class Store:
     def llm_calls(self, request_id: str) -> list[dict[str, Any]]:
         return self._rows("SELECT * FROM llm_calls WHERE request_id=? ORDER BY id", (request_id,))
 
-    def spent_rub(self) -> float:
-        rows = self._rows("SELECT COALESCE(SUM(cost_rub), 0) AS s FROM llm_calls")
+    def spent_rub(self, since: float = 0.0) -> float:
+        """Сумма ₽ по журналу; `since` — unix-время начала периода (0 — за всё время)."""
+        rows = self._rows("SELECT COALESCE(SUM(cost_rub), 0) AS s FROM llm_calls WHERE ts >= ?", (since,))
         return float(rows[0]["s"])
 
     # ---- память по ТС ----

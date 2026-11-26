@@ -9,7 +9,10 @@ services:
       LLM_MODEL: ${LLM_MODEL:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS:-}
-      LLM_BUDGET_RUB: ${LLM_BUDGET_RUB:-300}
+      LLM_BUDGET_DAY_RUB: ${LLM_BUDGET_DAY_RUB:-100}
+      LLM_BUDGET_TOTAL_RUB: ${LLM_BUDGET_TOTAL_RUB:-1000}
+      LLM_PRICE_IN_RUB: ${LLM_PRICE_IN_RUB:-}
+      LLM_PRICE_OUT_RUB: ${LLM_PRICE_OUT_RUB:-}
       # Внутри compose сервис ходит в заглушки по именам сервисов, а не по адресам из .env.
       MOCK_ML_URL: http://mock-ml:8001
       MOCK_TOIR_URL: http://mock-toir:8002
