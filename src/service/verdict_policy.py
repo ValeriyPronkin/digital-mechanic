@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from service.clients import Diagnosis
+from service.compat import check as compat_check
 
 EARLY_RECHECK_SCORE = 0.30
 
@@ -29,6 +30,7 @@ class VerdictCard(BaseModel):
     action: str
     banners: list[str]
     ticket_possible: bool
+    compatible: bool = True  # код совместим с двигателем ТС (правило 5)
     fault_code: str | None
     fault_title: str | None
     confidence_pct: int | None
@@ -40,7 +42,7 @@ def _pct(value: float | None) -> int | None:
     return None if value is None else round(value * 100)
 
 
-def build_card(diag: Diagnosis, fault_titles: dict[str, str]) -> VerdictCard:
+def build_card(diag: Diagnosis, fault_titles: dict[str, str], engine: str | None = None) -> VerdictCard:
     banners: list[str] = []
     if diag.signal_quality == "warning":
         banners.append(BANNER_NOISY)
@@ -85,6 +87,24 @@ def build_card(diag: Diagnosis, fault_titles: dict[str, str]) -> VerdictCard:
     code = diag.anomaly_type
     title = fault_titles.get(code) if code else None
     known = title is not None
+    if known and code and engine:
+        compat = compat_check(code, engine)
+        if not compat.ok:
+            return VerdictCard(
+                status="anomaly",
+                color="grey",
+                title="Результат не подходит к этому двигателю",
+                action=f"Сервис указал «{title}», но {compat.why} ({engine}). "
+                "Скорее всего, ошибка записи: повторите проверку. Заявку по такому результату не оформляем.",
+                banners=banners,
+                ticket_possible=False,
+                compatible=False,
+                fault_code=code,
+                fault_title=title,
+                confidence_pct=_pct(diag.confidence),
+                ml_quote=diag.description,
+                ml_quote_label="Сообщение сервиса диагностики",
+            )
     return VerdictCard(
         status="anomaly",
         color="red",

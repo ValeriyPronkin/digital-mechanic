@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from service import main
-from service.clients import MLClient
+from service.clients import MLClient, ToirClient
 
 client = TestClient(main.app)
 
@@ -48,3 +48,31 @@ def test_display_name_no_duplicate_make() -> None:
     names = {v["vehicle_id"]: v["name"] for v in client.get("/api/vehicles").json()}
     assert names["P456AT178"] == "МАЗ-5337"
     assert all(n for n in names.values())
+
+
+def test_chat_and_ticket_endpoints(ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from service.agent import Agent
+    from service.store import Store
+    from test_agent import ANOMALY, FixtureSearch, ScriptedLLM, c1_steps
+
+    ag = Agent(ScriptedLLM(c1_steps(*ANOMALY)), ml, toir, FixtureSearch(), Store(":memory:"), main.fleet())
+    monkeypatch.setattr(main, "agent", lambda: ag)
+    r = client.post("/api/chat", json={"vehicle_id": ANOMALY[0], "session_id": ANOMALY[1], "message": "Оформи заявку"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["draft"]["body"]["anomaly_type"] == "F02" and data["trace"]["steps"]
+    bad = client.post("/api/tickets", json={"conversation_id": data["conversation_id"], "fingerprint": "nope"})
+    assert bad.status_code == 409
+    ok = client.post(
+        "/api/tickets", json={"conversation_id": data["conversation_id"], "fingerprint": data["draft"]["fingerprint"]}
+    )
+    assert ok.status_code == 201 and ok.json()["ticket_id"].startswith("TKT-")
+
+
+def test_ticket_unknown_conversation() -> None:
+    r = client.post("/api/tickets", json={"conversation_id": "nope", "fingerprint": "x"})
+    assert r.status_code == 404
+
+
+def test_manual_pdf_missing() -> None:
+    assert client.get("/manuals/doc-1").status_code == 404

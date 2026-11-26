@@ -43,6 +43,25 @@
     blockquote cite { display:block; font-style:normal; color:var(--muted); font-size:.85rem; margin-bottom:.3rem; }
     .err { background:#fde8e7; color:var(--red); border-radius:12px; padding:.8rem 1rem; margin-bottom:1rem; }
     .muted { color:var(--muted); }
+    .chat { margin-top:1.25rem; }
+    .msg { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:.75rem 1rem;
+           margin-bottom:.6rem; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .msg.me { background:#e8f0fe; border-color:#c6d7f5; margin-left:2rem; }
+    .note { background:#fff4d6; color:#5c4300; border-radius:8px; padding:.4rem .6rem; margin-top:.5rem; font-size:.92rem; }
+    .src a { display:inline-block; margin:.3rem .4rem 0 0; padding:.35rem .6rem; border-radius:8px; background:#eef2f7;
+             color:var(--accent); text-decoration:none; font-size:.92rem; }
+    .ask { display:flex; gap:.5rem; margin-top:.5rem; }
+    .ask textarea { flex:1; font:inherit; padding:.7rem; border:1px solid var(--line); border-radius:12px; min-height:52px; }
+    .ask button, .quick button, .draft button { font:inherit; border:0; border-radius:12px; padding:.7rem 1rem;
+             background:var(--accent); color:#fff; font-weight:600; min-height:48px; }
+    .quick { display:flex; gap:.5rem; flex-wrap:wrap; margin:.5rem 0; }
+    .quick button { background:#eef2f7; color:var(--accent); }
+    .draft { border:2px solid var(--red); border-radius:14px; padding:1rem; background:var(--card); margin-bottom:.6rem; }
+    .draft h3 { margin:0 0 .5rem; } .draft ul { list-style:disc; padding-left:1.2rem; margin:.2rem 0 .6rem; }
+    .draft button.send { width:100%; background:var(--red); font-size:1.1rem; }
+    .ok { background:#e3f4e8; color:var(--green); border-radius:12px; padding:.8rem 1rem; font-weight:700; margin-bottom:.6rem; }
+    details.trace { margin-top:1rem; font-size:.88rem; color:var(--muted); }
+    details.trace table { width:100%; border-collapse:collapse; } details.trace td { padding:.2rem .3rem; border-top:1px solid var(--line); }
   </style>
 </head>
 <body>
@@ -60,7 +79,7 @@
 // Весь текст из данных выводится только через textContent: цитата ML — данные, не разметка и не инструкции.
 const $ = (id) => document.getElementById(id);
 const main = $("main");
-let vehicles = [], current = null, selected = null;
+let vehicles = [], current = null, selected = null, conversationId = null, lastCard = null;
 
 function el(tag, attrs, ...children) {
   const n = document.createElement(tag);
@@ -140,6 +159,7 @@ async function runDiagnose() {
 }
 
 function screenCard(card) {
+  conversationId = null; lastCard = card;
   const s = current.sessions.find(x => x.session_id === selected);
   const meta = [];
   if (card.fault_code) meta.push("Код " + card.fault_code);
@@ -153,10 +173,82 @@ function screenCard(card) {
     el("blockquote", {}, el("cite", {}, card.ml_quote_label), card.ml_quote),
     el("p", {class:"sub"}, current.vehicle_id + " · " + current.engine_model + " · проверка " + selected +
       (s ? " от " + fmtDate(s.checked_at) : "")),
-    card.ticket_possible ? el("p", {class:"muted"}, "Заявку на дефектовку можно будет оформить после разбора по руководству.") : null);
+    chatBlock(card));
   const btn = $("diagnose");
   btn.disabled = false; btn.textContent = "Выбрать другую проверку";
   window.scrollTo(0, 0);
+}
+
+
+// ---------- чат с агентом ----------
+function chatBlock(card) {
+  const log = el("div", {id:"chatlog"});
+  const input = el("textarea", {id:"question", rows:"2", placeholder:"Вопрос по этой машине", "aria-label":"Вопрос"});
+  const quick = ["Что делать по шагам?"];
+  if (card.ticket_possible) quick.push("Оформить заявку на дефектовку");
+  if (card.status === "check_failed") quick.splice(0, 1, "Как правильно повторить запись?");
+  return el("section", {class:"chat"},
+    el("h2", {}, "Спросить механика-помощника"),
+    log,
+    el("div", {class:"quick"}, ...quick.map(q => el("button", {onclick: () => ask(q)}, q))),
+    el("form", {class:"ask", onsubmit: (e) => { e.preventDefault(); const q = input.value.trim(); if (q) { input.value = ""; ask(q); } }},
+      input, el("button", {type:"submit"}, "Спросить")));
+}
+
+function renderAnswer(r) {
+  const byRef = Object.fromEntries(r.sources.map(s => [s.ref, s]));
+  const body = el("div", {class:"msg"});
+  // [R1] → кликабельная ссылка «документ, стр. PDF»; остальной текст — только textContent
+  for (const part of r.text.split(/(\[R\d+\])/)) {
+    const m = part.match(/^\[(R\d+)\]$/);
+    if (m && byRef[m[1]]) body.append(el("a", {href: byRef[m[1]].url, target:"_blank", rel:"noopener"}, "[стр. " + byRef[m[1]].pdf_page + "]"));
+    else body.append(part);
+  }
+  for (const n of r.notes) body.append(el("div", {class:"note"}, "⚠ " + n));
+  if (r.sources.length) body.append(el("div", {class:"src"}, ...r.sources.map(s =>
+    el("a", {href: s.url, target:"_blank", rel:"noopener"}, s.manual + ", стр. PDF " + s.pdf_page))));
+  const t = r.trace;
+  body.append(el("details", {class:"trace"}, el("summary", {}, "Трасса: " + t.tokens_in + "+" + t.tokens_out + " токенов, " + t.cost_rub.toFixed(2) + " ₽"),
+    el("table", {}, ...t.steps.map(s => el("tr", {},
+      el("td", {}, s.step), el("td", {}, s.kind === "llm" ? "модель " + s.name : "→ " + s.name + (s.ok ? "" : " (отказ)")),
+      el("td", {}, s.kind === "llm" ? s.tokens_in + "+" + s.tokens_out : ""), el("td", {}, s.ms + " мс"))))));
+  $("chatlog").append(body);
+  if (r.draft) $("chatlog").append(draftCard(r.draft));
+}
+
+function draftCard(d) {
+  const b = d.body;
+  const urg = {high:"высокая", medium:"средняя", low:"низкая"}[b.urgency];
+  const box = el("div", {class:"draft"},
+    el("h3", {}, "Заявка на дефектовку — проверьте"),
+    el("div", {}, el("b", {}, b.vehicle_id + " · " + b.session_id + " · " + b.anomaly_type)),
+    el("p", {}, b.conclusion),
+    el("div", {}, el("b", {}, "Срочность: " + urg), el("span", {class:"sub"}, " — " + d.urgency_reason)),
+    el("div", {}, el("b", {}, "Работы:")), el("ul", {}, ...b.operations.map(o => el("li", {}, o))),
+    b.spare_parts.length ? el("div", {}, el("b", {}, "Запчасти: "), b.spare_parts.join(", ")) : null,
+    el("div", {}, el("b", {}, "Источники:")), el("ul", {}, ...b.references.map(r => el("li", {}, r.manual + ", стр. PDF " + r.pdf_page))));
+  const send = el("button", {class:"send", onclick: async () => {
+    send.disabled = true; send.textContent = "Отправляю…";
+    try {
+      const res = await api("/api/tickets", {method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({conversation_id: conversationId, fingerprint: d.fingerprint})});
+      box.replaceWith(el("div", {class:"ok", role:"status"}, "✓ Заявка " + res.ticket_id + " создана в ТОиР"));
+    } catch (e) { send.disabled = false; send.textContent = "Отправить"; box.append(el("div", {class:"err"}, e.message)); }
+  }}, "Отправить");
+  box.append(send);
+  return box;
+}
+
+async function ask(q) {
+  $("chatlog").append(el("div", {class:"msg me"}, q));
+  const wait = el("div", {class:"msg muted"}, "Думаю…");
+  $("chatlog").append(wait);
+  try {
+    const r = await api("/api/chat", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({vehicle_id: current.vehicle_id, session_id: selected, message: q, conversation_id: conversationId})});
+    conversationId = r.conversation_id;
+    wait.remove(); renderAnswer(r);
+  } catch (e) { wait.remove(); $("chatlog").append(el("div", {class:"err"}, e.message)); }
 }
 
 $("diagnose").addEventListener("click", () => {
