@@ -68,6 +68,8 @@ def test_c1_through_v2(v2: tuple[TestClient, Any, Store]) -> None:
     assert src["handle"] == "S1" and src["pdf_page"] == 42
     ver = next(e for e in ev if e["type"] == "verification")
     assert ver["verified"] == ["S1"] and ver["counts"]["verified"] == 1
+    use = next(e for e in ev if e["type"] == "usage")
+    assert use["input_tokens"] + use["cache_read_tokens"] == 1000  # кэш провайдера не считается дважды
     pp = next(e for e in ev if e["type"] == "passport")  # паспорт запроса (#31) — для «?» в v2
     assert pp["question"]["level"] == "steps" and pp["total"]["model_rub"] >= 0
     sp = next(e for e in ev if e["type"] == "speech")  # короткая озвучка (#14) — по подписи сервера
@@ -75,6 +77,7 @@ def test_c1_through_v2(v2: tuple[TestClient, Any, Store]) -> None:
 
     restored = c.get(f"/api/v2/threads/current?vehicle_id={vid}").json()
     assert restored["session_id"] == sid and len(restored["transcript"]) == 2
+    assert restored["transcript"][1]["passport"]["total"]["model_rub"] >= 0  # паспорт — и после перезагрузки
 
     r2 = c.post("/api/v2/chat", json={"vehicle_id": vid, "session_id": sid, "message": "Создать заявку на дефектовку"})
     pending = next(e for e in events(r2) if e["type"] == "ticket_pending")

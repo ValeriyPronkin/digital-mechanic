@@ -216,6 +216,33 @@ export interface Verification {
   claims?: ClaimMarks[]
 }
 
+/** Our request passport (issue #31): what the assistant did, what went to the model, what it cost. */
+export interface PassportFragment {
+  ref: string
+  manual: string
+  pdf_page: number
+  section: string
+  tokens: number
+  used: boolean
+}
+export interface Passport {
+  request_id: string | null
+  searches: { by: string; engine: string | null; queries: string[]; found: number; fragments: PassportFragment[] }[]
+  llm: { name: string; provider: string; tokens_in: number; tokens_cached: number; tokens_out: number; ms: number; cost_rub: number }[]
+  voice: { stt_seconds: number; stt_rub: number; tts_chars: number; tts_rub_estimate: number }
+  rules: string[]
+  total: {
+    model_rub: number
+    search_rub: number
+    voice_rub: number
+    total_rub: number
+    ms: number
+    fragments_tokens: number
+    unused_tokens: number
+    unused_share: number
+  }
+}
+
 export type TranscriptEntry =
   | { role: 'user'; text: string }
   | {
@@ -225,6 +252,7 @@ export type TranscriptEntry =
       tools: ToolTrace[]
       usage: UsageEvent[]
       verification?: Verification
+      passport?: Passport
     }
   | { role: 'ticket'; ticket: TicketView }
 
@@ -265,6 +293,7 @@ export type ChatEvent =
   | ({ type: 'verification'; text: string } & Verification)
   | ({ type: 'ticket_pending' } & TicketPending)
   | ({ type: 'usage' } & UsageEvent)
+  | ({ type: 'passport' } & Passport)
   | { type: 'error'; message: string }
   | { type: 'done'; reason: string }
 

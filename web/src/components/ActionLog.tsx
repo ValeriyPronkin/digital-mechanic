@@ -1,6 +1,7 @@
-import type { SourceItem, ToolTrace, UsageEvent } from '../api'
+import type { Passport, SourceItem, ToolTrace, UsageEvent } from '../api'
 import { copy } from '../copy'
 import { logTotals, stepDetail } from '../lib/log'
+import { passportFile, passportRows } from '../lib/passport'
 import { SourceChip } from './SourceChip'
 
 type Sources = Record<string, SourceItem>
@@ -16,12 +17,14 @@ export function ActionLog({
   manualNames,
   sources = {},
   onOpen,
+  passport,
 }: {
   tools: ToolTrace[]
   usage: UsageEvent[]
   manualNames: Record<string, string> // manual id → the name the mechanic knows it by
   sources?: Sources // the pages that were issued a handle: a page the agent read opens from the log
   onOpen?: (s: SourceItem) => void
+  passport?: Passport // our request passport (#31): what went to the model, what it cost, which rules worked
 }) {
   if (!tools.length && !usage.length) return null
   const totals = logTotals(tools.length, usage)
@@ -67,7 +70,69 @@ export function ActionLog({
             <span className="block">{totals.calls}</span>
           </li>
         )}
+        {passport && <PassportSection passport={passport} />}
       </ol>
     </details>
+  )
+}
+
+/** The request passport inside the open log: plain rows, no JSON on the screen; the JSON is a download. */
+function PassportSection({ passport }: { passport: Passport }) {
+  const rows = passportRows(passport)
+  const download = () => {
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(passportFile(passport))
+    a.download = `passport-${passport.request_id ?? 'answer'}.json`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+  }
+  return (
+    <li className="space-y-2 pt-2">
+      <span className="block font-semibold text-text">Паспорт запроса</span>
+      {rows.fragments.length > 0 && (
+        <div>
+          <span className="block">Что ушло в модель из руководства</span>
+          <ul className="mt-0.5 space-y-0.5">
+            {rows.fragments.map((f, i) => (
+              <li key={i} className={f.used ? 'text-text' : 'text-mute'}>
+                {f.used ? '✓ ' : '— '}
+                {f.label} · {f.tokens} · {f.used ? 'в ответе' : 'не пошло в ответ'}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {rows.calls.length > 0 && (
+        <div>
+          <span className="block">Вызовы модели: токены вход / выход</span>
+          <ul className="mt-0.5 space-y-0.5">
+            {rows.calls.map((c, i) => (
+              <li key={i}>
+                {c.label} · {c.tokens} · {c.time} · <span className="text-text">{c.price}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div>
+        <span className="block">Правила кода</span>
+        <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+          {rows.rules.map((r, i) => (
+            <li key={i}>{r}</li>
+          ))}
+        </ul>
+      </div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+        {rows.total.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt>{k}</dt>
+            <dd className="text-text">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <button type="button" onClick={download} className="min-h-12 text-accent underline-offset-2 hover:underline">
+        Скачать паспорт (JSON)
+      </button>
+    </li>
   )
 }

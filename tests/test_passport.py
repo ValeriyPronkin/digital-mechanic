@@ -140,3 +140,12 @@ def test_api_passport_for_voice_question_and_card(
     cp = card["passport"]
     assert cp["total"]["total_rub"] == 0 and cp["llm"] == [] and cp["tools"][0]["tool"] == "get_diagnosis"
     assert any("модель не вызывалась" in r for r in cp["rules"])
+
+
+def test_search_refs_without_repeats() -> None:
+    """Три фрагмента одной страницы — одна ссылка, в паспорте страница один раз (стенд 27.11: «стр. 276» ×3)."""
+    from service.agent import tool_step
+
+    found = [{"ref": "R2"}, {"ref": "R2"}, {"ref": "R3"}, {"ref": "R2"}]
+    step = tool_step(0, "search_manual", {"query": "зазор"}, {"found": found, "engine": "ЯМЗ-236М2"}, True, 5)
+    assert step["search"]["refs"] == ["R2", "R3"] and step["search"]["found"] == 4

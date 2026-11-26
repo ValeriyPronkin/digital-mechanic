@@ -128,6 +128,7 @@ function AssistantBlock({
           manualNames={manualNames}
           sources={sources}
           onOpen={(s) => onOpenSource(s)}
+          passport={turn.passport}
         />
       )}
     </div>
