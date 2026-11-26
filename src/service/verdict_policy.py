@@ -23,6 +23,30 @@ BANNER_BAD = "Запись непригодна для выводов."
 BANNER_EARLY_RECHECK = "Норма, но повторите проверку раньше срока."
 
 
+Urgency = Literal["low", "medium", "high"]
+# Коды, при которых работа двигателя грозит серьёзной поломкой: срочность высокая независимо от оценки.
+CRITICAL_CODES = {"F02": "низкое давление масла", "F03": "перегрев / жидкость в масле", "F14": "цепь ГРМ"}
+
+
+def urgency_for(diag: Diagnosis) -> tuple[Urgency, str]:
+    """Срочность — правило в коде, с основанием. Одно и то же для карточки и для заявки."""
+    code = diag.anomaly_type or ""
+    if code in CRITICAL_CODES:
+        return "high", f"{code}: {CRITICAL_CODES[code]} — работа двигателя грозит серьёзной поломкой"
+    if (diag.anomaly_score or 0) >= 0.85:
+        return "high", f"высокая оценка отклонения ({diag.anomaly_score:.2f})"
+    if (diag.confidence or 0) < 0.6 or diag.signal_quality == "warning":
+        return "low", "уверенность сервиса диагностики снижена — сначала уточнить дефектовкой"
+    return "medium", "отклонение подтверждено, критичных признаков нет"
+
+
+URGENCY_ACTION = {
+    "high": "Срочно: до дефектовки машину не эксплуатировать. Оформите заявку.",
+    "medium": "Нужна дефектовка в ближайшее время — оформите заявку.",
+    "low": "Уточните дефектовкой или повторите запись: уверенность снижена. Заявку можно оформить.",
+}
+
+
 class VerdictCard(BaseModel):
     status: Literal["normal", "anomaly", "check_failed"]
     color: Color
@@ -37,6 +61,8 @@ class VerdictCard(BaseModel):
     ml_quote: str  # цитата ML-сервиса как есть; показывать как текст, не исполнять
     ml_quote_label: str
     manual: dict[str, Any] | None = None  # пояснение из матрицы по руководству (#16), без модели
+    urgency: Urgency | None = None  # срочность по правилу urgency_for (как в заявке)
+    urgency_reason: str | None = None
 
 
 def _pct(value: float | None) -> int | None:
@@ -106,13 +132,16 @@ def build_card(diag: Diagnosis, fault_titles: dict[str, str], engine: str | None
                 ml_quote=diag.description,
                 ml_quote_label="Сообщение сервиса диагностики",
             )
+    urgency, reason = urgency_for(diag) if known else (None, None)
     return VerdictCard(
         status="anomaly",
         color="red",
         title=f"Неисправность: {title}" if known else "Неисправность неизвестного типа",
-        action="Не откладывайте: машине нужна дефектовка. Можно оформить заявку."
-        if known
+        action=URGENCY_ACTION[urgency]
+        if urgency
         else "Тип неисправности не распознан. Повторите проверку; заявку по такому результату не оформляем.",
+        urgency=urgency,
+        urgency_reason=reason,
         banners=banners,
         ticket_possible=known,
         fault_code=code if known else None,

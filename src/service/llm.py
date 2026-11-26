@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import uuid
@@ -18,6 +19,8 @@ import httpx
 
 from service.clients import ServiceError
 from service.tls import ssl_context
+
+log = logging.getLogger(__name__)
 
 Message = dict[str, Any]
 TIMEOUT = httpx.Timeout(60.0, connect=5.0)
@@ -82,6 +85,7 @@ def _post(http: httpx.Client, url: str, **kw: Any) -> dict[str, Any]:
             time.sleep(1.0)
             continue
         if resp.status_code != 200:
+            log.warning("модель ответила %s: %s", resp.status_code, resp.text[:500])
             raise LLMError(f"Модель ответила ошибкой {resp.status_code}.")
         data: dict[str, Any] = resp.json()
         return data
@@ -133,16 +137,17 @@ class DeepSeekProvider:
         body = {
             "model": self.model,
             "messages": self.to_wire(messages),
-            "tools": [
+            "temperature": 0.2,
+            "max_tokens": max_tokens(),
+        }
+        if tools:  # пустой список инструментов API не принимает — без инструментов ключа нет
+            body["tools"] = [
                 {
                     "type": "function",
                     "function": {"name": t.name, "description": t.description, "parameters": t.parameters},
                 }
                 for t in tools
-            ],
-            "temperature": 0.2,
-            "max_tokens": max_tokens(),
-        }
+            ]
         data = _post(self.http, "/chat/completions", json=body, headers=self._auth)
         msg = data["choices"][0]["message"]
         finish = data["choices"][0].get("finish_reason")
@@ -210,17 +215,23 @@ class GigaChatProvider:
                 out.append({"role": "function", "name": m["name"], "content": m["content"]})
             else:
                 out.append({"role": m["role"], "content": m["content"]})
-        return out
+        # GigaChat: «system message must be the first message» — все системные склеиваем в одно первое
+        system = [m["content"] for m in out if m["role"] == "system"]
+        rest = [m for m in out if m["role"] != "system"]
+        return ([{"role": "system", "content": "\n\n".join(system)}] if system else []) + rest
 
     def chat(self, messages: list[Message], tools: list[ToolSpec]) -> LLMReply:
         body = {
             "model": self.model,
             "messages": self.to_wire(messages),
-            "functions": [{"name": t.name, "description": t.description, "parameters": t.parameters} for t in tools],
-            "function_call": "auto",
             "temperature": 0.2,
             "max_tokens": max_tokens(),
         }
+        if tools:
+            body["functions"] = [
+                {"name": t.name, "description": t.description, "parameters": t.parameters} for t in tools
+            ]
+            body["function_call"] = "auto"
         headers = {"Authorization": f"Bearer {self._access_token()}"}
         data = _post(self.http, f"{self.API_URL}/chat/completions", json=body, headers=headers)
         msg = data["choices"][0]["message"]

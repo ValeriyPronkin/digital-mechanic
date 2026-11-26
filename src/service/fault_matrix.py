@@ -214,13 +214,17 @@ def card_explanation(code: str, engine: str) -> dict[str, Any] | None:
     def ref(r: Ref) -> dict[str, Any]:
         doc = DOCS_BY_ID[r.doc]
         url = f"/manuals/{r.doc}#page={r.page}"
-        return {"text": r.quote, "manual": doc.designation, "pdf_page": r.page, "url": url}
+        out = {"text": r.quote, "manual": doc.designation, "pdf_page": r.page, "url": url}
+        if r.what:
+            out["what"] = r.what
+        return out
 
     if cell.status != "confirmed":
         note = "В руководстве этого двигателя нет порядка работ по этому узлу — нужна дефектовка."
-        return {"status": cell.status, "steps": [], "safety": [], "note": note}
+        return {"status": cell.status, "steps": [], "safety": [], "pages": [], "note": note}
     return {
         "status": "confirmed",
+        "pages": [ref(p) for p in cell.pages],
         "steps": [ref(o) for o in cell.operations],
         "safety": [ref(x) for x in cell.safety],
         "note": cell.note,
