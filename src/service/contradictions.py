@@ -114,6 +114,8 @@ def neutralize(k: Known, text: str) -> str:
             parts = [p for p in _SENT.split(ln[len(prefix) :]) if p.strip()]
             kept = [p for p in parts if not k.claim.search(p)]
             safe_seen = any(k.safe_line in o for o in out)
+            if safe_seen and not kept and not re.match(r"\s*\d", prefix):
+                continue  # вывод уже есть; нумерованный шаг оставляем — нумерация не ломается
             if not prefix and safe_seen:
                 if not kept:
                     continue  # вне списка вывод — один раз
@@ -141,7 +143,10 @@ def block(k: Known, quotes: list[Quote], refs: dict[tuple[str, int], str]) -> st
     for q in quotes:
         ref = refs.get((q.doc, q.page))
         lines.append(f"- {q.label()}: «{q.quote}»" + (f" [{ref}]" if ref else ""))
-    lines.append(f"Вывод: {k.conclusion} Основание — {k.basis}. {ADVICE}")
+    if k.conclusion:
+        lines.append(f"Вывод: {k.conclusion} Основание — {k.basis}. {ADVICE}")
+    else:  # правила заказчика нет — ни одно значение не выбираем
+        lines.append(f"Какое значение верно для вашего двигателя, руководства не уточняют. {ADVICE}")
     return "\n".join(lines)
 
 
@@ -150,9 +155,9 @@ def for_model(k: Known, quotes: list[Quote]) -> dict[str, Any]:
     return {
         "title": k.title,
         "quotes": [{"manual": q.label(), "text": q.quote} for q in quotes],
-        "conclusion": k.conclusion,
+        "conclusion": k.conclusion or "нет: ни одно значение не выбирай",
         "rule": "Не выбирай одну формулировку как бесспорную. Блок с цитатами и выводом вставит код — не повторяй их "
-        "и не пиши свой «Вывод:»; дай прямой ответ по выводу и шаги.",
+        "и не пиши свой «Вывод:»; дай прямой ответ по выводу (если он есть) и шаги.",
     }
 
 
