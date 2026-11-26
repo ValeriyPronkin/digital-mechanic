@@ -366,7 +366,7 @@ class Agent:
         )
 
     def check_budget(self) -> None:
-        """Лимиты D-8: в сутки по Москве и всего. Проверка до каждого вызова модели."""
+        """Лимиты D-10: в сутки по Москве и всего. Проверка до каждого вызова модели."""
         if self.store.spent_rub() >= self.budget_total_rub:
             raise BudgetExceededError(
                 f"Общий лимит расходов на модель ({self.budget_total_rub:g} ₽) исчерпан — помощник отключён. "

@@ -11,6 +11,6 @@ build/
 dist/
 
 # PDF руководств заказчика и индексы — не в git
-manuals/
+/manuals/
 .index/
 .state/
