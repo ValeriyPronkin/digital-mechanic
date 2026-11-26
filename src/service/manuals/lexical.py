@@ -53,9 +53,13 @@ class BM25:
         n = len(docs)
         self.idf = {t: math.log(1 + (n - f + 0.5) / (f + 0.5)) for t, f in df.items()}
 
-    def scores(self, query: Sequence[str], candidates: Iterable[int]) -> dict[int, float]:
-        """Оценки только для кандидатов (после фильтра по двигателю); нулевые не возвращаются."""
+    def scores(
+        self, query: Sequence[str], candidates: Iterable[int], weights: dict[str, float] | None = None
+    ) -> dict[int, float]:
+        """Оценки только для кандидатов (после фильтра по двигателю); нулевые не возвращаются.
+        weights — вес термина (по умолчанию 1; термины глоссария — 0,5)."""
         terms = [t for t in dict.fromkeys(query) if t in self.idf]
+        w = weights or {}
         out: dict[int, float] = {}
         if not terms:
             return out
@@ -66,7 +70,7 @@ class BM25:
             for t in terms:
                 f = tf.get(t)
                 if f:
-                    s += self.idf[t] * f * (self.k1 + 1) / (f + norm)
+                    s += w.get(t, 1.0) * self.idf[t] * f * (self.k1 + 1) / (f + norm)
             if s > 0:
                 out[i] = s
         return out

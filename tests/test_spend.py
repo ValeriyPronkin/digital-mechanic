@@ -171,7 +171,7 @@ def test_search_plan_call_goes_to_shared_counter(ml: MLClient, toir: ToirClient)
     obj = FakeObject()
     plan = LLMReply('{"lang": "ru", "queries": ["зазор клапанов"]}')
     ag, _ = make_agent([plan, say("ок")], ml, toir, ledger=ledger(obj), clock=lambda: TS, plan_search=True)
-    reply = ag.ask(ag.start(*ANOMALY), "Какой зазор клапанов?")
+    reply = ag.ask(ag.start(*ANOMALY), "Klapan zazori qanday?")  # не по-русски — план от модели (перевод)
     llm_steps = [s for s in reply.trace["steps"] if s["kind"] == "llm"]
     assert len(llm_steps) == 2 and any("план поиска" in s["name"] for s in llm_steps)
     assert obj.total() == pytest.approx(sum(s["cost_rub"] for s in llm_steps), abs=1e-3)
