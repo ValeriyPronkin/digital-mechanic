@@ -42,6 +42,7 @@
               padding:.7rem 1rem; margin-bottom:.75rem; font-weight:600; }
     blockquote { margin:0 0 1rem; background:var(--card); border-left:4px solid var(--line); border-radius:8px;
                  padding:.7rem 1rem; white-space:pre-wrap; overflow-wrap:anywhere; }
+    blockquote.injection { background:#f1f2f4; color:#6b7480; border-left-color:#b9c0c9; font-size:.92rem; font-style:italic; }
     blockquote cite { display:block; font-style:normal; color:var(--muted); font-size:.85rem; margin-bottom:.3rem; }
     .err { background:#fde8e7; color:var(--red); border-radius:12px; padding:.8rem 1rem; margin-bottom:1rem; }
     .muted { color:var(--muted); }
@@ -242,9 +243,15 @@ function screenCard(card) {
   const explain = card.status === "anomaly" && card.ticket_possible ? explainBlock(card) : null;
   const quote = el("div", {});
   const renderQuote = () => {
-    const bq = el("blockquote", {}, el("cite", {}, card.ml_quote_label), card.ml_quote);
-    // «Опытный» — минимум текста на первом экране: сообщение сервиса свёрнуто.
-    quote.replaceChildren(level() === "expert" ? el("details", {}, el("summary", {class:"sub"}, card.ml_quote_label), bq) : bq);
+    // Посторонний текст в описании сервиса (#40 п. 6) — отдельно и серым: видно, что команда из данных не исполнена.
+    const inj = card.ml_injection;
+    const clean = inj ? card.ml_quote.replace(inj, "").trim() : card.ml_quote;
+    const bq = el("blockquote", {}, el("cite", {}, card.ml_quote_label), clean || "—");
+    const attack = inj ? el("blockquote", {class:"injection", role:"note"},
+      el("cite", {}, "Посторонний текст в описании сервиса, отложен — не выполняется:"), "«" + inj + "»") : null;
+    // «Опытный» — минимум текста на первом экране: сообщение сервиса свёрнуто (отметка об атаке — всегда видна).
+    quote.replaceChildren(level() === "expert" ? el("details", {}, el("summary", {class:"sub"}, card.ml_quote_label), bq) : bq,
+      ...(attack ? [attack] : []));
   };
   renderQuote();
   rerenderCard = () => { if (explain) explain.render(); renderQuote(); };

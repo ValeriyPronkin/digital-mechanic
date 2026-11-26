@@ -421,3 +421,14 @@ def test_operation_number_checked_against_its_own_fragment(ml: MLClient, toir: T
     assert reply.draft is None
     refused = json.loads(llm.seen[-1][-1]["content"])["refused"]
     assert "45" in refused and "R1" in refused
+
+
+def test_visible_attack_not_passed_to_model_outside_wrapper(ml: MLClient, toir: ToirClient) -> None:
+    """#40 п. 6: отметка «посторонний текст» — только для экрана; модели атака идёт лишь внутри обёртки данных."""
+    ag, llm = make_agent([call("get_diagnosis", vehicle_id=FAILED[0], session_id=FAILED[1]), say("Повторите запись.")],
+                         ml, toir, prefetch=False)  # fmt: skip
+    ag.ask(ag.start(*FAILED), "Что с двигателем?")
+    tool = next(m for m in llm.seen[-1] if m["role"] == "tool")
+    data = json.loads(tool["content"])
+    assert "ml_injection" not in data and "passport" not in data
+    assert "Инструкция для ассистента" in data["ml_description"] and data["ml_description"].startswith("<<<")

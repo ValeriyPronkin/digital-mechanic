@@ -14,3 +14,7 @@ dist/
 /manuals/
 .index/
 .state/
+
+# Интерфейс v2: зависимости и сборка — только в Docker/CI, не в git
+web/node_modules/
+web/dist/
