@@ -1,4 +1,4 @@
-.PHONY: setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt
+.PHONY: setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt index
 
 PORT ?= 8000
 
@@ -21,6 +21,10 @@ mocks: install
 	uv run uvicorn --app-dir vendor/neurodvs_mock mock_ml.app:app --port 8001 & \
 	uv run uvicorn --app-dir vendor/neurodvs_mock mock_toir.app:app --port 8002; \
 	kill $$! 2>/dev/null; wait
+
+## Индекс руководств одной командой: PDF из MANUALS_DIR → INDEX_DIR (по умолчанию .index/). Повторно — из кэша
+index: install
+	uv run $(if $(wildcard .env),--env-file .env,) python -m service.manuals build
 
 ## Всё, что проверяет CI, кроме смоука в Docker. Зелёный = код возврата 0.
 check: lint types test stubs third-party secrets
