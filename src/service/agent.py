@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from service import absent_parts, contradictions, glossary
+from service import absent_parts, contradictions, glossary, row_check
 from service.clients import (
     Diagnosis,
     MLClient,
@@ -358,6 +358,14 @@ def _part_label(r: Any) -> str:
     """Запчасть для заявки: «наименование (обозначение), стр. N»; без обозначения — «наименование, стр. N»."""
     name = r.part_name if r.designation else r.quote
     return f"{name} ({r.designation}), стр. {r.page}" if r.designation else f"{name}, стр. {r.page}"
+
+
+def _last_question(conv: Any) -> str:
+    """Текущий вопрос механика (без приставки уровня ответа)."""
+    for m in reversed(conv.messages):
+        if m.get("role") == "user":
+            return str(m.get("content") or "").split("\n\n", 1)[-1]
+    return ""
 
 
 def _quote_label(q: Any) -> str:
@@ -883,9 +891,15 @@ class Agent:
         text = _REF.sub(lambda m: m.group(0) if m.group(1) in conv.sources else "", text)
 
         allowed = self._allowed_numbers(conv, cited)
+        question = _last_question(conv)
+        page_text = getattr(self.searcher, "page_text", None)
+
+        def pages_for(part: str) -> list[str]:
+            srcs = [conv.sources[r] for r in _REF.findall(part) if r in conv.sources] or cited
+            return [(page_text(s.manual_id, s.pdf_page) if page_text else None) or s.text for s in srcs]
 
         kept: list[str] = []
-        dropped = 0
+        dropped = row_dropped = 0
         for line in text.split("\n"):
             mark = _LIST_MARK.match(line)
             prefix = mark.group(0) if mark else ""
@@ -893,6 +907,9 @@ class Agent:
             for part in _SENTENCE.split(line[len(prefix) :]):
                 if numbers(part) - allowed:
                     dropped += 1
+                    continue
+                if cited and not row_check.row_ok(part, question, pages_for(part)):
+                    row_dropped += 1  # число из строки таблицы про другую деталь
                     continue
                 good.append(part)
             if good:
@@ -908,9 +925,16 @@ class Agent:
             notes.append("Часть выводов — рассуждение помощника, а не руководство: они помечены.")
         if dropped:
             notes.append("Часть цифр не нашёл в руководстве — убрал их. Точные значения уточнит дефектовка.")
+        if row_dropped:
+            notes.append("Цифру из строки таблицы про другую деталь убрал — в руководстве она относится не к этому.")
 
         grounded = bool(cited)
-        conv.passport["guard"] = {"numbers_dropped": dropped, "opinions_marked": opinions, "ungrounded": not grounded}
+        conv.passport["guard"] = {
+            "numbers_dropped": dropped,
+            "row_dropped": row_dropped,
+            "opinions_marked": opinions,
+            "ungrounded": not grounded,
+        }
         if not grounded and text:
             if conv.card and conv.card.status == "anomaly":
                 notes.append("Без ссылки на руководство: это пояснение, а не инструкция. Рекомендую дефектовку.")
