@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
-from service import IMPORT_STARTED, INSTANCE_ID, __version__, conv_state, kb_store
+from service import IMPORT_STARTED, INSTANCE_ID, __version__, conv_state, kb_store, stand_log
 from service.agent import Agent
 from service.clients import MLClient, ServiceError, ToirClient
 from service.fault_matrix import card_explanation
@@ -53,10 +53,61 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     kb_store.ensure_index_from_env()
     STARTUP["index_fetch_s"] = round(time.monotonic() - t, 2)
     STARTUP["ready_at"] = time.monotonic()
+    slog = journal()
+    if slog is not None:  # стенд: свой журнал в бакете (#27)
+        slog.start(version=__version__, provider=os.environ.get("LLM_PROVIDER", ""))
+        slog.run_background()
     yield
+    if slog is not None:
+        slog.close()
 
 
 app = FastAPI(title="Цифровой механик", version=__version__, lifespan=lifespan)
+
+
+@lru_cache(maxsize=1)
+def journal() -> stand_log.StandLog | None:
+    return stand_log.from_env(INSTANCE_ID)
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next: Any) -> Any:
+    """Журнал стенда (#27): маршрут без параметров, метод, код, время; исключение — только класс."""
+    slog = journal()
+    t0 = time.monotonic()
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        if slog is not None:
+            slog.event("error", route=stand_log.route_template(request), method=request.method,
+                       error=type(exc).__name__, status=500, ms=int((time.monotonic() - t0) * 1000))  # fmt: skip
+        raise
+    if slog is not None and request.url.path != "/health":
+        slog.event("request", route=stand_log.route_template(request), method=request.method,
+                   status=response.status_code, ms=int((time.monotonic() - t0) * 1000))  # fmt: skip
+    return response
+
+
+STEP_NAMES = {"get_diagnosis": "diagnose", "search_manual": "search", "draft_ticket": "ticket",
+              "fleet_summary": "fleet", "vehicle_history": "history"}  # fmt: skip
+
+
+def log_steps(trace: dict[str, Any]) -> None:
+    """Шаги агента — в журнал стенда: имя шага обезличено (diagnose, search, model…), без текста и номеров."""
+    slog = journal()
+    if slog is None:
+        return
+    for st in trace.get("steps", []):
+        name = str(st.get("name", ""))
+        if st.get("kind") == "llm":
+            step = "plan" if "план поиска" in name else "model"
+        elif st.get("kind") == "cache":
+            step = "answer_cache"
+        else:
+            step = STEP_NAMES.get(name.replace(" (код)", ""), "tool")
+        slog.event("step", step=step, ms=st.get("ms"), ok=st.get("ok", True))
+
+
 INDEX_HTML = Path(__file__).parent / "static" / "index.html"
 
 
@@ -244,6 +295,7 @@ def chat(req: ChatIn, request: Request) -> dict[str, Any]:
         reply = ag.ask(conv, req.message)
     except ServiceError as exc:
         raise HTTPException(exc.http_status, exc.message) from exc
+    log_steps(reply.trace)
     spoken = speech_for(reply.text, conv.sources)
     return {
         "conversation_id": conv.id,
@@ -266,6 +318,8 @@ async def voice_recognize(request: Request) -> dict[str, Any]:
         raise HTTPException(exc.http_status, exc.message) from exc
     cost = stt_cost_rub(seconds)
     store().log_voice("stt", round(seconds, 2), cost, ms)
+    if (slog := journal()) is not None:
+        slog.event("step", step="stt", ms=ms)
     if not text:
         raise HTTPException(422, NOT_HEARD)
     return {"text": text, "seconds": round(seconds, 1), "cost_rub": round(cost, 3)}
@@ -287,6 +341,8 @@ def voice_speak(req: SpeakIn, request: Request) -> Response:
     except ServiceError as exc:
         raise HTTPException(exc.http_status, exc.message) from exc
     store().log_voice("tts", len(req.text), tts_cost_rub(len(req.text)), ms)
+    if (slog := journal()) is not None:
+        slog.event("step", step="tts", ms=ms)
     return Response(content=audio, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
 
 

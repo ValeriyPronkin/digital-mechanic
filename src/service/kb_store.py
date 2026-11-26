@@ -24,7 +24,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qsl, quote, urlsplit
 
 import httpx
 
@@ -57,8 +57,14 @@ def object_url(endpoint: str, bucket: str, key: str) -> str:
 # ---------- авторизация ----------
 
 
+def _canonical_query(query: str) -> str:
+    """SigV4: параметры отсортированы, ключ и значение закодированы (RFC 3986). Нет параметров — пустая строка."""
+    pairs = sorted(parse_qsl(query, keep_blank_values=True))
+    return "&".join(f"{quote(k, safe='-_.~')}={quote(v, safe='-_.~')}" for k, v in pairs)
+
+
 def sigv4_auth(key_id: str, secret: str, region: str = REGION, now: Callable[[], dt.datetime] | None = None) -> Auth:
-    """Подпись AWS SigV4 для S3 API Object Storage (path-style, без query)."""
+    """Подпись AWS SigV4 для S3 API Object Storage (path-style; параметры запроса — канонически, для списка)."""
 
     def sign(method: str, url: str, headers: dict[str, str], payload_sha: str) -> dict[str, str]:
         t = (now or (lambda: dt.datetime.now(dt.UTC)))()
@@ -71,7 +77,7 @@ def sigv4_auth(key_id: str, secret: str, region: str = REGION, now: Callable[[],
             [
                 method,
                 parts.path or "/",
-                "",
+                _canonical_query(parts.query),
                 "".join(f"{n}:{signed[n]}\n" for n in names),
                 ";".join(names),
                 payload_sha,
