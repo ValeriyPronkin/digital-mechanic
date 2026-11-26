@@ -116,6 +116,8 @@ def test_incompatible_code_blocks_ticket(ml: MLClient) -> None:
                 incompatible.append((v.engine_model, card.fault_code))
                 assert not card.ticket_possible and card.status == "anomaly"
                 assert "повторите проверку" in card.action
+                fact = card.design_fact  # факт о конструкции с цитатой из ячейки «узла нет» (#40 п. 3)
+                assert fact and fact["quote"] and fact["pdf_page"] >= 1 and fact["url"].startswith("/manuals/")
     pairs = set(incompatible)
     assert ("ЗМЗ-5234.10", "F08") in pairs  # дизельная топливоподача на бензиновом
     assert ("ЯМЗ-536", "F12") in pairs and ("ЯМЗ-536", "F13") in pairs  # зажигание и бензин на дизеле

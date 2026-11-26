@@ -93,6 +93,7 @@ def match_answer(engine: str, answer: str) -> Known | None:
     return None
 
 
+_SENT = re.compile(r"(?<=[.!?])\s+")
 _LIST_PREFIX = re.compile(r"^(\s*(?:\d+[.)]|[-*•])\s+)")
 _NO_CONTRADICTION = re.compile(r"противоречи\w* (?:в документации )?нет", re.I)
 _ADVICE_DUP = re.compile(r"^\s*(?:\W\s*)?уточните у специалиста", re.I)
@@ -102,15 +103,23 @@ _CONCLUSION = re.compile(r"^\s*\**Вывод\**:", re.I)
 def neutralize(k: Known, text: str) -> str:
     """Ответ модели рядом с блоком кода: строки, где модель выбрала одну формулировку по спорной теме, — вывод
     заказчика со ссылкой на блок; «противоречий нет», свой «Вывод:» и повтор совета — убрать."""
-    out = []
+    out: list[str] = []
     for ln in text.split("\n"):
         if _NO_CONTRADICTION.search(ln) or _ADVICE_DUP.search(ln) or _CONCLUSION.search(ln):
             continue
         if k.claim.search(ln):
             m = _LIST_PREFIX.match(ln)
-            if m is None and k.safe_line in out:
-                continue  # вне списка вывод — один раз
-            ln = (m.group(1) if m else "") + k.safe_line
+            prefix = m.group(1) if m else ""
+            # заменяется только фраза о сроке: остальное в строке (значение зазора, ссылка) остаётся
+            parts = [p for p in _SENT.split(ln[len(prefix) :]) if p.strip()]
+            kept = [p for p in parts if not k.claim.search(p)]
+            safe_seen = any(k.safe_line in o for o in out)
+            if not prefix and safe_seen:
+                if not kept:
+                    continue  # вне списка вывод — один раз
+                ln = " ".join(kept)
+            else:
+                ln = prefix + " ".join([*kept, k.safe_line])
         out.append(ln)
     return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
 

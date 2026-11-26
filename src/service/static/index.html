@@ -83,6 +83,7 @@
     body.expert .verdict p { font-size:1.15rem; }
     .chat h2, .explain h3 { font-size:1.15rem; line-height:1.25; margin:.2rem 0 .6rem; overflow-wrap:anywhere; }
     .urgency { margin-top:.6rem; padding:.5rem .7rem; border-radius:10px; background:rgba(255,255,255,.16); font-size:1rem; }
+    .fact { margin-top:.6rem; padding:.5rem .7rem; border-radius:10px; background:rgba(255,255,255,.16); font-size:.95rem; } .fact q { font-style:italic; } .fact a { color:inherit; }
     .explain { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:.9rem 1rem; margin-bottom:1rem; }
     .explain dl { margin:0; } .explain dt { font-weight:700; margin-top:.6rem; } .explain dd { margin:.2rem 0 0; }
     .explain ol { margin:.3rem 0; padding-left:1.4rem; } .explain li { margin:.25rem 0; }
@@ -246,7 +247,9 @@ function screenCard(card) {
       el("h2", {}, card.title),
       el("p", {}, card.action),
       meta.length ? el("div", {class:"meta"}, meta.join(" · ")) : null,
-      card.urgency ? el("div", {class:"urgency"}, el("b", {}, "Срочность: " + URG[card.urgency]), " — " + card.urgency_reason) : null),
+      card.urgency ? el("div", {class:"urgency"}, el("b", {}, "Срочность: " + URG[card.urgency]), " — " + card.urgency_reason) : null,
+      card.design_fact ? el("div", {class:"fact"}, el("b", {}, "Факт о конструкции: "), card.design_fact.text, " ",
+        el("q", {}, card.design_fact.quote), " — ", pageLink(card.design_fact)) : null),
     explain,
     quote,
     el("p", {class:"sub"}, current.vehicle_id + " · " + current.engine_model + " · проверка " + selected +

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from service.fault_matrix import normalize
+from service.fault_matrix import all_cells, normalize
 from service.manuals.catalog import canonical_engine
 
 PATH = Path(__file__).resolve().parents[2] / "data" / "absent_parts.json"
@@ -44,6 +44,7 @@ class Absent:
 
 @lru_cache(maxsize=1)
 def items() -> tuple[Absent, ...]:
+    """Свои записи (чего нет в матрице) и ячейки матрицы «узла нет» — факт о конструкции с цитатой (#40 п. 3)."""
     data = json.loads(PATH.read_text(encoding="utf-8"))
     out = []
     for i in data["items"]:
@@ -57,6 +58,23 @@ def items() -> tuple[Absent, ...]:
                 statement=i["statement"],
                 quotes=tuple(Quote(q["doc"], int(q["page"]), q["quote"]) for q in i["quotes"]),
                 absent_on=(ao["doc"], tuple(ao["pages"]), re.compile(ao["pattern"], re.I)) if ao else None,
+            )
+        )
+    nodes = {k: v for k, v in data.get("matrix_nodes", {}).items() if not k.startswith("_")}
+    for cell in all_cells():
+        node = nodes.get(cell.code)
+        if cell.applicable != "false" or cell.basis is None or node is None:
+            continue
+        b = cell.basis
+        out.append(
+            Absent(
+                id=f"matrix-{cell.code}-{cell.engine}",
+                engines=(cell.engine,),
+                question=re.compile(node["question"], re.I),
+                part=node["part"],
+                statement=cell.why[:1].upper() + cell.why[1:] + ".",
+                quotes=(Quote(b.doc, b.page, b.quote),),
+                absent_on=None,
             )
         )
     return tuple(out)

@@ -194,6 +194,10 @@ def _load(path: Path = MATRIX_PATH) -> dict[tuple[str, str], Cell]:
     return cells
 
 
+def all_cells() -> list[Cell]:
+    return list(_load().values())
+
+
 def cell_for(code: str, engine: str) -> Cell | None:
     canon = canonical_engine(engine)
     if canon is None:
