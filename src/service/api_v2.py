@@ -510,6 +510,7 @@ def build_router(
     threads: ThreadStore,
     get_speech: Callable[[], Any] | None = None,
     get_pages: Callable[[], Any] | None = None,
+    get_marks: Callable[[], Any] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v2")
 
@@ -747,6 +748,10 @@ def build_router(
         page_text = getattr(searcher, "page_text", None)
         text = (page_text(manual_id, page) if page_text else None) or ""
         image = f"/manuals/{manual_id}/page/{page}.webp" if images and images.available(manual_id, page) else None
+        box = get_marks().mark(manual_id, page, (quote or "")[:400]) if (get_marks and image and quote) else None
+        mark = (
+            {"x": box[0], "y": box[1], "w": round(box[2] - box[0], 4), "h": round(box[3] - box[1], 4)} if box else None
+        )
         return {
             "manual_id": manual_id,
             "short": short_name(manual_id, doc.designation),
@@ -755,8 +760,9 @@ def build_router(
             "pages": pages,
             "text": text,
             "image": image,
-            "marks": [],  # подсветка строки — следующий шаг (приём Никиты page_marks)
-            "focus": None,
+            # строка цитаты на картинке (приём Никиты page_marks): только если на странице она одна
+            "marks": [mark] if mark else [],
+            "focus": mark,
         }
 
     @router.post("/transcribe")

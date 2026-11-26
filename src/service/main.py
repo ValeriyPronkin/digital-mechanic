@@ -26,6 +26,7 @@ from service.fleet import fleet
 from service.fleet_api import build_router as build_fleet_router
 from service.llm import provider_from_env
 from service.manual_search import default_searcher, manual_pdf
+from service.page_marks import PageMarks
 from service.pages import PageImages
 from service.rate_limit import RateLimiter, client_key
 from service.spend import BucketObject, RefreshingIamAuth, SharedLedger
@@ -490,6 +491,12 @@ def page_images() -> PageImages:
     return PageImages.from_env()
 
 
+@lru_cache(maxsize=1)
+def page_marks() -> PageMarks:
+    """Строки страниц для подсветки цитаты: бакет marks/ (тот же доступ, что у картинок) или локальный PDF."""
+    return PageMarks(page_images().bucket)
+
+
 @app.get("/manuals/{manual_id}/page/{page}.webp")
 def manual_page_webp(manual_id: str, page: int) -> Response:
     """Картинка страницы руководства (WebP) для просмотрщика v2: бакет `pages/` или рендер из PDF; кэш на сутки."""
@@ -509,5 +516,6 @@ app.include_router(
         api_v2.ThreadStore.from_env(),
         lambda: speech(),
         lambda: page_images(),
+        lambda: page_marks(),
     )
 )
