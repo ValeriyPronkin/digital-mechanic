@@ -74,3 +74,23 @@ def test_fill_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                 / 1e6 * rate for r in (9, 10))  # fmt: skip
     assert res["rub"] == pytest.approx(excel, rel=1e-4)
     assert run["label"] == "t1"
+
+
+def test_embedding_row_and_layered_comment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Шаблон — только запрос (модель + эмбеддинг); голос и постоянные в месяц — в комментарии, не в итоге."""
+    monkeypatch.setattr(cost_xlsx, "COST_DIR", tmp_path)
+    tpl, out = tmp_path / "tpl.xlsx", tmp_path / "out.xlsx"
+    _template(tpl)
+    run = _run(tmp_path)
+    run["scenarios"]["Г1"] = {"rub": 0.04, "rub_voice": 0.67, "llm_ms": 2000}
+    (tmp_path / "t1.json").write_text(json.dumps(run, ensure_ascii=False), encoding="utf-8")
+    with (tmp_path / "t1.csv").open("a", newline="", encoding="utf-8") as f:
+        for _ in range(2):
+            f.write("С1,1,0,эмбеддинг,text-search-query,12,0,0,0.0001,0\n")
+    cost_xlsx.fill(tpl, out, cost_xlsx.pick_run("t1"))
+    ws = openpyxl.load_workbook(out)["Расчёт"]
+    emb_row = next(r for r in range(9, 13) if ws[f"A{r}"].value == cost_xlsx.EMB_NAME)
+    assert (ws[f"C{emb_row}"].value, ws[f"D{emb_row}"].value, ws[f"E{emb_row}"].value) == (1.0, 12, 0)
+    assert ws[f"H{emb_row}"].value == "₽" and ws[f"F{emb_row}"].value == pytest.approx(0.0101 / 1.22 * 1000, rel=1e-3)
+    assert "Голос — опция" in ws["A18"].value and "0.67" in ws["A18"].value and "локально" in ws["A18"].value
+    assert "Постоянные в месяц" in ws["A19"].value

@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from service import IMPORT_STARTED, INSTANCE_ID, __version__, conv_state, kb_store, stand_log
-from service.agent import Agent
+from service.agent import Agent, Level
 from service.clients import MLClient, ServiceError, ToirClient
 from service.fault_matrix import card_explanation
 from service.fleet import fleet
@@ -279,6 +279,7 @@ class ChatIn(BaseModel):
     vehicle_id: str = Field(min_length=1)
     session_id: str = Field(min_length=1)
     message: str = Field(min_length=1, max_length=2000)
+    level: Level = "steps"  # уровень механика (#17): «Опытный» / «Пошагово»
     state: str | None = Field(default=None, max_length=400_000)  # подписанное состояние разговора
 
 
@@ -292,7 +293,7 @@ def chat(req: ChatIn, request: Request) -> dict[str, Any]:
         conv = conv_state.load(req.state, fleet()) if req.state else None
         if conv is None or conv.vehicle.vehicle_id != req.vehicle_id or conv.session_id != req.session_id:
             conv = ag.start(req.vehicle_id, req.session_id)
-        reply = ag.ask(conv, req.message)
+        reply = ag.ask(conv, req.message, req.level)
     except ServiceError as exc:
         raise HTTPException(exc.http_status, exc.message) from exc
     log_steps(reply.trace)
@@ -361,6 +362,36 @@ def send_ticket(req: TicketIn, request: Request) -> dict[str, Any]:
     except ServiceError as exc:
         raise HTTPException(exc.http_status, exc.message) from exc
     return {**resp.model_dump(), "state": conv_state.dump(conv)}
+
+
+@app.get("/manuals/{manual_id}/page/{page}.png")
+def manual_page_image(manual_id: str, page: int) -> Response:
+    """Картинка страницы PDF для «как в руководстве» (#17). Только если PDF есть на этом сервере."""
+    path = manual_pdf(manual_id)
+    if path is None:
+        raise HTTPException(404, "Файл руководства недоступен на этом сервере.")
+    png = render_page_png(str(path), page)
+    if png is None:
+        raise HTTPException(404, f"В руководстве нет страницы {page}.")
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
+@lru_cache(maxsize=32)
+def render_page_png(path: str, page: int) -> bytes | None:
+    import io
+
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument(path)
+    try:
+        if not 1 <= page <= len(pdf):
+            return None
+        image = pdf[page - 1].render(scale=1.6).to_pil()
+        buf = io.BytesIO()
+        image.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+    finally:
+        pdf.close()
 
 
 @app.get("/manuals/{manual_id}")
