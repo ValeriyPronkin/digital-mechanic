@@ -212,6 +212,18 @@ def _norm_num(s: str) -> str:
     return f"{f:g}"
 
 
+def _date_forms(iso: str) -> str:
+    """«2026-10-27T17:20:00+03:00» → те же цифры, как их пишет модель: 27.10.2026, 27.10, 17:20, 2026-10-27."""
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?", iso)
+    if not m:
+        return iso
+    y, mo, d, hh, mm = m.groups()
+    forms = [f"{d}.{mo}.{y}", f"{d}.{mo}", f"{int(d)}", y, f"{y}-{mo}-{d}"]
+    if hh:
+        forms += [hh, mm]
+    return " ".join(forms)
+
+
 def numbers(text: str) -> set[str]:
     return {_norm_num(n) for n in _NUM.findall(_REF.sub(" ", text))}
 
@@ -224,6 +236,24 @@ def leaks_prompt(text: str) -> bool:
             if len(p) >= 40 and p in norm:
                 return True
     return False
+
+
+_SOURCES_HEAD = re.compile(r"^\s*(?:#+\s*|\*\*)?Источник[и]?(?:\*\*)?\s*:?\s*$", re.I | re.M)
+_ANY_HEAD = re.compile(r"^\s*(?:#+\s+.+|\*\*[^*]+\*\*:?)\s*$", re.M)
+
+
+def _fill_sources(text: str, cited: list[Source]) -> str:
+    """Раздел «Источник» без единой ссылки [R…] — заполняет код списком процитированных страниц."""
+    head = _SOURCES_HEAD.search(text)
+    if head is None or not cited:
+        return text
+    nxt = _ANY_HEAD.search(text, head.end())
+    body = text[head.end() : nxt.start() if nxt else len(text)]
+    if _REF.search(body):
+        return text
+    listing = "\n".join(f"- [{s.ref}] {s.manual}, стр. {s.pdf_page}" for s in cited)
+    tail = text[nxt.start() :] if nxt else ""
+    return text[: head.end()] + "\n" + listing + ("\n\n" + tail if tail else "")
 
 
 Urgency = Literal["low", "medium", "high"]
@@ -387,6 +417,7 @@ class Agent:
             elif not line.strip():
                 kept.append("")
         text = "\n".join(kept).strip()
+        text = _fill_sources(text, cited)
         if dropped:
             notes.append("Часть цифр не нашёл в руководстве — убрал их. Точные значения уточнит дефектовка.")
 
@@ -405,9 +436,21 @@ class Agent:
         return allowed
 
     def _context_numbers(self, conv: Conversation) -> set[str]:
+        """Цифры-факты из кода и данных: карточка ТС, проверки этой машины, найденные документы.
+
+        Не входит описание сервиса диагностики (ml_description) — это непроверенные данные.
+        """
         v = conv.vehicle
         base = " ".join([v.vehicle_id, v.garage_no, v.engine_model, v.model or "", conv.session_id])
         nums = numbers(base)
+        for s in v.sessions:  # история проверок: номер, дата, оценки
+            nums |= numbers(f"{s.session_id} {_date_forms(s.checked_at)}")
+            for val in (s.anomaly_score, s.confidence):
+                if val is not None:
+                    nums.add(_norm_num(str(val)))
+                    nums.add(_norm_num(str(round(val * 100))))
+        for src in conv.sources.values():  # обозначение и страница найденного документа
+            nums |= numbers(f"{src.manual} {src.pdf_page}")
         if conv.card:
             if conv.card.confidence_pct is not None:
                 nums.add(_norm_num(str(conv.card.confidence_pct)))
