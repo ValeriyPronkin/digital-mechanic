@@ -52,7 +52,7 @@ def test_log_keeps_cached_tokens() -> None:
 
 def test_trace_has_rub_per_step_and_cached_total(ml: MLClient, toir: ToirClient) -> None:
     class CachingLLM(ScriptedLLM):
-        def chat(self, messages, tools):  # type: ignore[no-untyped-def]
+        def chat(self, messages, tools, max_tokens=None):  # type: ignore[no-untyped-def]
             reply = super().chat(messages, tools)
             reply.tokens_cached = 600
             return reply
