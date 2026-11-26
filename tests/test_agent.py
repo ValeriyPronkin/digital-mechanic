@@ -42,9 +42,11 @@ class ScriptedLLM:
     def __init__(self, steps: list[Step]) -> None:
         self.steps = list(steps)
         self.seen: list[list[Message]] = []
+        self.max_tokens: list[int | None] = []
 
-    def chat(self, messages: list[Message], tools: list[ToolSpec]) -> LLMReply:
+    def chat(self, messages: list[Message], tools: list[ToolSpec], max_tokens: int | None = None) -> LLMReply:
         self.seen.append([dict(m) for m in messages])
+        self.max_tokens.append(max_tokens)
         step = self.steps.pop(0)
         reply = step(messages) if callable(step) else step
         reply.tokens_in, reply.tokens_out, reply.model = 1000, 200, self.model

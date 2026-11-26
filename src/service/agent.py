@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from service.clients import (
     Diagnosis,
@@ -78,6 +78,22 @@ operations и spare_parts — они подставятся из матрицы)
 Длина — до 150 слов: в разделе 1–3 коротких пункта, без вступлений, повторов и пересказа вопроса. \
 Статус normal или check_failed — без разделов, 2–3 предложения. \
 В «Источнике» — только ссылки [R…]. После черновика заявки — одно-два предложения."""
+
+# Уровень механика (#17): формат и длина ответа. Правила кода (цифры из фрагментов, двигатель из карточки) — те же.
+Level = Literal["expert", "steps"]
+LEVELS: tuple[Level, ...] = ("expert", "steps")
+LEVEL_PROMPT: dict[Level, str] = {
+    "expert": "Уровень механика: ОПЫТНЫЙ. Этот ответ — коротко, без разделов и без пояснения терминов: "
+    "1–3 предложения — значение с единицами, нужный инструмент, ссылка [R…]. До 60 слов. "
+    "Статус check_failed или normal — одно предложение.",
+    "steps": "Уровень механика: ПОШАГОВО (механик начинающий или неуверенный). Этот ответ — нумерованными шагами "
+    "«1. …», «2. …», в каждом шаге одно действие и ссылка [R…]. Перед шагами строка «Понадобится: …» (инструмент "
+    "из фрагмента). Если во фрагменте есть меры безопасности — отдельной строкой «Безопасность: …». Термины "
+    "поясняй простыми словами в скобках. Если вопрос о неисправности — шаги внутри разделов «Проверки» и "
+    "«Возможный ремонт». До 220 слов.",
+}
+LEVEL_MAX_TOKENS: dict[Level, int] = {"expert": 300, "steps": 900}
+
 
 TOOLS: list[ToolSpec] = [
     ToolSpec(
@@ -357,11 +373,12 @@ class Agent:
         ]
         return conv
 
-    def ask(self, conv: Conversation, question: str) -> AgentReply:
+    def ask(self, conv: Conversation, question: str, level: Level = "steps") -> AgentReply:
         request_id = uuid.uuid4().hex
         steps: list[dict[str, Any]] = []
-        conv.messages.append({"role": "user", "content": mask_pii(question)})
-        cache_key = self._answer_cache_key(conv, question)
+        # Уровень — приставкой к вопросу, а не системным сообщением: GigaChat принимает system только первым.
+        conv.messages.append({"role": "user", "content": f"[{LEVEL_PROMPT[level]}]\n\n{mask_pii(question)}"})
+        cache_key = self._answer_cache_key(conv, question, level)
         if cache_key:
             hit = self.store.cached_answer(cache_key)
             if hit is not None:
@@ -372,7 +389,7 @@ class Agent:
         for step in range(1, MAX_STEPS + 1):
             self.check_budget()
             t0 = time.monotonic()
-            reply = self.provider.chat(conv.messages, TOOLS)
+            reply = self.provider.chat(conv.messages, TOOLS, max_tokens=LEVEL_MAX_TOKENS[level])
             ms = int((time.monotonic() - t0) * 1000)
             cost = self.store.log_llm(
                 request_id,
@@ -459,7 +476,7 @@ class Agent:
         )
 
     # ---- кэш ответов (issue #16) ----
-    def _answer_cache_key(self, conv: Conversation, question: str) -> str | None:
+    def _answer_cache_key(self, conv: Conversation, question: str, level: Level = "steps") -> str | None:
         """Ключ: вопрос (без ПДн, регистра и знаков) + двигатель + результат проверки + версии индекса,
         матрицы и промпта. Только первый вопрос разговора и не про заявку: дальше ответ зависит от истории."""
         if sum(1 for m in conv.messages if m.get("role") == "user") != 1 or _TICKET_ASK.search(question):
@@ -474,6 +491,7 @@ class Agent:
         diag = conv.diag
         parts = [
             norm,
+            level,  # «Опытный» и «Пошагово» — разные ответы на один вопрос
             conv.vehicle.engine_model,
             card.status,
             card.fault_code or "",

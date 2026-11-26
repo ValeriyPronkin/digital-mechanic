@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from service import IMPORT_STARTED, INSTANCE_ID, __version__, conv_state, kb_store
-from service.agent import Agent
+from service.agent import Agent, Level
 from service.clients import MLClient, ServiceError, ToirClient
 from service.fault_matrix import card_explanation
 from service.fleet import fleet
@@ -208,6 +208,7 @@ class ChatIn(BaseModel):
     vehicle_id: str = Field(min_length=1)
     session_id: str = Field(min_length=1)
     message: str = Field(min_length=1, max_length=2000)
+    level: Level = "steps"  # уровень механика (#17): «Опытный» / «Пошагово»
     state: str | None = Field(default=None, max_length=400_000)  # подписанное состояние разговора
 
 
@@ -221,7 +222,7 @@ def chat(req: ChatIn, request: Request) -> dict[str, Any]:
         conv = conv_state.load(req.state, fleet()) if req.state else None
         if conv is None or conv.vehicle.vehicle_id != req.vehicle_id or conv.session_id != req.session_id:
             conv = ag.start(req.vehicle_id, req.session_id)
-        reply = ag.ask(conv, req.message)
+        reply = ag.ask(conv, req.message, req.level)
     except ServiceError as exc:
         raise HTTPException(exc.http_status, exc.message) from exc
     spoken = speech_for(reply.text, conv.sources)

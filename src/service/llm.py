@@ -57,7 +57,7 @@ class LLMProvider(Protocol):
     name: str
     model: str
 
-    def chat(self, messages: list[Message], tools: list[ToolSpec]) -> LLMReply: ...
+    def chat(self, messages: list[Message], tools: list[ToolSpec], max_tokens: int | None = None) -> LLMReply: ...
 
 
 def _args(raw: Any) -> dict[str, Any]:
@@ -88,7 +88,7 @@ def _post(http: httpx.Client, url: str, **kw: Any) -> dict[str, Any]:
     raise LLMError("Модель недоступна.")  # pragma: no cover
 
 
-def max_tokens() -> int:
+def default_max_tokens() -> int:
     """Страховочный потолок длины ответа (issue #16): выход модели — главная статья расходов."""
     return int(os.environ.get("LLM_MAX_TOKENS", "800"))
 
@@ -129,7 +129,7 @@ class DeepSeekProvider:
                 out.append({"role": m["role"], "content": m["content"]})
         return out
 
-    def chat(self, messages: list[Message], tools: list[ToolSpec]) -> LLMReply:
+    def chat(self, messages: list[Message], tools: list[ToolSpec], max_tokens: int | None = None) -> LLMReply:
         body = {
             "model": self.model,
             "messages": self.to_wire(messages),
@@ -141,7 +141,7 @@ class DeepSeekProvider:
                 for t in tools
             ],
             "temperature": 0.2,
-            "max_tokens": max_tokens(),
+            "max_tokens": max_tokens or default_max_tokens(),
         }
         data = _post(self.http, "/chat/completions", json=body, headers=self._auth)
         msg = data["choices"][0]["message"]
@@ -212,14 +212,14 @@ class GigaChatProvider:
                 out.append({"role": m["role"], "content": m["content"]})
         return out
 
-    def chat(self, messages: list[Message], tools: list[ToolSpec]) -> LLMReply:
+    def chat(self, messages: list[Message], tools: list[ToolSpec], max_tokens: int | None = None) -> LLMReply:
         body = {
             "model": self.model,
             "messages": self.to_wire(messages),
             "functions": [{"name": t.name, "description": t.description, "parameters": t.parameters} for t in tools],
             "function_call": "auto",
             "temperature": 0.2,
-            "max_tokens": max_tokens(),
+            "max_tokens": max_tokens or default_max_tokens(),
         }
         headers = {"Authorization": f"Bearer {self._access_token()}"}
         data = _post(self.http, f"{self.API_URL}/chat/completions", json=body, headers=headers)
