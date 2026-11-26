@@ -238,9 +238,15 @@ class TicketDraft:
     body: TicketRequest
     urgency_reason: str
     fingerprint: str
+    tools: list[str] = field(default_factory=list)  # инструмент и приспособления — по руководству, в ТОиР не уходит
 
     def public(self) -> dict[str, Any]:
-        return {"body": self.body.model_dump(), "urgency_reason": self.urgency_reason, "fingerprint": self.fingerprint}
+        return {
+            "body": self.body.model_dump(),
+            "urgency_reason": self.urgency_reason,
+            "fingerprint": self.fingerprint,
+            "tools": self.tools,
+        }
 
 
 @dataclass
@@ -346,6 +352,12 @@ def leaks_prompt(text: str) -> bool:
             if len(p) >= 40 and p in norm:
                 return True
     return False
+
+
+def _part_label(r: Any) -> str:
+    """Запчасть для заявки: «наименование (обозначение), стр. N»; без обозначения — «наименование, стр. N»."""
+    name = r.part_name if r.designation else r.quote
+    return f"{name} ({r.designation}), стр. {r.page}" if r.designation else f"{name}, стр. {r.page}"
 
 
 def _quote_label(q: Any) -> str:
@@ -1160,8 +1172,15 @@ class Agent:
             "status": "confirmed",
             # цитаты страниц модели не нужны — работы и ссылки есть ниже; текст страниц остаётся в Source (#16)
             "pages": [{"ref": refs[(p.doc, p.page)], "what": p.what} for p in cell.pages],
-            "operations": [{"ref": refs[(o.doc, o.page)], "text": o.quote} for o in cell.operations],
-            "spare_parts": [{"ref": refs[(o.doc, o.page)], "text": o.quote} for o in cell.spare_parts],
+            "operations": [
+                {"ref": refs[(o.doc, o.page)], "text": o.quote, **({"tools": o.tools} if o.tools else {})}
+                for o in cell.operations
+            ],
+            "spare_parts": [
+                {"ref": refs[(o.doc, o.page)], "text": _part_label(o)}
+                | ({"designation": o.designation} if o.designation else {})
+                for o in cell.spare_parts
+            ],
             "safety": [{"ref": refs[(o.doc, o.page)], "text": o.quote} for o in cell.safety],
         }
 
@@ -1298,7 +1317,7 @@ class Agent:
         ops_in: list[Any] = list(args.get("operations") or [])
         if not ops_in and confirmed:
             ops_in = [{"text": o["text"], "ref": o["ref"]} for o in confirmed["operations"]]
-            if parts_in is None:
+            if parts_in is None:  # «наименование (обозначение), стр. N» — как в матрице
                 parts_in = [p["text"] for p in confirmed["spare_parts"]]
         if not ops_in:
             return {"refused": "Нет работ и ссылок на страницы руководства — сначала search_manual."}
@@ -1354,9 +1373,12 @@ class Agent:
             spare_parts=[str(p).strip() for p in parts_in or [] if str(p).strip()],
             references=[Reference(manual=m, pdf_page=pg) for m, pg in pages],
         )
-        conv.draft = TicketDraft(body=body, urgency_reason=why, fingerprint=fingerprint(body))
+        matrix_ops = (confirmed or {}).get("operations", [])
+        tools = list(dict.fromkeys(t for o in matrix_ops if o["text"] in operations for t in o.get("tools", [])))
+        conv.draft = TicketDraft(body=body, urgency_reason=why, fingerprint=fingerprint(body), tools=tools)
         return {
             "draft": body.model_dump(),
+            "tools": tools,
             "urgency_reason": why,
             "status": "Черновик показан механику. Отправит он сам кнопкой «Отправить».",
         }

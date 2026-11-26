@@ -74,6 +74,7 @@ def dump(conv: Conversation) -> str:
             "body": conv.draft.body.model_dump(),
             "urgency_reason": conv.draft.urgency_reason,
             "fingerprint": conv.draft.fingerprint,
+            "tools": conv.draft.tools,
         },
     }
     raw = zlib.compress(json.dumps(state, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), 9)
@@ -104,5 +105,6 @@ def load(token: str, fleet: Fleet) -> Conversation:
             body=TicketRequest.model_validate(d["body"]),
             urgency_reason=d["urgency_reason"],
             fingerprint=d["fingerprint"],
+            tools=list(d.get("tools") or []),
         )
     return conv

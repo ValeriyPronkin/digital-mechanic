@@ -83,6 +83,7 @@
     body.expert .verdict p { font-size:1.15rem; }
     .chat h2, .explain h3 { font-size:1.15rem; line-height:1.25; margin:.2rem 0 .6rem; overflow-wrap:anywhere; }
     .urgency { margin-top:.6rem; padding:.5rem .7rem; border-radius:10px; background:rgba(255,255,255,.16); font-size:1rem; }
+    .tools { font-size:.9rem; color:var(--sub, #555); margin-top:.15rem; }
     .fact { margin-top:.6rem; padding:.5rem .7rem; border-radius:10px; background:rgba(255,255,255,.16); font-size:.95rem; } .fact q { font-style:italic; } .fact a { color:inherit; }
     .explain { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:.9rem 1rem; margin-bottom:1rem; }
     .explain dl { margin:0; } .explain dt { font-weight:700; margin-top:.6rem; } .explain dd { margin:.2rem 0 0; }
@@ -320,7 +321,10 @@ function explainBlock(card) {
       if (m.safety.length) dl.append(el("dd", {class:"warn"}, "⚠ " + m.safety[0].text));
     } else {
       dl.append(el("dt", {}, "Что проверить — по шагам"),
-        el("dd", {}, el("ol", {}, ...m.steps.map(x => el("li", {}, x.text, " ", el("span", {class:"sub"}, "(стр. " + x.pdf_page + ")"))))));
+        el("dd", {}, el("ol", {}, ...m.steps.map(x => el("li", {}, x.text, " ", el("span", {class:"sub"}, "(стр. " + x.pdf_page + ")"),
+          x.tools && x.tools.length ? el("div", {class:"tools"}, "🔧 Инструмент: " + x.tools.join(", ")) : null)))));
+      if (m.parts && m.parts.length) dl.append(el("dt", {}, "Запчасти по руководству"),
+        el("dd", {}, el("ul", {}, ...m.parts.map(p => el("li", {}, p.text + " — " + p.designation + " ", el("a", {href:p.url, target:"_blank", rel:"noopener", class:"sub"}, "(стр. " + p.pdf_page + ")"))))));
       if (m.safety.length) dl.append(el("dt", {}, "Безопасность"), ...m.safety.map(x => el("dd", {class:"warn"}, "⚠ " + x.text)));
     }
     if (m && m.status === "confirmed" && m.note) dl.append(el("dd", {class:"sub"}, m.note));
@@ -496,6 +500,20 @@ function renderAnswer(r) {
   return body;
 }
 
+// Запчасть в черновике + наличие у поставщика (/api/parts): по обозначению в скобках, иначе по наименованию.
+function partItem(label) {
+  const li = el("li", {}, label);
+  const m = label.match(/\(([\d.\-]+)\)/), q = m ? m[1] : label.split(",")[0];
+  const info = el("div", {class:"sub"});
+  li.append(info);
+  api("/api/parts?q=" + encodeURIComponent(q)).then(r => {
+    if (!r.connected) { info.textContent = "Наличие: каталог поставщика не подключён"; return; }
+    const o = r.offers[0];
+    info.textContent = o ? "Поставщик: " + [o.supplier, o.available, o.price_rub != null ? o.price_rub + " ₽" : null,
+      o.lead_days != null ? "срок " + o.lead_days + " дн." : null].filter(Boolean).join(" · ") : r.note;
+  }).catch(() => { info.textContent = ""; });
+  return li;
+}
 function draftCard(d) {
   const b = d.body;
   const urg = {high:"высокая", medium:"средняя", low:"низкая"}[b.urgency];
@@ -505,7 +523,10 @@ function draftCard(d) {
     el("p", {}, b.conclusion),
     el("div", {}, el("b", {}, "Срочность: " + urg), el("span", {class:"sub"}, " — " + d.urgency_reason)),
     el("div", {}, el("b", {}, "Работы:")), el("ul", {}, ...b.operations.map(o => el("li", {}, o))),
-    b.spare_parts.length ? el("div", {}, el("b", {}, "Запчасти: "), b.spare_parts.join(", ")) : null,
+    b.spare_parts.length ? el("div", {}, el("b", {}, "Запчасти:")) : null,
+    b.spare_parts.length ? el("ul", {}, ...b.spare_parts.map(partItem)) : null,
+    d.tools && d.tools.length ? el("div", {}, el("b", {}, "Инструмент и приспособления:")) : null,
+    d.tools && d.tools.length ? el("ul", {}, ...d.tools.map(t => el("li", {}, t))) : null,
     el("div", {}, el("b", {}, "Источники:")), el("ul", {}, ...b.references.map(r => el("li", {}, r.manual + ", стр. PDF " + r.pdf_page))));
   const send = el("button", {class:"send", onclick: async () => {
     send.disabled = true; send.textContent = "Отправляю…";
