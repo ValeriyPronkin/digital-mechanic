@@ -26,6 +26,7 @@ from service.fleet import fleet
 from service.fleet_api import build_router as build_fleet_router
 from service.llm import provider_from_env
 from service.manual_search import default_searcher, manual_pdf
+from service.pages import PageImages
 from service.rate_limit import RateLimiter, client_key
 from service.spend import BucketObject, RefreshingIamAuth, SharedLedger
 from service.store import Store
@@ -484,9 +485,29 @@ def manual(manual_id: str) -> FileResponse:
     return FileResponse(path, media_type="application/pdf")
 
 
+@lru_cache(maxsize=1)
+def page_images() -> PageImages:
+    return PageImages.from_env()
+
+
+@app.get("/manuals/{manual_id}/page/{page}.webp")
+def manual_page_webp(manual_id: str, page: int) -> Response:
+    """Картинка страницы руководства (WebP) для просмотрщика v2: бакет `pages/` или рендер из PDF; кэш на сутки."""
+    data = page_images().get(manual_id, page)
+    if data is None:
+        raise HTTPException(404, "Картинки этой страницы нет — смотрите текст страницы.")
+    return Response(content=data, media_type="image/webp", headers={"Cache-Control": "public, max-age=86400"})
+
+
 # Интерфейс v2 (issue #52): его API — /api/v2 поверх нашей логики (слой совместимости `api_v2`).
 app.include_router(
     api_v2.build_router(
-        lambda: agent(), lambda: store(), lambda: fleet(), _rate_limit, api_v2.ThreadStore.from_env(), lambda: speech()
+        lambda: agent(),
+        lambda: store(),
+        lambda: fleet(),
+        _rate_limit,
+        api_v2.ThreadStore.from_env(),
+        lambda: speech(),
+        lambda: page_images(),
     )
 )

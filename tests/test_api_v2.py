@@ -139,3 +139,11 @@ def test_transcribe_wav(ml: MLClient, toir: ToirClient) -> None:
     assert store.voice_spent_rub() > 0
     bad = c.post("/api/v2/transcribe", content=b"webm-bytes", headers={"Content-Type": "audio/webm"})
     assert bad.status_code == 422  # не WAV — понятная ошибка, а не сбой
+
+
+def test_quote_line_is_the_line_with_the_number() -> None:
+    page = "22 ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ\nРегулировать зазор 0,25-0,30 мм на холодном двигателе.\nПрочее."
+    assert api_v2.quote_line("Зазор 0,25–0,30 мм [R1].", "R1", page).startswith("Регулировать зазор")
+    assert api_v2.quote_line("Без чисел [R1].", "R1", page) == "22 ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ"
+    # число из предложения с другой ссылкой не уводит строку этой страницы
+    assert api_v2.quote_line("Момент 22 Н·м [R2]. Без чисел [R1].", "R1", page) == "22 ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ"

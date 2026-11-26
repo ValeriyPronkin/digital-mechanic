@@ -271,12 +271,32 @@ def source_items(reply: AgentReply, conv: Conversation) -> list[dict[str, Any]]:
     return out
 
 
+_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def quote_line(answer: str, ref: str, source_text: str) -> str:
+    """Строка страницы, на которой нашлось число из предложения ответа со ссылкой [ref] — её интерфейс v2
+    показывает «Найдено на странице». Нет числа или строки — начало фрагмента."""
+    from service.agent import numbers
+
+    wanted: set[str] = set()
+    for sentence in _SENTENCE.split(answer):
+        if f"[{ref}]" in sentence:
+            wanted |= numbers(sentence)
+    lines = [ln.strip() for ln in source_text.splitlines() if ln.strip()]
+    if wanted:
+        best = max(lines, key=lambda ln: len(numbers(ln) & wanted), default="")
+        if best and numbers(best) & wanted:
+            return best[:240]
+    return (lines[0] if lines else "")[:240]
+
+
 def verification(reply: AgentReply, text: str) -> dict[str, Any]:
     """Что проверил код (`agent.guard`): страницы, на которые опирается ответ, и сколько снято. Наш guard не
     зачёркивает, а убирает предложение с цифрой не из фрагмента — оно считается снятым."""
     rules = reply.trace.get("rules") or {}
     verified = [handle(s["ref"]) for s in reply.sources]
-    quotes = {handle(s["ref"]): (s.get("quote") or "")[:240] for s in reply.sources}
+    quotes = {handle(s["ref"]): quote_line(reply.text, s["ref"], s.get("quote") or "") for s in reply.sources}
     return {
         "type": "verification",
         "text": text,
@@ -433,6 +453,7 @@ def build_router(
     rate_limit: Callable[[Request], None],
     threads: ThreadStore,
     get_speech: Callable[[], Any] | None = None,
+    get_pages: Callable[[], Any] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v2")
 
@@ -639,6 +660,33 @@ def build_router(
         data["state"] = conv_state.dump(conv)
         threads.put(b, decision.vehicle_id, data)
         return Response(status_code=204)
+
+    @router.get("/vehicles/{vehicle_id}/pages/{manual_id}/{page}")
+    def manual_page(vehicle_id: str, manual_id: str, page: int, quote: str | None = None) -> dict[str, Any]:
+        """Страница руководства для просмотрщика: только руководства двигателя этой машины (правило 3)."""
+        v = vehicle_or_404(vehicle_id)
+        doc = next((d for d in documents_for_engine(v.engine_model) if d.doc_id == manual_id), None)
+        if doc is None:
+            raise HTTPException(404, "Это руководство не относится к двигателю машины.")
+        images = get_pages() if get_pages else None
+        pages = doc.pages or (images.pages(manual_id) if images else 0)
+        if not 1 <= page <= max(pages, 1) or (pages and page > pages):
+            raise HTTPException(404, f"В руководстве нет страницы {page}.")
+        searcher = getattr(get_agent(), "searcher", None)
+        page_text = getattr(searcher, "page_text", None)
+        text = (page_text(manual_id, page) if page_text else None) or ""
+        image = f"/manuals/{manual_id}/page/{page}.webp" if images and images.available(manual_id, page) else None
+        return {
+            "manual_id": manual_id,
+            "short": short_name(manual_id, doc.designation),
+            "designation": doc.designation,
+            "page": page,
+            "pages": pages,
+            "text": text,
+            "image": image,
+            "marks": [],  # подсветка строки — следующий шаг (приём Никиты page_marks)
+            "focus": None,
+        }
 
     @router.post("/transcribe")
     async def transcribe(request: Request) -> dict[str, Any]:
