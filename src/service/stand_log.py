@@ -60,6 +60,8 @@ class StandLog:
         self._unsent = 0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._last_flush: float | None = None  # None — ещё ни разу не выгружали (событие start ждёт)
+        self._urgent = False
 
     # ---- запись событий ----
     def event(self, kind: str, **fields: Any) -> None:
@@ -80,6 +82,7 @@ class StandLog:
             if len(self._events) > MAX_EVENTS:
                 del self._events[: len(self._events) - MAX_EVENTS]
             self._unsent += 1
+            self._urgent = self._urgent or kind == "error"
             flush = self._unsent >= BATCH
         if flush:
             self.flush()
@@ -95,6 +98,18 @@ class StandLog:
         with self._lock:
             return self._flush_locked()
 
+    def due(self) -> bool:
+        """Пора выгрузить: есть невыгруженное и (первая выгрузка, ошибка или прошло FLUSH_S)."""
+        with self._lock:
+            if not self._unsent:
+                return False
+            return self._last_flush is None or self._urgent or self.clock() - self._last_flush >= FLUSH_S
+
+    def maybe_flush(self) -> bool:
+        """Serverless Containers дают процессор только на время запроса: фоновый поток между запросами заморожен,
+        а экземпляр останавливают без close(). Поэтому выгружаем из обработки запроса, когда пора."""
+        return self.flush() if self.due() else True
+
     def _flush_locked(self) -> bool:
         if not self._unsent or not self._day:
             return True
@@ -105,6 +120,8 @@ class StandLog:
             log.warning("журнал стенда не записан в бакет (%s): %s событий подождут", type(exc).__name__, self._unsent)
             return False
         self._unsent = 0
+        self._last_flush = self.clock()
+        self._urgent = False
         return True
 
     def run_background(self, period: float = FLUSH_S) -> None:

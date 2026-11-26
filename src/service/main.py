@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -82,10 +83,14 @@ async def log_requests(request: Request, call_next: Any) -> Any:
         if slog is not None:
             slog.event("error", route=stand_log.route_template(request), method=request.method,
                        error=type(exc).__name__, status=500, ms=int((time.monotonic() - t0) * 1000))  # fmt: skip
+            await asyncio.to_thread(slog.maybe_flush)
         raise
     if slog is not None and request.url.path != "/health":
         slog.event("request", route=stand_log.route_template(request), method=request.method,
                    status=response.status_code, ms=int((time.monotonic() - t0) * 1000))  # fmt: skip
+    if slog is not None:
+        # выгрузка — пока у экземпляра есть процессор (до ответа); не чаще раза в FLUSH_S, ошибка — сразу
+        await asyncio.to_thread(slog.maybe_flush)
     return response
 
 

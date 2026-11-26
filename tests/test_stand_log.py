@@ -144,3 +144,31 @@ def test_sigv4_signs_query_for_listing() -> None:
     a = sign("GET", "https://s3/b?list-type=2&prefix=logs/", {}, "e3b0")["authorization"]
     b = sign("GET", "https://s3/b?list-type=2&prefix=index/", {}, "e3b0")["authorization"]
     assert a != b  # параметры входят в подпись
+
+
+def test_flush_from_request_path_first_then_each_minute_errors_at_once() -> None:
+    """Serverless: фоновый поток заморожен между запросами — выгружает сама обработка запроса, когда пора."""
+    puts: list[str] = []
+    now = [1_764_150_000.0]
+    slog = StandLog(lambda k, b: puts.append(b.decode()), instance="i1", clock=lambda: now[0])
+    slog.start()
+    assert slog.due() and slog.maybe_flush() and len(puts) == 1  # первый запрос после старта — start в бакете
+    slog.event("request", route="/api/x", status=200, ms=5)
+    assert not slog.due()  # не чаще раза в минуту
+    now[0] += 61
+    assert slog.maybe_flush() and len(puts) == 2
+    slog.event("error", route="/api/x", error="ValueError", status=500)
+    assert slog.due() and slog.maybe_flush() and len(puts) == 3 and "ValueError" in puts[-1]
+
+
+def test_middleware_flushes_on_first_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from service import main
+
+    puts: list[str] = []
+    slog = StandLog(lambda k, b: puts.append(k), instance="i2")
+    slog.start()
+    monkeypatch.setattr(main, "journal", lambda: slog)
+    TestClient(main.app).get("/api/vehicles")
+    assert puts and puts[0].startswith("logs/") and puts[0].endswith("/i2.jsonl")
