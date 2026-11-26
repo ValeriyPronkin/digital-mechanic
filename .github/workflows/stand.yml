@@ -23,6 +23,14 @@ on:
         description: "Тёплые экземпляры (1 — на время питча, без холодного старта; 0 — экономия)"
         required: false
         default: ""
+      logs_minutes:
+        description: "Только прочитать журнал контейнеров стенда (Cloud Logging) за N минут, без деплоя"
+        required: false
+        default: ""
+      voice_live:
+        description: "Прогнать голос на стенде как страница: WAV → распознавание → чат → озвучка (≈0,5 ₽); с logs_minutes — без деплоя"
+        type: boolean
+        default: false
       c1_live:
         description: "После деплоя прогнать С1 на настоящей модели: вопрос → заявка (≈0,4 ₽)"
         type: boolean
@@ -92,7 +100,40 @@ jobs:
           "$YC" config set folder-id "$YC_FOLDER_ID"
           "$YC" version
 
+      - name: Журнал контейнеров стенда (только чтение)
+        if: inputs.logs_minutes != ''
+        env:
+          LOGS_MINUTES: ${{ inputs.logs_minutes }}
+        run: |
+          set -eu
+          case "$LOGS_MINUTES" in ''|*[!0-9]*) echo "logs_minutes — целое число минут" >&2; exit 1 ;; esac
+          echo "Группы журнала каталога:"
+          yc logging group list --format json | jq -r '.[] | "\(.id) \(.name) retention=\(.retention_period)"' || true
+          for name in "$CONTAINER_NAME" "$ML_NAME" "$TOIR_NAME"; do
+            id=$(yc serverless container get --name "$name" --format json | jq -r '.id')
+            rev=$(yc serverless container revision list --container-name "$name" --limit 1 --format json | jq '.[0]')
+            echo "Ревизия $name: $(printf '%s' "$rev" | jq -c '{id, created_at, log_options, resources, execution_timeout}')"
+            group=$(printf '%s' "$rev" | jq -r '.log_options.log_group_id // empty')
+            echo "::group::$name ($id) — последние $LOGS_MINUTES мин"
+            if [ -n "$group" ]; then sel="--group-id=$group"; else sel="--group-name=default"; fi
+            yc logging read "$sel" \
+              --resource-ids "$id" --since "${LOGS_MINUTES}m" --limit 1000 \
+              --format json | jq -r '.[] | [.timestamp, .level, (.message // "" | tostring), ((.json_payload // {}) | tostring)] | join(" | ")' \
+              | tail -n 400 || echo "чтение журнала не удалось (роль logging.reader у сервисного аккаунта?)"
+            echo "::endgroup::"
+          done
+
+      - name: Замер соединения со стендом (TLS и ответ)
+        if: inputs.logs_minutes != ''
+        run: |
+          set -u
+          URL=$(yc serverless container get --name "$CONTAINER_NAME" --format json | jq -r '.url')
+          for i in $(seq 1 20); do
+            curl -sS -m 90 -o /dev/null -w "#$i code=%{http_code} ip=%{remote_ip} tcp=%{time_connect} tls=%{time_appconnect} ttfb=%{time_starttransfer} total=%{time_total}\n" "${URL%/}/health" || true
+          done
+
       - name: Сборка и push образов
+        if: inputs.logs_minutes == ''
         run: |
           set -eu
           TAG="stand-$(printf '%s' "$GITHUB_SHA" | cut -c1-7)"
@@ -107,6 +148,7 @@ jobs:
           echo "MOCK_IMAGE=$MOCK_IMAGE" >> "$GITHUB_ENV"
 
       - name: Деплой заглушек ML и ТОиР
+        if: inputs.logs_minutes == ''
         run: |
           set -eu
           . scripts/stand_lib.sh
@@ -118,8 +160,10 @@ jobs:
           echo "TOIR_URL=$TOIR_URL" >> "$GITHUB_ENV"
 
       - name: Деплой основного контейнера
+        if: inputs.logs_minutes == ''
         env:
           APP_ENV: ${{ secrets.APP_ENV }}
+          YANDEX_TTS_API_KEY: ${{ secrets.YANDEX_TTS_API_KEY }}
         run: |
           set -eu
           . scripts/stand_lib.sh
@@ -136,6 +180,11 @@ jobs:
           else
             echo "::warning::vars.S3_BUCKET не задан — стенд без индекса руководств (поиск пуст, заявок нет)"
           fi
+          # Голос (#14): ключ SpeechKit — из секрета, если его нет в APP_ENV; в браузер не попадает.
+          case "${APP_ENV:-}" in
+            *YANDEX_TTS_API_KEY=*) ;;
+            *) [ -z "${YANDEX_TTS_API_KEY:-}" ] || set -- "$@" --environment "YANDEX_TTS_API_KEY=${YANDEX_TTS_API_KEY}" ;;
+          esac
           # Каталог Yandex Cloud для эмбеддинга вопроса (поиск по смыслу); ключ YANDEX_API_KEY — в APP_ENV.
           case "${APP_ENV:-}" in
             *YANDEX_FOLDER_ID=*) ;;
@@ -165,6 +214,7 @@ jobs:
           echo "Стенд: $URL"
 
       - name: Проверка /health и смоук сценариев без модели
+        if: inputs.logs_minutes == ''
         run: |
           set -eu
           . scripts/stand_lib.sh
@@ -182,6 +232,11 @@ jobs:
           [ "$C1" = "anomaly true" ] || { echo "stand: С1 — ждали anomaly с возможной заявкой" >&2; exit 1; }
           KB=$(curl -fsS --max-time 30 "${STAND_URL}health" | jq -c '.manuals_index')
           echo "Индекс руководств: $KB"
+          VOICE=$(curl -fsS --max-time 30 "${STAND_URL}health" | jq -r '.voice_key_present')
+          [ "$VOICE" = true ] || echo "::warning::голос на стенде недоступен: нет YANDEX_TTS_API_KEY / YANDEX_API_KEY"
+          FORGED=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X POST "${STAND_URL}api/voice/speak" \
+            -H 'Content-Type: application/json' -d "{\"text\":\"проверка\",\"sig\":\"$(printf '0%.0s' $(seq 64))\"}")
+          [ "$FORGED" = 400 ] || { echo "stand: озвучка без подписи сервера должна давать 400, а не $FORGED" >&2; exit 1; }
           if [ -n "${S3_BUCKET:-}" ]; then
             [ "$(printf '%s' "$KB" | jq -r '.present')" = true ] || {
               echo "stand: индекс из бакета не скачан — роль storage.viewer у сервисного аккаунта? index/LATEST выложен?" >&2
@@ -195,12 +250,12 @@ jobs:
             echo "- Здоровье: ${STAND_URL}health"
             echo "- Заглушки: ML ${ML_URL} · ТОиР ${TOIR_URL}"
             echo "- Смоук через Mock ML: С3 → \`$C3\`, С1 → \`$C1\`"
-            echo "- Индекс руководств: \`$KB\`"
+            echo "- Индекс руководств: \`$KB\` · голос: ключ ${VOICE}, озвучка без подписи → ${FORGED}"
             echo "- Коммит: \`$(printf '%s' "$GITHUB_SHA" | cut -c1-7)\` · контейнер \`${CONTAINER_NAME}\` · тёплых экземпляров: ${STAND_MIN_INSTANCES}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: С1 на настоящей модели
-        if: inputs.c1_live
+        if: inputs.c1_live && inputs.logs_minutes == ''
         run: |
           set -eu
           pip install --quiet "httpx==0.28.1"
@@ -214,6 +269,16 @@ jobs:
             echo '```'
             echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Голос на стенде как со страницы
+        if: inputs.voice_live
+        env:
+          YANDEX_TTS_API_KEY: ${{ secrets.YANDEX_TTS_API_KEY }}
+        run: |
+          set -eu
+          URL="${STAND_URL:-$(yc serverless container get --name "$CONTAINER_NAME" --format json | jq -r '.url')}"
+          pip install --quiet "httpx==0.28.1"
+          python scripts/stand_voice.py "$URL"
 
       - name: Убрать ключ
         if: always()

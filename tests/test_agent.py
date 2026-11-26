@@ -99,8 +99,7 @@ INCOMPATIBLE = first(lambda v, s: s.status == "anomaly" and not is_compatible(s.
 
 DRAFT = {
     "conclusion": "Низкое давление масла",
-    "operations": ["Замерить давление масла манометром"],
-    "reference_ids": ["R1"],
+    "operations": [{"text": "Замерить давление масла манометром", "ref": "R1"}],
 }
 
 
@@ -150,9 +149,10 @@ def test_no_ticket_when_not_allowed(ml: MLClient, toir: ToirClient, pair: tuple[
         ag.confirm_ticket(conv, "anything")
 
 
-@pytest.mark.parametrize("refs", [[], ["R7"]], ids=["empty", "unknown"])
-def test_no_ticket_without_references(ml: MLClient, toir: ToirClient, refs: list[str]) -> None:
-    steps = [call("draft_ticket", **{**DRAFT, "reference_ids": refs}), say("Готово")]
+@pytest.mark.parametrize("ref", ["", "R7"], ids=["empty", "unknown"])
+def test_no_ticket_without_references(ml: MLClient, toir: ToirClient, ref: str) -> None:
+    ops = [{"text": "Замерить давление масла", "ref": ref}]
+    steps = [call("search_manual", query="масло"), call("draft_ticket", **{**DRAFT, "operations": ops}), say("Готово")]
     ag, _ = make_agent(steps, ml, toir)
     conv = ag.start(*ANOMALY)
     assert ag.ask(conv, "Оформи заявку").draft is None
@@ -167,7 +167,7 @@ def test_no_ticket_when_search_finds_nothing(ml: MLClient, toir: ToirClient) -> 
 def test_fingerprint_mismatch(ml: MLClient, toir: ToirClient) -> None:
     steps = [
         *c1_steps(*ANOMALY),
-        call("draft_ticket", **{**DRAFT, "operations": ["Заменить масляный насос"]}),
+        call("draft_ticket", **{**DRAFT, "operations": [{"text": "Заменить масляный насос", "ref": "R1"}]}),
         say("Обновил черновик [R1]"),
     ]
     ag, _ = make_agent(steps, ml, toir)
@@ -359,8 +359,8 @@ def test_list_markers_survive_number_check(ml: MLClient, toir: ToirClient) -> No
 
 
 def test_ticket_numbers_must_be_in_fragment(ml: MLClient, toir: ToirClient) -> None:
-    bad = {**DRAFT, "operations": ["Затянуть пробку моментом 45 Н·м"]}
-    good = {**DRAFT, "operations": ["Проверить, что давление на холостом ходу не менее 0,1 МПа"]}
+    bad = {**DRAFT, "operations": [{"text": "Затянуть пробку моментом 45 Н·м", "ref": "R1"}]}
+    good = {**DRAFT, "operations": [{"text": "Проверить, что давление на холостом ходу не менее 0,1 МПа", "ref": "R1"}]}
     steps = [call("search_manual", query="x"), call("draft_ticket", **bad), call("draft_ticket", **good), say("ок")]
     ag, llm = make_agent(steps, ml, toir, prefetch=False)
     conv = ag.start(*ANOMALY)
@@ -369,3 +369,46 @@ def test_ticket_numbers_must_be_in_fragment(ml: MLClient, toir: ToirClient) -> N
     first_try = results[1]
     assert "45" in first_try["refused"]
     assert reply.draft is not None and "0,1 МПа" in reply.draft["body"]["operations"][0]
+
+
+class TwoPageSearch:
+    """Два разных фрагмента: R1 — давление масла (стр. 42), R2 — моменты затяжки (стр. 77)."""
+
+    def search(self, query: str, engine: str, k: int = 5) -> list[ManualHit]:
+        return [
+            ManualHit("doc-1", "Руководство по ремонту", 42, "Смазочная система", FRAGMENT),
+            ManualHit("doc-1", "Руководство по ремонту", 77, "Моменты затяжки", "Момент затяжки пробки 45 Н·м."),
+        ]
+
+
+def test_ticket_references_only_pages_cited_by_operations(ml: MLClient, toir: ToirClient) -> None:
+    """I-03: найдено две страницы, работа ссылается на одну — в заявке только она."""
+    steps = [call("search_manual", query="масло"), call("draft_ticket", **DRAFT), say("Готово [R1]")]
+    ag, _ = make_agent(steps, ml, toir, TwoPageSearch())
+    reply = ag.ask(ag.start(*ANOMALY), "Оформи заявку")
+    assert reply.draft is not None, reply.text
+    assert reply.draft["body"]["references"] == [{"manual": "Руководство по ремонту", "pdf_page": 42}]
+    assert reply.draft["body"]["operations"] == ["Замерить давление масла манометром"]
+
+
+def test_operation_ref_marker_and_conclusion_ref(ml: MLClient, toir: ToirClient) -> None:
+    """Работа строкой с [R2] — ссылка из маркера; [R1] в заключении добавляет страницу; маркеры убраны из текста."""
+    draft = {"conclusion": "Низкое давление масла [R1]", "operations": ["Затянуть пробку моментом 45 Н·м [R2]"]}
+    steps = [call("search_manual", query="масло"), call("draft_ticket", **draft), say("Готово [R1]")]
+    ag, _ = make_agent(steps, ml, toir, TwoPageSearch())
+    reply = ag.ask(ag.start(*ANOMALY), "Оформи заявку")
+    assert reply.draft is not None, reply.text
+    body = reply.draft["body"]
+    assert [r["pdf_page"] for r in body["references"]] == [77, 42]
+    assert body["operations"] == ["Затянуть пробку моментом 45 Н·м"] and body["conclusion"] == "Низкое давление масла"
+
+
+def test_operation_number_checked_against_its_own_fragment(ml: MLClient, toir: ToirClient) -> None:
+    """45 Н·м есть только на стр. 77: работа с этой цифрой, но ссылкой на стр. 42 — отказ."""
+    ops = [{"text": "Затянуть пробку моментом 45 Н·м", "ref": "R1"}]
+    steps = [call("search_manual", query="масло"), call("draft_ticket", **{**DRAFT, "operations": ops}), say("ок")]
+    ag, llm = make_agent(steps, ml, toir, TwoPageSearch())
+    reply = ag.ask(ag.start(*ANOMALY), "Оформи заявку")
+    assert reply.draft is None
+    refused = json.loads(llm.seen[-1][-1]["content"])["refused"]
+    assert "45" in refused and "R1" in refused

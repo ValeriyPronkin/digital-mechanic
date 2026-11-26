@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
@@ -10,10 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
-from service import __version__, conv_state, kb_store
+from service import IMPORT_STARTED, INSTANCE_ID, __version__, conv_state, kb_store
 from service.agent import Agent
 from service.clients import MLClient, ServiceError, ToirClient
 from service.fault_matrix import card_explanation
@@ -24,12 +25,29 @@ from service.manual_search import default_searcher, manual_pdf
 from service.rate_limit import RateLimiter, client_key
 from service.store import Store
 from service.verdict_policy import VerdictCard, build_card
+from service.voice import (
+    DEFAULT_VOICE,
+    NOT_HEARD,
+    SpeechClient,
+    SpeechKit,
+    pcm_from_wav,
+    speech_for,
+    stt_cost_rub,
+    timed,
+    tts_cost_rub,
+)
+
+STARTUP: dict[str, float] = {}
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # Стенд: индекс руководств из бакета S3_BUCKET по IAM-токену (D-9, #6) — до первого вопроса механика.
+    STARTUP["import_s"] = round(time.monotonic() - IMPORT_STARTED, 2)
+    t = time.monotonic()
     kb_store.ensure_index_from_env()
+    STARTUP["index_fetch_s"] = round(time.monotonic() - t, 2)
+    STARTUP["ready_at"] = time.monotonic()
     yield
 
 
@@ -62,6 +80,11 @@ def agent() -> Agent:
 
 
 @lru_cache(maxsize=1)
+def speech() -> SpeechClient:
+    return SpeechKit.from_env()
+
+
+@lru_cache(maxsize=1)
 def limiter() -> RateLimiter:
     return RateLimiter.from_env()
 
@@ -88,6 +111,13 @@ def health() -> dict[str, Any]:
         "llm_key_present": any(os.environ.get(k) for k in ("DEEPSEEK_API_KEY", "GIGACHAT_CREDENTIALS", "LLM_API_KEY")),
         "llm_provider": os.environ.get("LLM_PROVIDER", "deepseek"),
         "manuals_index": manuals_index_status(),
+        "voice_key_present": any(os.environ.get(k) for k in ("YANDEX_TTS_API_KEY", "YANDEX_API_KEY")),
+        "tts_voice": os.environ.get("TTS_VOICE", DEFAULT_VOICE),
+        "instance": {
+            "id": INSTANCE_ID,
+            "uptime_s": round(time.monotonic() - IMPORT_STARTED, 1),
+            **{k: v for k, v in STARTUP.items() if k != "ready_at"},
+        },
     }
 
 
@@ -198,7 +228,50 @@ def chat(req: ChatIn, request: Request) -> dict[str, Any]:
         reply = ag.ask(conv, req.message)
     except ServiceError as exc:
         raise HTTPException(exc.http_status, exc.message) from exc
-    return {"conversation_id": conv.id, "state": conv_state.dump(conv), **reply.__dict__}
+    spoken = speech_for(reply.text, conv.sources)
+    return {
+        "conversation_id": conv.id,
+        "state": conv_state.dump(conv),
+        **reply.__dict__,
+        # Короткая версия для ответа вслух (#14): собрана кодом, цифры сверены с фрагментом; синтез — по подписи.
+        "speech": {"text": spoken.text, "sig": conv_state.sign_text(spoken.text)},
+    }
+
+
+@app.post("/api/voice/recognize")
+async def voice_recognize(request: Request) -> dict[str, Any]:
+    """Вопрос голосом: WAV 16 кГц моно (до 30 с) → текст. Текст механик видит и может поправить до отправки."""
+    _rate_limit(request)
+    body = await request.body()
+    try:
+        pcm, seconds = pcm_from_wav(body)
+        text, ms = timed(speech().recognize, pcm)
+    except ServiceError as exc:
+        raise HTTPException(exc.http_status, exc.message) from exc
+    cost = stt_cost_rub(seconds)
+    store().log_voice("stt", round(seconds, 2), cost, ms)
+    if not text:
+        raise HTTPException(422, NOT_HEARD)
+    return {"text": text, "seconds": round(seconds, 1), "cost_rub": round(cost, 3)}
+
+
+class SpeakIn(BaseModel):
+    text: str = Field(min_length=1, max_length=600)
+    sig: str = Field(min_length=64, max_length=64)
+
+
+@app.post("/api/voice/speak")
+def voice_speak(req: SpeakIn, request: Request) -> Response:
+    """Ответ вслух: mp3 короткой версии. Только текст с подписью сервера — синтеза произвольного текста нет."""
+    _rate_limit(request)
+    if not conv_state.verify_text(req.text, req.sig):
+        raise HTTPException(400, "Этот текст сервер не готовил к озвучке.")
+    try:
+        audio, ms = timed(speech().synthesize, req.text)
+    except ServiceError as exc:
+        raise HTTPException(exc.http_status, exc.message) from exc
+    store().log_voice("tts", len(req.text), tts_cost_rub(len(req.text)), ms)
+    return Response(content=audio, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
 
 
 class TicketIn(BaseModel):

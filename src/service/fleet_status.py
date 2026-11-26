@@ -1,7 +1,7 @@
 """Режим «Главный механик» (ТЗ B3, сценарий С4) и график оценки (B2), issue #21.
 
 Статус машины — по последней проверке, правилом в коде (не моделью):
-  карантин         — отклонение с высокой срочностью (`urgency_for`: F02, F03, F14 или оценка ≥ 0,85)
+  карантин         — отклонение с высокой срочностью (`verdict_policy.urgency_for`: F02, F03, F14 или оценка ≥ 0,85)
                      или код, несовместимый с двигателем (узла нет — результату нельзя верить, машину не выпускать
                      до повторной проверки);
   требует внимания — прочие отклонения; запись с помехами (signal_quality = warning);
@@ -20,7 +20,7 @@ from typing import Any, Literal
 
 from service.compat import check as compat_check
 from service.fleet import Fleet, Session, Vehicle
-from service.urgency import urgency_for
+from service.verdict_policy import urgency_for
 
 Status = Literal["quarantine", "attention", "rerecord", "normal"]
 

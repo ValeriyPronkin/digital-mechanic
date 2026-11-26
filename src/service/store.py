@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS card_views (
     id INTEGER PRIMARY KEY, vehicle_id TEXT, session_id TEXT, status TEXT, fault_code TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS answer_cache (
     key TEXT PRIMARY KEY, value TEXT, hits INTEGER DEFAULT 0, ts REAL);
+CREATE TABLE IF NOT EXISTS voice_calls (
+    id INTEGER PRIMARY KEY, kind TEXT, units REAL, cost_rub REAL, ms INTEGER, ts REAL);
 CREATE TABLE IF NOT EXISTS tickets (
     id INTEGER PRIMARY KEY, ticket_id TEXT, vehicle_id TEXT, session_id TEXT, anomaly_type TEXT,
     urgency TEXT, body TEXT, ts REAL, fingerprint TEXT);
@@ -126,6 +128,17 @@ class Store:
             "INSERT INTO tool_calls (request_id, step, tool, args, ok, ms, ts) VALUES (?,?,?,?,?,?,?)",
             (request_id, step, tool, json.dumps(args, ensure_ascii=False), int(ok), ms, time.time()),
         )
+
+    def log_voice(self, kind: str, units: float, cost: float, ms: int) -> None:
+        """Голос (#14): kind = stt (units — секунды записи) | tts (units — символы синтеза)."""
+        self._exec(
+            "INSERT INTO voice_calls (kind, units, cost_rub, ms, ts) VALUES (?,?,?,?,?)",
+            (kind, units, cost, ms, time.time()),
+        )
+
+    def voice_spent_rub(self, since: float = 0.0) -> float:
+        rows = self._rows("SELECT COALESCE(SUM(cost_rub), 0) AS s FROM voice_calls WHERE ts >= ?", (since,))
+        return float(rows[0]["s"])
 
     def llm_calls(self, request_id: str) -> list[dict[str, Any]]:
         return self._rows("SELECT * FROM llm_calls WHERE request_id=? ORDER BY id", (request_id,))
