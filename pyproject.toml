@@ -5,12 +5,13 @@ description = "Каркас сервиса хакатона: /health, стран
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
+    "httpx>=0.27",
+    "pydantic>=2.7",
     "uvicorn>=0.30",
 ]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.27",
     "mypy>=1.11",
     "pytest>=8.3",
     "ruff>=0.6",

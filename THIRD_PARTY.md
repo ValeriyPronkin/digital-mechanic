@@ -10,7 +10,8 @@
 |---|---|---|---|
 | fastapi | >=0.115 | MIT | HTTP API и страница |
 | uvicorn | >=0.30 | BSD-3-Clause | ASGI-сервер |
-| httpx | >=0.27 | BSD-3-Clause | dev: тестовый клиент FastAPI |
+| httpx | >=0.27 | BSD-3-Clause | HTTP-клиент к Mock ML и Mock ТОиР; тестовый клиент FastAPI |
+| pydantic | >=2.7 | MIT | схемы ответов ML и заявки ТОиР по контракту v6 |
 | mypy | >=1.11 | MIT | dev: проверка типов |
 | pytest | >=8.3 | MIT | dev: тесты |
 | ruff | >=0.6 | MIT | dev: линтер и форматтер |
