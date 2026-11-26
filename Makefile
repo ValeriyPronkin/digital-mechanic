@@ -1,4 +1,5 @@
-.PHONY: logs spend-probe eval-open setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch
+PHONY_ENGINEER := engineer-pack
+.PHONY: $(PHONY_ENGINEER) logs spend-probe eval-open setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch
 
 PORT ?= 8000
 
@@ -28,6 +29,11 @@ index: install
 
 ## Себестоимость по участкам на настоящей модели (issue #16): reports/cost.md + reports/cost/<LABEL>.csv
 LABEL ?= $(shell date +%Y%m%d-%H%M)
+## Пакет для инженера (#40 п. 7): все отклонения и сбои на стенде → reports/engineer-pack-<дата>.html (≈15 мин, ≈11 ₽)
+STAND_URL ?= https://bbab8qkqhuhg3ere9dam.containers.yandexcloud.net/
+engineer-pack: install
+	uv run python scripts/engineer_pack.py $(STAND_URL) $(PACK_ARGS)
+
 cost: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/cost_report.py --label $(LABEL)
 
