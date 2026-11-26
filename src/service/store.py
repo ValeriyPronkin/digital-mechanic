@@ -137,12 +137,19 @@ class Store:
             (request_id, step, tool, json.dumps(args, ensure_ascii=False), int(ok), ms, time.time()),
         )
 
-    def log_voice(self, kind: str, units: float, cost: float, ms: int) -> None:
-        """Голос (#14): kind = stt (units — секунды записи) | tts (units — символы синтеза)."""
-        self._exec(
-            "INSERT INTO voice_calls (kind, units, cost_rub, ms, ts) VALUES (?,?,?,?,?)",
-            (kind, units, cost, ms, time.time()),
-        )
+    def log_voice(self, kind: str, units: float, cost: float, ms: int) -> int:
+        """Голос (#14): kind = stt (units — секунды записи) | tts (units — символы синтеза). Возвращает id записи."""
+        with self._lock:
+            cur = self._db.execute(
+                "INSERT INTO voice_calls (kind, units, cost_rub, ms, ts) VALUES (?,?,?,?,?)",
+                (kind, units, cost, ms, time.time()),
+            )
+            self._db.commit()
+            return int(cur.lastrowid or 0)
+
+    def voice_call(self, call_id: int) -> dict[str, Any] | None:
+        rows = self._rows("SELECT * FROM voice_calls WHERE id=?", (call_id,))
+        return rows[0] if rows else None
 
     def voice_spent_rub(self, since: float = 0.0) -> float:
         rows = self._rows("SELECT COALESCE(SUM(cost_rub), 0) AS s FROM voice_calls WHERE ts >= ?", (since,))

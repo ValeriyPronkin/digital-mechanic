@@ -223,6 +223,8 @@ class Conversation:
     card: VerdictCard | None = None
     draft: TicketDraft | None = None
     fact_numbers: set[str] = field(default_factory=set)  # цифры из ответов кода (сводка парка) — факты, не выдумка
+    # Паспорт запроса (#31): данные текущего вопроса — план поиска, итоги guard. Не сериализуется в состояние.
+    passport: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -500,6 +502,7 @@ class Agent:
     def ask(self, conv: Conversation, question: str) -> AgentReply:
         request_id = uuid.uuid4().hex
         steps: list[dict[str, Any]] = []
+        conv.passport = {"refs_before": set(conv.sources)}
         conv.messages.append({"role": "user", "content": mask_pii(question)})
         cache_key = self._answer_cache_key(conv, question)
         if cache_key:
@@ -551,7 +554,7 @@ class Agent:
                 result, ok = self._run_tool(conv, call.name, call.arguments)
                 tms = int((time.monotonic() - t0) * 1000)
                 self.store.log_tool(request_id, step, call.name, call.arguments, ok, tms)
-                steps.append({"step": step, "kind": "tool", "name": call.name, "ok": ok, "ms": tms})
+                steps.append(tool_step(step, call.name, call.arguments, result, ok, tms))
                 conv.messages.append(
                     {
                         "role": "tool",
@@ -589,6 +592,7 @@ class Agent:
             "tokens_out": sum(c["tokens_out"] for c in calls),
             "tokens_cached": sum(int(c.get("tokens_cached") or 0) for c in calls),
             "cost_rub": round(sum(c["cost_rub"] for c in calls), 4),
+            **self._passport_trace(conv, cited),
         }
         return AgentReply(
             text=final,
@@ -681,6 +685,7 @@ class Agent:
             "tokens_cached": 0,
             "cost_rub": 0.0,
             "cache": True,
+            **self._passport_trace(conv, cited, cache=True),
         }
         return AgentReply(
             text=text,
@@ -706,9 +711,36 @@ class Agent:
             )
 
     # ---- проверка ответа ----
+    def _passport_trace(self, conv: Conversation, cited: list[Source], cache: bool = False) -> dict[str, Any]:
+        """Для паспорта запроса (#31): что ушло в модель и использовано ли, правила кода, план поиска."""
+        before: set[str] = conv.passport.get("refs_before", set())
+        used = {c.ref for c in cited}
+        sent = [s for r, s in conv.sources.items() if r not in before or r in used]
+        fragments = [
+            {
+                "ref": s.ref,
+                "manual": s.manual,
+                "pdf_page": s.pdf_page,
+                "section": s.section,
+                "tokens": approx_tokens(s.text),
+                "used": s.ref in used,
+                "new": s.ref not in before,
+            }
+            for s in sent
+        ]
+        card = conv.card
+        rules = {
+            **conv.passport.get("guard", {}),
+            "answer_cache": cache,
+            "card_status": card.status if card else None,
+            "code_compatible": card.compatible if card else None,
+        }
+        return {"fragments": fragments, "rules": rules, "plan": conv.passport.get("plan")}
+
     def guard(self, conv: Conversation, text: str) -> tuple[str, bool, list[str], list[Source]]:
         notes: list[str] = []
         if leaks_prompt(text):
+            conv.passport["guard"] = {"prompt_leak": True}
             return "Это служебные настройки, их не показываю. Спросите о машине или проверке.", False, [], []
 
         refs = [r for r in dict.fromkeys(_REF.findall(text))]
@@ -742,6 +774,7 @@ class Agent:
             notes.append("Часть цифр не нашёл в руководстве — убрал их. Точные значения уточнит дефектовка.")
 
         grounded = bool(cited)
+        conv.passport["guard"] = {"numbers_dropped": dropped, "opinions_marked": opinions, "ungrounded": not grounded}
         if not grounded and text:
             if conv.card and conv.card.status == "anomaly":
                 notes.append("Без ссылки на руководство: это пояснение, а не инструкция. Рекомендую дефектовку.")
@@ -846,7 +879,7 @@ class Agent:
             result, ok = self._run_tool(conv, call.name, call.arguments)
             tms = int((time.monotonic() - t0) * 1000)
             self.store.log_tool(request_id, 0, call.name, call.arguments, ok, tms)
-            steps.append({"step": 0, "kind": "tool", "name": call.name + " (код)", "ok": ok, "ms": tms})
+            steps.append(tool_step(0, call.name, call.arguments, result, ok, tms, by_code=True))
             conv.messages.append(
                 {
                     "role": "tool",
@@ -1047,6 +1080,7 @@ class Agent:
         plan["lang"] = str(data.get("lang") or "ru").lower()[:5]
         plan["question_ru"] = mask_pii(str(data.get("question_ru") or masked))
         plan["queries"] = [mask_pii(q) for q in plan["queries"]]
+        conv.passport["plan"] = {"lang": plan["lang"], "question_ru": plan["question_ru"], "queries": plan["queries"]}
         return plan
 
     def _draft_ticket(self, conv: Conversation, args: dict[str, Any]) -> dict[str, Any]:
@@ -1190,3 +1224,44 @@ def _operation(op: Any) -> tuple[str, str | None]:
     if ref is None and marks:
         ref = marks[0]
     return _strip_refs(text), ref
+
+
+def approx_tokens(text: str) -> int:
+    """Оценка токенов фрагмента для паспорта: ≈ 4 символа на токен (точное число — только у провайдера)."""
+    return max(1, round(len(text) / 4))
+
+
+_HIDDEN_ARGS = {"vehicle_id", "session_id"}  # машина и проверка — из разговора; в паспорт не дублируем
+
+
+def tool_step(
+    step: int,
+    name: str,
+    args: dict[str, Any],
+    result: dict[str, Any],
+    ok: bool,
+    ms: int,
+    by_code: bool = False,
+) -> dict[str, Any]:
+    """Шаг трассы для инструмента (#31): параметры и, для поиска, что найдено — ссылки R… и двигатель-фильтр."""
+    out: dict[str, Any] = {
+        "step": step,
+        "kind": "tool",
+        "name": name + (" (код)" if by_code else ""),
+        "tool": name,
+        "by_code": by_code,
+        "ok": ok,
+        "ms": ms,
+        "params": {k: v for k, v in args.items() if k not in _HIDDEN_ARGS},
+    }
+    if name == "search_manual":
+        found = result.get("found") or []
+        out["search"] = {
+            "engine": result.get("engine"),
+            "queries": [args.get("query"), *(args.get("more_queries") or [])],
+            "found": len(found),
+            "refs": [f.get("ref") for f in found],
+        }
+    if "refused" in result:
+        out["refused"] = result["refused"]
+    return out
