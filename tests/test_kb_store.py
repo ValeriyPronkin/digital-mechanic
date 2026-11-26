@@ -166,10 +166,11 @@ def test_health_reports_index_version(monkeypatch: pytest.MonkeyPatch, tmp_path:
     (dest / kb_store.VERSION_FILE).write_text("v7", encoding="utf-8")
     monkeypatch.setenv("INDEX_DIR", str(dest))
     monkeypatch.delenv("S3_BUCKET", raising=False)
+    monkeypatch.delenv("YANDEX_API_KEY", raising=False)
     from service.main import app
 
     body = TestClient(app).get("/health").json()
-    assert body["manuals_index"] == {"present": True, "version": "v7", "fragments": 2}
+    assert body["manuals_index"] == {"present": True, "version": "v7", "fragments": 2, "semantic": False}
 
 
 def test_stand_never_passes_static_key_to_container() -> None:

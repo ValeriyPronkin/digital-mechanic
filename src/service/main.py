@@ -95,7 +95,15 @@ def manuals_index_status() -> dict[str, Any]:
         return {"present": False}
     with frags.open("rb") as f:
         count = sum(1 for _ in f)
-    return {"present": True, "version": kb_store.installed_version(index_dir()), "fragments": count}
+    semantic = (index_dir() / "vectors.npy").is_file() and all(
+        os.environ.get(k, "").strip() for k in ("YANDEX_API_KEY", "YANDEX_FOLDER_ID")
+    )
+    return {
+        "present": True,
+        "version": kb_store.installed_version(index_dir()),
+        "fragments": count,
+        "semantic": semantic,  # поиск по смыслу: есть векторы и ключ Yandex для эмбеддинга вопроса
+    }
 
 
 @app.get("/", response_class=HTMLResponse)

@@ -41,6 +41,7 @@ env:
   YC_REGISTRY_ID: ${{ vars.YC_REGISTRY_ID }}
   YC_SA_ID: ${{ vars.YC_SA_ID }}
   S3_BUCKET: ${{ vars.S3_BUCKET }}
+  YANDEX_FOLDER_ID: ${{ vars.YANDEX_FOLDER_ID }}
   # Ответ агента бывает дольше 30 с превью: даём 120 с.
   STAND_TIMEOUT: ${{ vars.STAND_TIMEOUT || '120s' }}
   STAND_MEMORY: ${{ vars.STAND_MEMORY || '1GB' }}
@@ -135,6 +136,11 @@ jobs:
           else
             echo "::warning::vars.S3_BUCKET не задан — стенд без индекса руководств (поиск пуст, заявок нет)"
           fi
+          # Каталог Yandex Cloud для эмбеддинга вопроса (поиск по смыслу); ключ YANDEX_API_KEY — в APP_ENV.
+          case "${APP_ENV:-}" in
+            *YANDEX_FOLDER_ID=*) ;;
+            *) [ -z "${YANDEX_FOLDER_ID:-}" ] || set -- "$@" --environment "YANDEX_FOLDER_ID=${YANDEX_FOLDER_ID}" ;;
+          esac
           case "${APP_ENV:-}" in
             *APP_SECRET=*) ;;
             # Ключ подписи разговора, общий для всех экземпляров: производный от секрета, сам секрет не раскрывает.
