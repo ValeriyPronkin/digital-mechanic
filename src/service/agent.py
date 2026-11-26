@@ -37,11 +37,12 @@ from service.clients import (
 from service.fault_matrix import MATRIX_PATH, cell_for
 from service.fleet import Fleet, Vehicle
 from service.fleet_status import summary as fleet_summary
-from service.llm import LLMError, LLMProvider, Message, ToolCall, ToolSpec
+from service.llm import LLMError, LLMProvider, LLMReply, Message, ToolCall, ToolSpec
 from service.manual_search import ManualSearcher, manual_pdf
 from service.manuals.catalog import DOCS_BY_ID
 from service.manuals.lexical import tokenize
 from service.manuals.search import make_quote
+from service.spend import SpendLedger
 from service.store import Store
 from service.verdict_policy import CRITICAL_CODES, Urgency, VerdictCard, build_card, urgency_for  # noqa: F401
 
@@ -487,6 +488,7 @@ class Agent:
         budget_day_rub: float = 100.0,
         budget_total_rub: float = 1000.0,
         clock: Any = time.time,
+        ledger: SpendLedger | None = None,
     ) -> None:
         self.provider = provider
         self.ml = ml
@@ -499,6 +501,7 @@ class Agent:
         self.budget_day_rub = budget_day_rub
         self.budget_total_rub = budget_total_rub
         self.clock = clock
+        self.ledger = ledger  # общий счётчик расходов всех экземпляров стенда (#11); None — журнал экземпляра
 
     # ---- разговор ----
     def start(self, vehicle_id: str, session_id: str) -> Conversation:
@@ -543,16 +546,7 @@ class Agent:
             t0 = time.monotonic()
             reply = self.provider.chat(conv.messages, TOOLS, max_tokens=LEVEL_MAX_TOKENS[level])
             ms = int((time.monotonic() - t0) * 1000)
-            cost = self.store.log_llm(
-                request_id,
-                step,
-                self.provider.name,
-                reply.model,
-                reply.tokens_in,
-                reply.tokens_out,
-                ms,
-                tokens_cached=reply.tokens_cached,
-            )
+            cost = self._spend(request_id, step, reply, ms)
             steps.append(
                 {
                     "step": step,
@@ -726,14 +720,29 @@ class Agent:
             followup=followup,
         )
 
+    def _spend(self, request_id: str, step: int, reply: LLMReply, ms: int) -> float:
+        """Каждый вызов модели — в журнал экземпляра и в общий счётчик стенда (#11): одна точка учёта расхода."""
+        cost = self.store.log_llm(
+            request_id, step, self.provider.name, reply.model, reply.tokens_in, reply.tokens_out, ms,
+            tokens_cached=reply.tokens_cached,
+        )  # fmt: skip
+        if self.ledger is not None:
+            self.ledger.add(cost, self.clock())
+        return cost
+
     def check_budget(self) -> None:
         """Лимиты D-11: в сутки по Москве и всего. Проверка до каждого вызова модели."""
-        if self.store.spent_rub() >= self.budget_total_rub:
+        now = self.clock()
+        if self.ledger is not None:  # стенд: общий счётчик всех экземпляров (#11)
+            total, today = self.ledger.spent_total(), self.ledger.spent_today(now)
+        else:
+            total, today = self.store.spent_rub(), self.store.spent_rub(since=moscow_day_start(now))
+        if total >= self.budget_total_rub:
             raise BudgetExceededError(
                 f"Общий лимит расходов на модель ({self.budget_total_rub:g} ₽) исчерпан — помощник отключён. "
                 + NO_MODEL_HINT
             )
-        if self.store.spent_rub(since=moscow_day_start(self.clock())) >= self.budget_day_rub:
+        if today >= self.budget_day_rub:
             raise BudgetExceededError(
                 f"Лимит на сегодня ({self.budget_day_rub:g} ₽) исчерпан — помощник снова заработает "
                 "в 00:00 по Москве. " + NO_MODEL_HINT
@@ -1110,8 +1119,7 @@ class Agent:
             ms = int((time.monotonic() - t0) * 1000)
         except (LLMError, BudgetExceededError):
             return plan
-        cost = self.store.log_llm(request_id, 0, self.provider.name, reply.model, reply.tokens_in, reply.tokens_out,
-                                  ms, tokens_cached=reply.tokens_cached)  # fmt: skip
+        cost = self._spend(request_id, 0, reply, ms)
         steps.append({"step": 0, "kind": "llm", "name": reply.model + " (план поиска)", "tokens_in": reply.tokens_in,
                       "tokens_out": reply.tokens_out, "tokens_cached": reply.tokens_cached,
                       "cost_rub": round(cost, 4), "ms": ms})  # fmt: skip

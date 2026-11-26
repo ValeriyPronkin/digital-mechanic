@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from collections.abc import AsyncIterator
@@ -10,6 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
@@ -23,6 +25,7 @@ from service.fleet_api import build_router as build_fleet_router
 from service.llm import provider_from_env
 from service.manual_search import default_searcher, manual_pdf
 from service.rate_limit import RateLimiter, client_key
+from service.spend import BucketObject, RefreshingIamAuth, SharedLedger
 from service.store import Store
 from service.verdict_policy import VerdictCard, build_card
 from service.voice import (
@@ -38,6 +41,8 @@ from service.voice import (
 )
 
 STARTUP: dict[str, float] = {}
+
+log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -76,7 +81,18 @@ def agent() -> Agent:
         fleet=fleet(),
         budget_day_rub=float(os.environ.get("LLM_BUDGET_DAY_RUB", "100")),
         budget_total_rub=float(os.environ.get("LLM_BUDGET_TOTAL_RUB", "1000")),
+        ledger=shared_ledger(),
     )
+
+
+def shared_ledger() -> SharedLedger | None:
+    """Стенд (задан S3_BUCKET): общий счётчик расходов в бакете по IAM-токену (#11). Локально — журнал SQLite."""
+    if not os.environ.get("S3_BUCKET", "").strip() or os.environ.get("SPEND_LEDGER", "bucket") != "bucket":
+        return None
+    http = httpx.Client()
+    endpoint = os.environ.get("S3_ENDPOINT", kb_store.DEFAULT_ENDPOINT)
+    bucket = kb_store.Bucket(os.environ["S3_BUCKET"].strip(), RefreshingIamAuth(http), http, endpoint)
+    return SharedLedger(BucketObject(bucket))
 
 
 @lru_cache(maxsize=1)
