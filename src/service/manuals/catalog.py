@@ -20,6 +20,7 @@ class Document:
     designation: str  # обозначение для механика
     engines: tuple[str, ...]  # канонические модели двигателей (как в data/vehicles.json)
     kind: str  # вид по умолчанию: эксплуатация / ремонт
+    pages: int = 0  # страниц в PDF (паспорт индекса): ссылка на страницу вне 1..pages невозможна
     toc_pages: tuple[int, ...] = ()  # страницы PDF (с 1) с оглавлением
     repair_from_page: int | None = None  # для общих РЭ+ремонт: с этой страницы PDF — «ремонт»
     section_from_page_title: bool = False  # раздел = заголовок модуля данных в первой строке страницы
@@ -37,6 +38,7 @@ DOCUMENTS: tuple[Document, ...] = (
         designation="ЯМЗ-236М2, ЯМЗ-238М2. Руководство по эксплуатации 236-3902150-Б РЭ",
         engines=("ЯМЗ-236М2",),
         kind=KIND_OPERATION,
+        pages=172,
         toc_pages=(170, 171, 172),
     ),
     Document(
@@ -45,6 +47,7 @@ DOCUMENTS: tuple[Document, ...] = (
         designation="ЯМЗ-236, ЯМЗ-238. Руководство по ремонту",
         engines=("ЯМЗ-236М2",),
         kind=KIND_REPAIR,
+        pages=287,
         toc_pages=(2, 3, 4, 5, 6, 7),
     ),
     Document(
@@ -53,6 +56,7 @@ DOCUMENTS: tuple[Document, ...] = (
         designation="ЯМЗ-536. Руководство по эксплуатации 536.3902150 РЭ",
         engines=("ЯМЗ-536",),
         kind=KIND_OPERATION,
+        pages=285,
         toc_pages=(282, 283, 284, 285),
     ),
     Document(
@@ -61,6 +65,7 @@ DOCUMENTS: tuple[Document, ...] = (
         designation="ЯМЗ-536. Руководство по ремонту 536.01.02 РК",
         engines=("ЯМЗ-536",),
         kind=KIND_REPAIR,
+        pages=603,
         section_from_page_title=True,
     ),
     Document(
@@ -69,6 +74,7 @@ DOCUMENTS: tuple[Document, ...] = (
         designation="ЗМЗ-5234.10. Руководство по ремонту (изд. 5, 2025)",
         engines=("ЗМЗ-5234.10",),
         kind=KIND_REPAIR,
+        pages=158,
         toc_pages=(135, 136),
     ),
     Document(
@@ -77,6 +83,7 @@ DOCUMENTS: tuple[Document, ...] = (
         designation="ЗМЗ-40904.10, ЗМЗ-40905.10. Руководство по эксплуатации, ТО и ремонту (изд. 10, 2025)",
         engines=("ЗМЗ-40904.10", "ЗМЗ-40905.10"),
         kind=KIND_OPERATION,
+        pages=238,
         toc_pages=(3, 4),
         repair_from_page=112,
     ),

@@ -1,45 +1,31 @@
 """Совместимость «код неисправности × двигатель» (CLAUDE.md, правило 5).
 
 Если узла у двигателя нет (бензин на дизеле, турбина на атмосферном) — заявку не отправляем.
-STUB: compat-table — таблица `data/compat.json` пока черновая; признак «неизвестно» (null) заявку не блокирует.
+Источник — матрица по руководствам `data/fault_matrix.json` (issue #10, D-10): несовместимо только то, где
+ячейка `applicable == "false"` с проверенной цитатой-основанием. «Не ясно» и «руководство молчит» заявку
+не блокируют — их ограничивают ссылки на руководство и подтверждение механика.
 """
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from functools import lru_cache
-from pathlib import Path
-from typing import Any
 
-from service.fleet import DATA_DIR
+from service.fault_matrix import cell_for
 
 
 @dataclass(frozen=True)
 class Compat:
     ok: bool
     why: str  # пусто, если совместимо
-
-
-@lru_cache(maxsize=1)
-def _table(path: Path = DATA_DIR / "compat.json") -> dict[str, Any]:
-    data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    return data
+    source: str = ""  # «документ, стр. N» — основание вывода «узла нет»
 
 
 def check(code: str, engine: str) -> Compat:
-    t = _table()
-    rule = t["requires"].get(code)
-    traits = t["engines"].get(engine)
-    if rule is None or traits is None:
+    cell = cell_for(code, engine)
+    if cell is None or cell.applicable != "false":
         return Compat(True, "")
-    for key, need in rule.items():
-        if key == "why":
-            continue
-        have = traits.get(key)
-        if have is not None and have != need:
-            return Compat(False, str(rule["why"]))
-    return Compat(True, "")
+    src = f"{cell.basis.doc}, стр. {cell.basis.page}" if cell.basis else ""
+    return Compat(False, cell.why, src)
 
 
 def is_compatible(code: str, engine: str) -> bool:
