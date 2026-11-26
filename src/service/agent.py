@@ -529,8 +529,10 @@ class Agent:
             _, card = self._ensure_diag(conv)
         except ServiceError:
             return  # ML недоступен — модель сама вызовет инструмент и получит ошибку
-        if card.status == "anomaly" and card.compatible and PREFETCH_K > 0 and not _TICKET_ASK.search(question):
-            calls.append(ToolCall(f"pre-search-{len(conv.messages)}", "search_manual", {"query": mask_pii(question), "k": 3}))
+        wants_search = card.status == "anomaly" and card.compatible and not _TICKET_ASK.search(question)
+        if wants_search and PREFETCH_K > 0:
+            query = {"query": mask_pii(question), "k": PREFETCH_K}
+            calls.append(ToolCall(f"pre-search-{len(conv.messages)}", "search_manual", query))
         if not calls:
             return
         conv.messages.append({"role": "assistant", "content": "", "tool_calls": calls})
