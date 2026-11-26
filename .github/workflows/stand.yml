@@ -23,6 +23,10 @@ on:
         description: "Тёплые экземпляры (1 — на время питча, без холодного старта; 0 — экономия)"
         required: false
         default: ""
+      c1_live:
+        description: "После деплоя прогнать С1 на настоящей модели: вопрос → заявка (≈0,4 ₽)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -187,6 +191,22 @@ jobs:
             echo "- Смоук через Mock ML: С3 → \`$C3\`, С1 → \`$C1\`"
             echo "- Индекс руководств: \`$KB\`"
             echo "- Коммит: \`$(printf '%s' "$GITHUB_SHA" | cut -c1-7)\` · контейнер \`${CONTAINER_NAME}\` · тёплых экземпляров: ${STAND_MIN_INSTANCES}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: С1 на настоящей модели
+        if: inputs.c1_live
+        run: |
+          set -eu
+          pip install --quiet "httpx==0.28.1"
+          python scripts/stand_c1.py "$STAND_URL" | tee "$RUNNER_TEMP/c1.txt"
+          {
+            echo
+            echo "<details><summary>С1 на настоящей модели — ок</summary>"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/c1.txt"
+            echo '```'
+            echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Убрать ключ
