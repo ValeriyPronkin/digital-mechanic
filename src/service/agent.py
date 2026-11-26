@@ -38,10 +38,11 @@ from service.fault_matrix import MATRIX_PATH, cell_for
 from service.fleet import Fleet, Vehicle
 from service.fleet_status import summary as fleet_summary
 from service.llm import LLMError, LLMProvider, LLMReply, Message, ToolCall, ToolSpec, plan_temperature
-from service.manual_search import ManualSearcher, manual_pdf
-from service.manuals.catalog import DOCS_BY_ID
+from service.manual_search import ManualSearcher, manual_pdf, search_engine
+from service.manuals.catalog import DOCS_BY_ID, canonical_engine
 from service.manuals.lexical import tokenize
 from service.manuals.search import deterministic_mode, make_quote
+from service.nikita import coverage as nk_coverage
 from service.spend import SpendLedger
 from service.store import Store
 from service.verdict_policy import CRITICAL_CODES, Urgency, VerdictCard, build_card, urgency_for  # noqa: F401
@@ -374,6 +375,10 @@ def _quote_label(q: Any) -> str:
     return f"{short + ' — ' if short else ''}{doc.designation if doc else q.doc}, стр. {q.page}"
 
 
+GUIDE_ATTACHED = 3  # страниц реестра, которые справочник прикладывает целиком (как у Никиты)
+_DRIVE_ASK = re.compile(
+    r"можно ли (?:ехать|ездить|эксплуат)|своим ходом|доехать|перегнать|ехать дальше|можно ездить", re.I
+)
 OPINION_MARK = "(мнение помощника, не из руководства)"
 # Утверждение о причине или диагнозе (#28, проверка с телефона): без ссылки [R…] — рассуждение модели
 _DIAG = re.compile(
@@ -1027,7 +1032,9 @@ class Agent:
         # Поиск — при любом статусе (#28: вопрос по руководству при «норме» оставался без поиска); не для заявки.
         # Сбой записи — без поиска: выводов о двигателе нет, фрагменты подталкивали бы к догадкам.
         skip = card.status == "check_failed"  # несовместимый код — вопрос по руководству всё равно ищем (#28, Q19)
-        if PREFETCH_K > 0 and not _TICKET_ASK.search(question) and not skip:
+        # вопрос о карточке при поиске Никиты: страницы — из реестра (fault_guide в get_diagnosis), поиск не нужен
+        guide_only = search_engine() == "nikita" and bool(_CARD_ASK.search(question)) and self._has_guide(conv)
+        if PREFETCH_K > 0 and not _TICKET_ASK.search(question) and not skip and not guide_only:
             # план от модели — только для перевода (язык — кодом); русский вопрос ищется сам + глоссарий
             plan = (
                 self._search_plan(conv, question, request_id, steps)
@@ -1081,7 +1088,52 @@ class Agent:
         matrix = self._manual_matrix(conv)
         if matrix is not None:
             out["manual_matrix"] = matrix
+        guide = self._fault_guide(conv, _last_question(conv))
+        if guide is not None:
+            out["fault_guide"] = guide
         return out
+
+    # ---- справочник по неисправности из реестра Никиты (registry/coverage.yaml, SEARCH_ENGINE=nikita) ----
+    def _fault_guide(self, conv: Conversation, question: str) -> dict[str, Any] | None:
+        """Как get_fault_guide Никиты: класс покрытия, факт о конструкции, оговорка, страницы с «что на ней»
+        (первые три — целиком на вопрос о карточке), страницы пределов эксплуатации (целиком — на «можно ли
+        ехать»). Страницы — из реестра, не из поиска: одни и те же каждый раз. Совместимость — наша (карточка)."""
+        if search_engine() != "nikita":
+            return None
+        card = conv.card
+        if card is None or card.status != "anomaly" or not card.compatible or not card.fault_code:
+            return None
+        engine = canonical_engine(conv.vehicle.engine_model) or conv.vehicle.engine_model
+        cell = nk_coverage.cell_for(engine, card.fault_code)
+        if cell is None or cell.coverage == "not_covered":
+            return None
+        page_text = getattr(self.searcher, "page_text", None)
+
+        def ref(manual: str, page: int, why: str, attach: bool) -> dict[str, Any]:
+            text = (page_text(manual, page) if page_text else None) or why
+            src = self._source_for(conv, manual, page, why, text)
+            return {"ref": src.ref, "why": why, **({"text": text} if attach else {})}
+
+        on_card = bool(_CARD_ASK.search(question))
+        out: dict[str, Any] = {
+            "class": cell.coverage,
+            "pages": [ref(p.manual, p.page, p.why, on_card and i < GUIDE_ATTACHED) for i, p in enumerate(cell.pages)],
+        }
+        if cell.note:
+            out["note"] = cell.note
+        if cell.proof:
+            out["proof"] = {"text": cell.proof.text, **ref(cell.proof.manual, cell.proof.page, cell.proof.text, False)}
+        drive = bool(_DRIVE_ASK.search(question))
+        out["operating_limits"] = [ref(p.manual, p.page, p.why, drive) for p in nk_coverage.limits_for(engine)]
+        return out
+
+    def _has_guide(self, conv: Conversation) -> bool:
+        card = conv.card
+        if card is None or card.status != "anomaly" or not card.compatible or not card.fault_code:
+            return False
+        engine = canonical_engine(conv.vehicle.engine_model) or conv.vehicle.engine_model
+        cell = nk_coverage.cell_for(engine, card.fault_code)
+        return cell is not None and cell.coverage != "not_covered"
 
     # ---- вопрос про другой двигатель (независимый прогон 26.11, п. 2) ----
     def _other_engine_reply(self, conv: Conversation, question: str, request_id: str) -> AgentReply | None:
