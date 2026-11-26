@@ -1,4 +1,4 @@
-.PHONY: setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost index kb-publish kb-fetch
+.PHONY: spend-probe setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost index kb-publish kb-fetch
 
 PORT ?= 8000
 
@@ -38,6 +38,10 @@ kb-publish: install
 ## Проверить выкладку: скачать index/LATEST из бакета в каталог KB_OUT (по умолчанию .state/kb-check)
 kb-fetch: install
 	uv run $(if $(wildcard .env),--env-file .env,) python -m service.kb_store fetch --out $(or $(KB_OUT),.state/kb-check)
+
+## Проверка условной записи на настоящем бакете (issue #11): объект spend/probe-*, после — удаляется. Запускает человек
+spend-probe: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/spend_probe.py
 
 ## Всё, что проверяет CI, кроме смоука в Docker. Зелёный = код возврата 0.
 check: lint types test stubs third-party secrets
