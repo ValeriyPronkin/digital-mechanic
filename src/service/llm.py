@@ -99,11 +99,21 @@ def _post(http: httpx.Client, url: str, **kw: Any) -> dict[str, Any]:
 
 
 def default_temperature() -> float:
-    """Температура основного ответа (LLM_TEMPERATURE). План поиска всегда с 0: один вопрос → те же страницы."""
+    """Температура ответа (LLM_TEMPERATURE), по умолчанию 0,2 — как было."""
     try:
         return float(os.environ.get("LLM_TEMPERATURE", "0.2"))
     except ValueError:
         return 0.2
+
+
+def plan_temperature() -> float | None:
+    """Температура плана поиска (LLM_PLAN_TEMPERATURE); не задана — как у ответа. Замер 26.11: t=0 у DeepSeek
+    план не стабилизирует (reports/search-stability.md), поэтому по умолчанию поведение прежнее."""
+    raw = os.environ.get("LLM_PLAN_TEMPERATURE", "").strip()
+    try:
+        return float(raw) if raw else None
+    except ValueError:
+        return None
 
 
 def default_max_tokens() -> int:

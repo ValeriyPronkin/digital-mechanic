@@ -1,4 +1,4 @@
-"""Стабильность поиска (штурман 26.11): план поиска — с температурой 0, иначе один вопрос давал разные страницы."""
+"""Настройки температуры (штурман 26.11): по умолчанию — как было; план t=0 — только настройкой LLM_PLAN_TEMPERATURE."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from service.llm import LLMReply
 from test_agent import make_agent, say
 
 
-def test_search_plan_called_with_zero_temperature(ml: MLClient, toir: ToirClient) -> None:
+def test_search_plan_temperature_default_and_setting(ml: MLClient, toir: ToirClient, monkeypatch: Any) -> None:
     seen: list[Any] = []
     ag, llm = make_agent([say('{"lang":"ru","question_ru":"q","queries":["q"]}'), say("ответ")], ml, toir,
                          plan_search=True)  # fmt: skip
@@ -20,9 +20,13 @@ def test_search_plan_called_with_zero_temperature(ml: MLClient, toir: ToirClient
         return orig(messages, tools, max_tokens, temperature)
 
     llm.chat = spy  # type: ignore[method-assign]
+    monkeypatch.delenv("LLM_PLAN_TEMPERATURE", raising=False)
     ag.ask(ag.start("B418HK98", "S-0007"), "Какой зазор клапанов?")
-    assert seen[0] == 0.0  # план поиска
-    assert seen[-1] is None  # основной ответ — по настройке LLM_TEMPERATURE
+    assert seen[0] is None and seen[-1] is None  # по умолчанию — температура провайдера, как было
+    from service.llm import plan_temperature
+
+    monkeypatch.setenv("LLM_PLAN_TEMPERATURE", "0")
+    assert plan_temperature() == 0.0
 
 
 def test_default_temperature_from_env(monkeypatch: Any) -> None:
