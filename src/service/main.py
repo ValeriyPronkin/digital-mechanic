@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -11,7 +13,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
-from service import __version__, conv_state
+from service import __version__, conv_state, kb_store
 from service.agent import Agent
 from service.clients import MLClient, ServiceError, ToirClient
 from service.fleet import fleet
@@ -21,7 +23,15 @@ from service.rate_limit import RateLimiter, client_key
 from service.store import Store
 from service.verdict_policy import VerdictCard, build_card
 
-app = FastAPI(title="Цифровой механик", version=__version__)
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Стенд: индекс руководств из бакета S3_BUCKET по IAM-токену (D-9, #6) — до первого вопроса механика.
+    kb_store.ensure_index_from_env()
+    yield
+
+
+app = FastAPI(title="Цифровой механик", version=__version__, lifespan=lifespan)
 INDEX_HTML = Path(__file__).parent / "static" / "index.html"
 
 
@@ -72,7 +82,20 @@ def health() -> dict[str, Any]:
         "version": __version__,
         "llm_key_present": any(os.environ.get(k) for k in ("DEEPSEEK_API_KEY", "GIGACHAT_CREDENTIALS", "LLM_API_KEY")),
         "llm_provider": os.environ.get("LLM_PROVIDER", "deepseek"),
+        "manuals_index": manuals_index_status(),
     }
+
+
+def manuals_index_status() -> dict[str, Any]:
+    """Есть ли индекс руководств у экземпляра: версия из бакета и число фрагментов (без загрузки поиска)."""
+    from service.manuals.index import index_dir
+
+    frags = index_dir() / "fragments.jsonl"
+    if not frags.is_file():
+        return {"present": False}
+    with frags.open("rb") as f:
+        count = sum(1 for _ in f)
+    return {"present": True, "version": kb_store.installed_version(index_dir()), "fragments": count}
 
 
 @app.get("/", response_class=HTMLResponse)

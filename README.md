@@ -92,6 +92,20 @@ uv run --env-file .env python scripts/verify_index.py              # сверк�
 - Номер страницы в выдаче — номер страницы PDF с 1, не печатный (в РЭ ЯМЗ-536 печатный на 1 меньше).
 - Поиск сначала оставляет только руководства двигателя ТС (`documents_for_engine`), потом ранжирует: BM25 по леммам + эмбеддинги Yandex, слияние RRF.
 
+### Индекс на стенде (D-9, issue #6)
+
+Индекс и PDF лежат в частном бакете Object Storage (`S3_BUCKET`, сейчас `digital-mechanic-kb`):
+`index/<версия>/` + `MANIFEST.json` (sha256 файлов), `index/LATEST` — текущая версия, `manuals/` — PDF.
+
+```bash
+make index && make kb-publish                 # собрать и выложить новой версией (ключ S3_* из .env); PDF — KB_ARGS=--manuals
+make kb-fetch                                 # проверить: скачать index/LATEST в .state/kb-check
+```
+
+Стенд при старте скачивает `index/LATEST` в `INDEX_DIR=/tmp/index` по IAM-токену своего сервисного аккаунта
+из метаданных (нужна роль `storage.viewer` на бакет); статический ключ в контейнер не попадает. Версия индекса
+и число фрагментов — в `/health` (`manuals_index`). Чтобы стенд взял новую версию — перезапустить workflow Stand.
+
 ## Российские модели и TLS
 
 Сервер GigaChat подписан корневым сертификатом Минцифры, которому Python по умолчанию не доверяет

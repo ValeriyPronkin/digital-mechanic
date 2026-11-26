@@ -6,6 +6,9 @@
 # (Actions → Stand → Run workflow).
 # Переменные приложения (ключи моделей) — секрет APP_ENV, строки KEY=VALUE; в логи не печатаются.
 # Без переменной YC_REGISTRY_ID job пропускается, CI не краснеет.
+# Индекс руководств (D-9, #6): переменная S3_BUCKET — имя частного бакета; контейнер при старте скачивает
+# index/LATEST по IAM-токену своего сервисного аккаунта (YC_SA_ID, роль storage.viewer на бакет).
+# Статический ключ в контейнер не передаётся: строки S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY из APP_ENV отбрасываются.
 name: Stand
 
 on:
@@ -33,6 +36,7 @@ env:
   YC_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
   YC_REGISTRY_ID: ${{ vars.YC_REGISTRY_ID }}
   YC_SA_ID: ${{ vars.YC_SA_ID }}
+  S3_BUCKET: ${{ vars.S3_BUCKET }}
   # Ответ агента бывает дольше 30 с превью: даём 120 с.
   STAND_TIMEOUT: ${{ vars.STAND_TIMEOUT || '120s' }}
   STAND_MEMORY: ${{ vars.STAND_MEMORY || '1GB' }}
@@ -120,7 +124,13 @@ jobs:
             --environment "MOCK_ML_URL=${ML_URL%/}" \
             --environment "MOCK_TOIR_URL=${TOIR_URL%/}" \
             --environment MOCK_TIMEOUT=30 \
-            --environment STATE_DB=/tmp/agent.db
+            --environment STATE_DB=/tmp/agent.db \
+            --environment INDEX_DIR=/tmp/index
+          if [ -n "${S3_BUCKET:-}" ]; then
+            set -- "$@" --environment "S3_BUCKET=${S3_BUCKET}"
+          else
+            echo "::warning::vars.S3_BUCKET не задан — стенд без индекса руководств (поиск пуст, заявок нет)"
+          fi
           case "${APP_ENV:-}" in
             *APP_SECRET=*) ;;
             # Ключ подписи разговора, общий для всех экземпляров: производный от секрета, сам секрет не раскрывает.
@@ -131,7 +141,10 @@ jobs:
               line="${line%$'\r'}"
               case "$line" in ''|'#'*) continue ;; esac
               case "$line" in
-                MOCK_ML_URL=*|MOCK_TOIR_URL=*) echo "APP_ENV: ${line%%=*} задаёт workflow — строка пропущена" >&2 ;;
+                MOCK_ML_URL=*|MOCK_TOIR_URL=*|S3_BUCKET=*|INDEX_DIR=*)
+                  echo "APP_ENV: ${line%%=*} задаёт workflow — строка пропущена" >&2 ;;
+                S3_ACCESS_KEY_ID=*|S3_SECRET_ACCESS_KEY=*)
+                  echo "APP_ENV: ${line%%=*} — статический ключ в контейнер не кладём (D-9), строка пропущена" >&2 ;;
                 *=*) set -- "$@" --environment "$line" ;;
                 *) echo "APP_ENV: строка без '=' пропущена" >&2 ;;
               esac
@@ -157,6 +170,14 @@ jobs:
           echo "С3: $C3 · С1: $C1"
           [ "$C3" = "check_failed false" ] || { echo "stand: С3 — ждали check_failed без заявки" >&2; exit 1; }
           [ "$C1" = "anomaly true" ] || { echo "stand: С1 — ждали anomaly с возможной заявкой" >&2; exit 1; }
+          KB=$(curl -fsS --max-time 30 "${STAND_URL}health" | jq -c '.manuals_index')
+          echo "Индекс руководств: $KB"
+          if [ -n "${S3_BUCKET:-}" ]; then
+            [ "$(printf '%s' "$KB" | jq -r '.present')" = true ] || {
+              echo "stand: индекс из бакета не скачан — роль storage.viewer у сервисного аккаунта? index/LATEST выложен?" >&2
+              exit 1
+            }
+          fi
           {
             echo "### 🟢 Стенд"
             echo
@@ -164,6 +185,7 @@ jobs:
             echo "- Здоровье: ${STAND_URL}health"
             echo "- Заглушки: ML ${ML_URL} · ТОиР ${TOIR_URL}"
             echo "- Смоук через Mock ML: С3 → \`$C3\`, С1 → \`$C1\`"
+            echo "- Индекс руководств: \`$KB\`"
             echo "- Коммит: \`$(printf '%s' "$GITHUB_SHA" | cut -c1-7)\` · контейнер \`${CONTAINER_NAME}\` · тёплых экземпляров: ${STAND_MIN_INSTANCES}"
           } >> "$GITHUB_STEP_SUMMARY"
 

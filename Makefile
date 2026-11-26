@@ -1,4 +1,4 @@
-.PHONY: setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt index
+.PHONY: setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt index kb-publish kb-fetch
 
 PORT ?= 8000
 
@@ -25,6 +25,14 @@ mocks: install
 ## Индекс руководств одной командой: PDF из MANUALS_DIR → INDEX_DIR (по умолчанию .index/). Повторно — из кэша
 index: install
 	uv run $(if $(wildcard .env),--env-file .env,) python -m service.manuals build
+
+## Выложить индекс новой версией в бакет S3_BUCKET (статический ключ из .env; index/LATEST — последним). PDF — KB_ARGS=--manuals
+kb-publish: install
+	uv run $(if $(wildcard .env),--env-file .env,) python -m service.kb_store publish $(KB_ARGS)
+
+## Проверить выкладку: скачать index/LATEST из бакета в каталог KB_OUT (по умолчанию .state/kb-check)
+kb-fetch: install
+	uv run $(if $(wildcard .env),--env-file .env,) python -m service.kb_store fetch --out $(or $(KB_OUT),.state/kb-check)
 
 ## Всё, что проверяет CI, кроме смоука в Docker. Зелёный = код возврата 0.
 check: lint types test stubs third-party secrets
