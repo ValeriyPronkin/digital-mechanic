@@ -5,13 +5,48 @@ services:
       - "${PORT:-8000}:8000"
     environment:
       # Ключи берутся из .env (docker compose читает его сам); в образ не попадают.
-      LLM_API_KEY: ${LLM_API_KEY:-}
-    # Данные заказчика монтировать только на чтение, например:
-    # volumes:
-    #   - ./task/data:/data/source:ro
+      LLM_PROVIDER: ${LLM_PROVIDER:-deepseek}
+      LLM_MODEL: ${LLM_MODEL:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS:-}
+      LLM_BUDGET_RUB: ${LLM_BUDGET_RUB:-300}
+      # Внутри compose сервис ходит в заглушки по именам сервисов, а не по адресам из .env.
+      MOCK_ML_URL: http://mock-ml:8001
+      MOCK_TOIR_URL: http://mock-toir:8002
+    depends_on:
+      mock-ml:
+        condition: service_healthy
+      mock-toir:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       start_period: 30s
       interval: 10s
       timeout: 3s
       retries: 3
+
+  # Заглушки заказчика из vendor/neurodvs_mock (код не меняем, только образ).
+  mock-ml:
+    build:
+      context: .
+      dockerfile: docker/mock.Dockerfile
+    command: ["uvicorn", "mock_ml.app:app", "--host", "0.0.0.0", "--port", "8001"]
+    ports:
+      - "8001:8001"
+    healthcheck: &mock-health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      start_period: 15s
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mock-toir:
+    build:
+      context: .
+      dockerfile: docker/mock.Dockerfile
+    command: ["uvicorn", "mock_toir.app:app", "--host", "0.0.0.0", "--port", "8002"]
+    ports:
+      - "8002:8002"
+    healthcheck:
+      <<: *mock-health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]

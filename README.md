@@ -11,15 +11,34 @@
 лицензия на использование не предоставляется.
 
 
-## Запуск
+## Запуск за 5 минут
+
+**Docker (всё сразу):** сервис + заглушки Mock ML и Mock ТОиР из `vendor/neurodvs_mock`.
 
 ```sh
-cp .env.example .env   # вписать ключ
-make setup             # зависимости и git-хуки — один раз после клона
-make run               # http://localhost:8000
+cp .env.example .env          # ключи модели пока не нужны
+docker compose up --build     # http://localhost:8000 (заглушки — :8001 и :8002)
 ```
 
-Или в Docker: `docker compose up --build`.
+**Без Docker** (нужен [uv](https://docs.astral.sh/uv/)):
+
+```sh
+cp .env.example .env
+make setup                    # зависимости и git-хуки — один раз после клона
+make mocks                    # терминал 1: Mock ML :8001 и Mock ТОиР :8002
+make run                      # терминал 2: http://localhost:8000
+```
+
+С телефона: откройте `http://<IP компьютера в той же сети>:8000` или ссылку превью из PR.
+Сценарий: машина → проверка из истории → «Получить результат диагностики» → карточка вердикта.
+
+## Агент
+
+После карточки — чат: модель (`LLM_PROVIDER=deepseek|gigachat`, ключ `DEEPSEEK_API_KEY` или `GIGACHAT_CREDENTIALS`)
+сама вызывает инструменты `get_diagnosis`, `vehicle_history`, `search_manual`, `draft_ticket`, `fleet_summary`.
+Заявка уходит в ТОиР только кнопкой «Отправить» под показанным черновиком. Под каждым ответом — свёрнутая трасса:
+инструменты, токены, ₽. Журнал и память по машинам — SQLite (`STATE_DB`, по умолчанию `.state/agent.db`).
+Лимит расходов — `LLM_BUDGET_RUB`, цены — `LLM_PRICE_IN_RUB` / `LLM_PRICE_OUT_RUB` (₽ за 1 млн токенов).
 
 ## Проверки
 
@@ -84,4 +103,5 @@ uv run --env-file .env python scripts/verify_index.py              # сверк�
 Каждая заглушка в коде помечается `STUB: <id>` и описывается здесь строкой `- <id> — что не сделано`;
 `make stubs` падает на неописанной.
 
-Пока заглушек нет.
+- `STUB: compat-table` — таблица совместимости код × двигатель (`data/compat.json`) черновая: только топливо, турбина, EGR, цепь ГРМ; полную даст матрица по руководствам (#3).
+- `STUB: search-until-#3` — пока индекс руководств не собран (`make index`; на стенде — до решения issue #6), поиск по руководству пуст: агент отвечает «в руководстве не нашёл», заявка невозможна (нет ссылок).

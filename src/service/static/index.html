@@ -2,20 +2,262 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Сервис</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f2933">
+  <title>Цифровой механик</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; }
-    code { background: #f2f2f2; padding: 0 .3rem; }
+    :root { --bg:#f4f5f7; --fg:#1f2933; --muted:#5f6b7a; --card:#fff; --line:#d9dee5;
+            --green:#1e7a3c; --yellow:#9a6a00; --red:#b42318; --grey:#5f6b7a; --accent:#1f5fbf; }
+    * { box-sizing: border-box; }
+    body { margin:0; font: 17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+           background:var(--bg); color:var(--fg); }
+    header { position:sticky; top:0; z-index:2; background:var(--fg); color:#fff;
+             padding:.75rem 1rem; display:flex; align-items:center; gap:.75rem; }
+    header h1 { font-size:1.1rem; margin:0; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    header button { background:none; border:0; color:#fff; font-size:1rem; padding:.5rem; min-height:44px; }
+    main { max-width:36rem; margin:0 auto; padding:1rem 1rem 7rem; }
+    input[type=search] { width:100%; font-size:1.05rem; padding:.8rem 1rem; border:1px solid var(--line);
+                         border-radius:12px; margin-bottom:.75rem; }
+    ul { list-style:none; margin:0; padding:0; }
+    li button { width:100%; text-align:left; background:var(--card); border:1px solid var(--line);
+                border-radius:12px; padding:.8rem 1rem; margin-bottom:.5rem; font:inherit; color:inherit;
+                min-height:56px; display:block; }
+    li button[aria-pressed=true] { border:2px solid var(--accent); }
+    .plate { font-weight:700; font-size:1.1rem; letter-spacing:.03em; }
+    .sub { color:var(--muted); font-size:.92rem; }
+    .actionbar { position:fixed; left:0; right:0; bottom:0; padding:.75rem 1rem calc(.75rem + env(safe-area-inset-bottom));
+                 background:linear-gradient(transparent, var(--bg) 30%); }
+    .actionbar button { display:block; width:100%; max-width:34rem; margin:0 auto; min-height:56px; font-size:1.1rem;
+                        font-weight:700; border:0; border-radius:14px; background:var(--accent); color:#fff; }
+    .actionbar button:disabled { background:#9aa5b1; }
+    .verdict { border-radius:16px; padding:1.1rem; color:#fff; margin-bottom:1rem; }
+    .verdict h2 { margin:0 0 .4rem; font-size:1.45rem; line-height:1.2; }
+    .verdict p { margin:0; font-size:1.08rem; }
+    .verdict .meta { margin-top:.6rem; opacity:.9; font-size:.95rem; }
+    .green { background:var(--green); } .yellow { background:var(--yellow); }
+    .red { background:var(--red); } .grey { background:var(--grey); }
+    .banner { background:#fff4d6; border:1px solid #e5c46b; color:#5c4300; border-radius:12px;
+              padding:.7rem 1rem; margin-bottom:.75rem; font-weight:600; }
+    blockquote { margin:0 0 1rem; background:var(--card); border-left:4px solid var(--line); border-radius:8px;
+                 padding:.7rem 1rem; white-space:pre-wrap; overflow-wrap:anywhere; }
+    blockquote cite { display:block; font-style:normal; color:var(--muted); font-size:.85rem; margin-bottom:.3rem; }
+    .err { background:#fde8e7; color:var(--red); border-radius:12px; padding:.8rem 1rem; margin-bottom:1rem; }
+    .muted { color:var(--muted); }
+    .chat { margin-top:1.25rem; }
+    .msg { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:.75rem 1rem;
+           margin-bottom:.6rem; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .msg.me { background:#e8f0fe; border-color:#c6d7f5; margin-left:2rem; }
+    .note { background:#fff4d6; color:#5c4300; border-radius:8px; padding:.4rem .6rem; margin-top:.5rem; font-size:.92rem; }
+    .src a { display:inline-block; margin:.3rem .4rem 0 0; padding:.35rem .6rem; border-radius:8px; background:#eef2f7;
+             color:var(--accent); text-decoration:none; font-size:.92rem; }
+    .ask { display:flex; gap:.5rem; margin-top:.5rem; }
+    .ask textarea { flex:1; font:inherit; padding:.7rem; border:1px solid var(--line); border-radius:12px; min-height:52px; }
+    .ask button, .quick button, .draft button { font:inherit; border:0; border-radius:12px; padding:.7rem 1rem;
+             background:var(--accent); color:#fff; font-weight:600; min-height:48px; }
+    .quick { display:flex; gap:.5rem; flex-wrap:wrap; margin:.5rem 0; }
+    .quick button { background:#eef2f7; color:var(--accent); }
+    .draft { border:2px solid var(--red); border-radius:14px; padding:1rem; background:var(--card); margin-bottom:.6rem; }
+    .draft h3 { margin:0 0 .5rem; } .draft ul { list-style:disc; padding-left:1.2rem; margin:.2rem 0 .6rem; }
+    .draft button.send { width:100%; background:var(--red); font-size:1.1rem; }
+    .ok { background:#e3f4e8; color:var(--green); border-radius:12px; padding:.8rem 1rem; font-weight:700; margin-bottom:.6rem; }
+    details.trace { margin-top:1rem; font-size:.88rem; color:var(--muted); }
+    details.trace table { width:100%; border-collapse:collapse; } details.trace td { padding:.2rem .3rem; border-top:1px solid var(--line); }
   </style>
 </head>
 <body>
-  <h1>Сервис запущен</h1>
-  <p>Статус: <code id="health">…</code></p>
-  <script>
-    fetch("/health").then(r => r.json()).then(h => {
-      document.getElementById("health").textContent = h.status + " · v" + h.version;
-    }).catch(() => { document.getElementById("health").textContent = "нет ответа"; });
-  </script>
+  <header>
+    <button id="back" hidden aria-label="Назад">← Назад</button>
+    <h1 id="title">Цифровой механик</h1>
+  </header>
+  <main id="main"></main>
+  <div class="actionbar" id="actionbar" hidden>
+    <button id="diagnose" disabled>Получить результат диагностики</button>
+  </div>
+
+<script>
+"use strict";
+// Весь текст из данных выводится только через textContent: цитата ML — данные, не разметка и не инструкции.
+const $ = (id) => document.getElementById(id);
+const main = $("main");
+let vehicles = [], current = null, selected = null, conversationId = null, lastCard = null;
+
+function el(tag, attrs, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") n.className = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v);
+  }
+  for (const c of children) if (c !== null && c !== undefined) n.append(c instanceof Node ? c : String(c));
+  return n;
+}
+const fmtDate = (iso) => new Date(iso).toLocaleString("ru-RU", {day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit"});
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof body.detail === "string" ? body.detail : "Ошибка " + r.status);
+  return body;
+}
+function showError(msg) { main.prepend(el("div", {class:"err", role:"alert"}, msg)); }
+
+function screenList(filter = "") {
+  current = null; selected = null;
+  $("title").textContent = "Цифровой механик"; $("back").hidden = true; $("actionbar").hidden = true;
+  const q = filter.trim().toLowerCase();
+  const search = el("input", {type:"search", placeholder:"Госномер, гаражный номер, марка", "aria-label":"Поиск машины"});
+  search.value = filter;
+  const list = el("ul", {});
+  const render = () => {
+    const f = search.value.trim().toLowerCase();
+    list.replaceChildren(...vehicles
+      .filter(v => !f || [v.vehicle_id, v.garage_no, v.name, v.engine_model].join(" ").toLowerCase().includes(f))
+      .map(v => el("li", {}, el("button", {onclick: () => openVehicle(v.vehicle_id)},
+        el("div", {class:"plate"}, v.vehicle_id, el("span", {class:"sub"}, "  ·  " + v.garage_no)),
+        el("div", {class:"sub"}, v.name + " · " + v.engine_model)))));
+    if (!list.children.length) list.append(el("li", {class:"muted"}, "Ничего не найдено"));
+  };
+  search.addEventListener("input", render);
+  main.replaceChildren(search, list);
+  render();
+  if (q) search.focus();
+}
+
+async function openVehicle(id) {
+  try { current = await api("/api/vehicles/" + encodeURIComponent(id)); }
+  catch (e) { showError(e.message); return; }
+  selected = current.sessions[0] ? current.sessions[0].session_id : null;
+  $("title").textContent = current.vehicle_id; $("back").hidden = false; $("actionbar").hidden = false;
+  screenHistory();
+  window.scrollTo(0, 0);
+}
+
+function screenHistory() {
+  $("diagnose").disabled = !selected;
+  $("diagnose").textContent = "Получить результат диагностики";
+  const items = current.sessions.map((s, i) => el("li", {}, el("button", {
+      "aria-pressed": String(s.session_id === selected),
+      onclick: () => { selected = s.session_id; screenHistory(); }},
+    el("div", {}, el("b", {}, fmtDate(s.checked_at)), i === 0 ? el("span", {class:"sub"}, "  · последняя") : null),
+    el("div", {class:"sub"}, "Проверка " + s.session_id))));
+  main.replaceChildren(
+    el("p", {class:"sub"}, current.name + " · " + current.garage_no + " · двигатель " + current.engine_model),
+    el("h2", {}, "Проверки звука двигателя"),
+    el("ul", {}, ...items));
+}
+
+async function runDiagnose() {
+  const btn = $("diagnose");
+  btn.disabled = true; btn.textContent = "Запрашиваю результат…";
+  let card;
+  try {
+    card = await api("/api/diagnose", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({vehicle_id: current.vehicle_id, session_id: selected})});
+  } catch (e) {
+    btn.disabled = false; btn.textContent = "Получить результат диагностики"; showError(e.message); return;
+  }
+  screenCard(card);
+}
+
+function screenCard(card) {
+  conversationId = null; lastCard = card;
+  const s = current.sessions.find(x => x.session_id === selected);
+  const meta = [];
+  if (card.fault_code) meta.push("Код " + card.fault_code);
+  if (card.confidence_pct !== null) meta.push("уверенность " + card.confidence_pct + "%");
+  main.replaceChildren(
+    ...card.banners.map(b => el("div", {class:"banner", role:"status"}, "⚠ " + b)),
+    el("section", {class:"verdict " + card.color, "aria-live":"polite"},
+      el("h2", {}, card.title),
+      el("p", {}, card.action),
+      meta.length ? el("div", {class:"meta"}, meta.join(" · ")) : null),
+    el("blockquote", {}, el("cite", {}, card.ml_quote_label), card.ml_quote),
+    el("p", {class:"sub"}, current.vehicle_id + " · " + current.engine_model + " · проверка " + selected +
+      (s ? " от " + fmtDate(s.checked_at) : "")),
+    chatBlock(card));
+  const btn = $("diagnose");
+  btn.disabled = false; btn.textContent = "Выбрать другую проверку";
+  window.scrollTo(0, 0);
+}
+
+
+// ---------- чат с агентом ----------
+function chatBlock(card) {
+  const log = el("div", {id:"chatlog"});
+  const input = el("textarea", {id:"question", rows:"2", placeholder:"Вопрос по этой машине", "aria-label":"Вопрос"});
+  const quick = ["Что делать по шагам?"];
+  if (card.ticket_possible) quick.push("Оформить заявку на дефектовку");
+  if (card.status === "check_failed") quick.splice(0, 1, "Как правильно повторить запись?");
+  return el("section", {class:"chat"},
+    el("h2", {}, "Спросить механика-помощника"),
+    log,
+    el("div", {class:"quick"}, ...quick.map(q => el("button", {onclick: () => ask(q)}, q))),
+    el("form", {class:"ask", onsubmit: (e) => { e.preventDefault(); const q = input.value.trim(); if (q) { input.value = ""; ask(q); } }},
+      input, el("button", {type:"submit"}, "Спросить")));
+}
+
+function renderAnswer(r) {
+  const byRef = Object.fromEntries(r.sources.map(s => [s.ref, s]));
+  const body = el("div", {class:"msg"});
+  // [R1] → кликабельная ссылка «документ, стр. PDF»; остальной текст — только textContent
+  for (const part of r.text.split(/(\[R\d+\])/)) {
+    const m = part.match(/^\[(R\d+)\]$/);
+    if (m && byRef[m[1]]) body.append(el("a", {href: byRef[m[1]].url, target:"_blank", rel:"noopener"}, "[стр. " + byRef[m[1]].pdf_page + "]"));
+    else body.append(part);
+  }
+  for (const n of r.notes) body.append(el("div", {class:"note"}, "⚠ " + n));
+  if (r.sources.length) body.append(el("div", {class:"src"}, ...r.sources.map(s =>
+    el("a", {href: s.url, target:"_blank", rel:"noopener"}, s.manual + ", стр. PDF " + s.pdf_page))));
+  const t = r.trace;
+  body.append(el("details", {class:"trace"}, el("summary", {}, "Трасса: " + t.tokens_in + "+" + t.tokens_out + " токенов, " + t.cost_rub.toFixed(2) + " ₽"),
+    el("table", {}, ...t.steps.map(s => el("tr", {},
+      el("td", {}, s.step), el("td", {}, s.kind === "llm" ? "модель " + s.name : "→ " + s.name + (s.ok ? "" : " (отказ)")),
+      el("td", {}, s.kind === "llm" ? s.tokens_in + "+" + s.tokens_out : ""), el("td", {}, s.ms + " мс"))))));
+  $("chatlog").append(body);
+  if (r.draft) $("chatlog").append(draftCard(r.draft));
+}
+
+function draftCard(d) {
+  const b = d.body;
+  const urg = {high:"высокая", medium:"средняя", low:"низкая"}[b.urgency];
+  const box = el("div", {class:"draft"},
+    el("h3", {}, "Заявка на дефектовку — проверьте"),
+    el("div", {}, el("b", {}, b.vehicle_id + " · " + b.session_id + " · " + b.anomaly_type)),
+    el("p", {}, b.conclusion),
+    el("div", {}, el("b", {}, "Срочность: " + urg), el("span", {class:"sub"}, " — " + d.urgency_reason)),
+    el("div", {}, el("b", {}, "Работы:")), el("ul", {}, ...b.operations.map(o => el("li", {}, o))),
+    b.spare_parts.length ? el("div", {}, el("b", {}, "Запчасти: "), b.spare_parts.join(", ")) : null,
+    el("div", {}, el("b", {}, "Источники:")), el("ul", {}, ...b.references.map(r => el("li", {}, r.manual + ", стр. PDF " + r.pdf_page))));
+  const send = el("button", {class:"send", onclick: async () => {
+    send.disabled = true; send.textContent = "Отправляю…";
+    try {
+      const res = await api("/api/tickets", {method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({conversation_id: conversationId, fingerprint: d.fingerprint})});
+      box.replaceWith(el("div", {class:"ok", role:"status"}, "✓ Заявка " + res.ticket_id + " создана в ТОиР"));
+    } catch (e) { send.disabled = false; send.textContent = "Отправить"; box.append(el("div", {class:"err"}, e.message)); }
+  }}, "Отправить");
+  box.append(send);
+  return box;
+}
+
+async function ask(q) {
+  $("chatlog").append(el("div", {class:"msg me"}, q));
+  const wait = el("div", {class:"msg muted"}, "Думаю…");
+  $("chatlog").append(wait);
+  try {
+    const r = await api("/api/chat", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({vehicle_id: current.vehicle_id, session_id: selected, message: q, conversation_id: conversationId})});
+    conversationId = r.conversation_id;
+    wait.remove(); renderAnswer(r);
+  } catch (e) { wait.remove(); $("chatlog").append(el("div", {class:"err"}, e.message)); }
+}
+
+$("diagnose").addEventListener("click", () => {
+  if ($("diagnose").textContent.startsWith("Выбрать")) screenHistory(); else runDiagnose();
+});
+$("back").addEventListener("click", () => screenList());
+
+api("/api/vehicles").then(v => { vehicles = v; screenList(); })
+  .catch(e => { main.replaceChildren(); showError("Не удалось загрузить список машин: " + e.message); });
+</script>
 </body>
 </html>
