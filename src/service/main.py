@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
@@ -13,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
-from service import __version__, conv_state, kb_store
+from service import IMPORT_STARTED, INSTANCE_ID, __version__, conv_state, kb_store
 from service.agent import Agent
 from service.clients import MLClient, ServiceError, ToirClient
 from service.fault_matrix import card_explanation
@@ -34,11 +35,17 @@ from service.voice import (
     tts_cost_rub,
 )
 
+STARTUP: dict[str, float] = {}
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # Стенд: индекс руководств из бакета S3_BUCKET по IAM-токену (D-9, #6) — до первого вопроса механика.
+    STARTUP["import_s"] = round(time.monotonic() - IMPORT_STARTED, 2)
+    t = time.monotonic()
     kb_store.ensure_index_from_env()
+    STARTUP["index_fetch_s"] = round(time.monotonic() - t, 2)
+    STARTUP["ready_at"] = time.monotonic()
     yield
 
 
@@ -100,6 +107,11 @@ def health() -> dict[str, Any]:
         "llm_provider": os.environ.get("LLM_PROVIDER", "deepseek"),
         "manuals_index": manuals_index_status(),
         "voice_key_present": any(os.environ.get(k) for k in ("YANDEX_TTS_API_KEY", "YANDEX_API_KEY")),
+        "instance": {
+            "id": INSTANCE_ID,
+            "uptime_s": round(time.monotonic() - IMPORT_STARTED, 1),
+            **{k: v for k, v in STARTUP.items() if k != "ready_at"},
+        },
     }
 
 

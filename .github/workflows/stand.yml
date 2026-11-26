@@ -27,6 +27,10 @@ on:
         description: "Только прочитать журнал контейнеров стенда (Cloud Logging) за N минут, без деплоя"
         required: false
         default: ""
+      voice_live:
+        description: "Прогнать голос на стенде как страница: WAV → распознавание → чат → озвучка (≈0,5 ₽); с logs_minutes — без деплоя"
+        type: boolean
+        default: false
       c1_live:
         description: "После деплоя прогнать С1 на настоящей модели: вопрос → заявка (≈0,4 ₽)"
         type: boolean
@@ -256,6 +260,16 @@ jobs:
             echo '```'
             echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Голос на стенде как со страницы
+        if: inputs.voice_live
+        env:
+          YANDEX_TTS_API_KEY: ${{ secrets.YANDEX_TTS_API_KEY }}
+        run: |
+          set -eu
+          URL="${STAND_URL:-$(yc serverless container get --name "$CONTAINER_NAME" --format json | jq -r '.url')}"
+          pip install --quiet "httpx==0.28.1"
+          python scripts/stand_voice.py "$URL"
 
       - name: Убрать ключ
         if: always()
