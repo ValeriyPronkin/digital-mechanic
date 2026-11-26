@@ -46,6 +46,20 @@ class IndexSearcher:
 
     def __init__(self, index: Any) -> None:
         self.index = index
+        self._pages: dict[tuple[str, int], str] | None = None
+
+    def page_text(self, manual_id: str, pdf_page: int) -> str | None:
+        """Текст всей страницы PDF из индекса (фрагменты по порядку, повторы строк на стыках убраны) — для окна
+        вокруг попадания: цифра часто стоит в соседнем фрагменте той же страницы (#28)."""
+        if self._pages is None:
+            pages: dict[tuple[str, int], list[str]] = {}
+            for f in self.index.fragments:
+                lines = pages.setdefault((f.doc_id, int(f.page)), [])
+                for ln in f.text.splitlines():
+                    if ln.strip() and ln not in lines[-3:]:
+                        lines.append(ln)
+            self._pages = {k: "\n".join(v) for k, v in pages.items()}
+        return self._pages.get((manual_id, int(pdf_page)))
 
     def search(self, query: str, engine: str, k: int = 5) -> list[ManualHit]:
         hits = self.index.search(query, engine, k=k)

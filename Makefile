@@ -1,4 +1,4 @@
-.PHONY: setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost index kb-publish kb-fetch
+.PHONY: eval-open setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost index kb-publish kb-fetch
 
 PORT ?= 8000
 
@@ -38,6 +38,10 @@ kb-publish: install
 ## Проверить выкладку: скачать index/LATEST из бакета в каталог KB_OUT (по умолчанию .state/kb-check)
 kb-fetch: install
 	uv run $(if $(wildcard .env),--env-file .env,) python -m service.kb_store fetch --out $(or $(KB_OUT),.state/kb-check)
+
+## Открытая половина вопросов приёмщика на настоящей модели (issue #28): reports/eval-open.md (вопросы — вне git)
+eval-open: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/eval_open.py --label $(or $(LABEL),$(shell date +%Y%m%d-%H%M))
 
 ## Всё, что проверяет CI, кроме смоука в Docker. Зелёный = код возврата 0.
 check: lint types test stubs third-party secrets
