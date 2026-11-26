@@ -27,7 +27,7 @@ packages = ["src/service"]
 line-length = 120
 target-version = "py311"
 src = ["src", "scripts", "tests"]
-extend-exclude = ["kb"]  # локальная папка людей (не в git)
+extend-exclude = ["kb", "vendor"]  # kb — локальная папка людей; vendor — заглушки заказчика как есть
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "RUF"]

@@ -21,6 +21,8 @@
 | Компонент | Лицензия / условия | Зачем |
 |---|---|---|
 | uv | MIT / Apache-2.0 | менеджер зависимостей |
+| Заглушки Mock ML и Mock ТОиР, `data/vehicles.json`, `data/fault_types.json` (`vendor/neurodvs_mock/`, `data/`) | материалы ООО «НейроДВС» для команд хакатона, синтетические | контракт API и тестовые данные по ТЗ |
+| Руководства по эксплуатации и ремонту ЯМЗ, ЗМЗ (6 PDF) | материалы заказчика; в репозиторий не входят | база знаний агента |
 | gitleaks | MIT | поиск секретов в pre-commit и CI |
 | Docker-образ `python:3.12-slim` | PSF и лицензии пакетов Debian | образ для запуска |
 | GitHub Actions `actions/checkout`, `actions/setup-python` | MIT | CI |
