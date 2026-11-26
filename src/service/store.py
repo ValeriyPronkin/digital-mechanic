@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS card_views (
     id INTEGER PRIMARY KEY, vehicle_id TEXT, session_id TEXT, status TEXT, fault_code TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS tickets (
     id INTEGER PRIMARY KEY, ticket_id TEXT, vehicle_id TEXT, session_id TEXT, anomaly_type TEXT,
-    urgency TEXT, body TEXT, ts REAL);
+    urgency TEXT, body TEXT, ts REAL, fingerprint TEXT);
 """
 
 
@@ -56,6 +56,9 @@ class Store:
         self._lock = threading.Lock()
         with self._lock:
             self._db.executescript(SCHEMA)
+            cols = {r[1] for r in self._db.execute("PRAGMA table_info(tickets)")}
+            if "fingerprint" not in cols:  # база от S2
+                self._db.execute("ALTER TABLE tickets ADD COLUMN fingerprint TEXT")
 
     def _exec(self, sql: str, args: tuple[Any, ...] = ()) -> None:
         with self._lock:
@@ -98,10 +101,14 @@ class Store:
             (vehicle_id, session_id, status, fault_code, time.time()),
         )
 
-    def remember_ticket(self, ticket_id: str, body: dict[str, Any]) -> None:
+    def ticket_for(self, fingerprint: str) -> str | None:
+        rows = self._rows("SELECT ticket_id FROM tickets WHERE fingerprint=? LIMIT 1", (fingerprint,))
+        return str(rows[0]["ticket_id"]) if rows else None
+
+    def remember_ticket(self, ticket_id: str, body: dict[str, Any], fingerprint: str = "") -> None:
         self._exec(
-            "INSERT INTO tickets (ticket_id, vehicle_id, session_id, anomaly_type, urgency, body, ts)"
-            " VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO tickets (ticket_id, vehicle_id, session_id, anomaly_type, urgency, body, ts, fingerprint)"
+            " VALUES (?,?,?,?,?,?,?,?)",
             (
                 ticket_id,
                 body["vehicle_id"],
@@ -110,6 +117,7 @@ class Store:
                 body["urgency"],
                 json.dumps(body, ensure_ascii=False),
                 time.time(),
+                fingerprint,
             ),
         )
 

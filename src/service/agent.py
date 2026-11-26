@@ -584,7 +584,11 @@ class Agent:
             raise TicketRefusedError(refusal)
         if not draft.body.references or not draft.body.operations:
             raise TicketRefusedError("В заявке нет работ или ссылок на руководство.")
+        already = self.store.ticket_for(draft.fingerprint)
+        if already:
+            conv.draft = None
+            raise TicketRefusedError(f"Эта заявка уже отправлена: {already}.")
         resp = self.toir.create_ticket(draft.body)
-        self.store.remember_ticket(resp.ticket_id, draft.body.model_dump())
+        self.store.remember_ticket(resp.ticket_id, draft.body.model_dump(), draft.fingerprint)
         conv.draft = None
         return resp

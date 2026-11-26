@@ -30,7 +30,9 @@ services:
     build:
       context: .
       dockerfile: docker/mock.Dockerfile
-    command: ["uvicorn", "mock_ml.app:app", "--host", "0.0.0.0", "--port", "8001"]
+    environment:
+      MOCK_APP: mock_ml.app:app
+      PORT: "8001"
     ports:
       - "8001:8001"
     healthcheck: &mock-health
@@ -44,7 +46,9 @@ services:
     build:
       context: .
       dockerfile: docker/mock.Dockerfile
-    command: ["uvicorn", "mock_toir.app:app", "--host", "0.0.0.0", "--port", "8002"]
+    environment:
+      MOCK_APP: mock_toir.app:app
+      PORT: "8002"
     ports:
       - "8002:8002"
     healthcheck:

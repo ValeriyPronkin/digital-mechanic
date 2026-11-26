@@ -7,16 +7,17 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
-from service import __version__
-from service.agent import Agent, Conversation
+from service import __version__, conv_state
+from service.agent import Agent
 from service.clients import MLClient, ServiceError, ToirClient
 from service.fleet import fleet
 from service.llm import provider_from_env
 from service.manual_search import default_searcher, manual_pdf
+from service.rate_limit import RateLimiter, client_key
 from service.store import Store
 from service.verdict_policy import VerdictCard, build_card
 
@@ -47,8 +48,19 @@ def agent() -> Agent:
     )
 
 
-CONVERSATIONS: dict[str, Conversation] = {}
-MAX_CONVERSATIONS = 500
+@lru_cache(maxsize=1)
+def limiter() -> RateLimiter:
+    return RateLimiter.from_env()
+
+
+def _rate_limit(request: Request) -> None:
+    wait = limiter().check(client_key(request))
+    if wait > 0:
+        raise HTTPException(
+            429,
+            f"Слишком много вопросов подряд. Подождите {int(wait) + 1} с и спросите снова.",
+            headers={"Retry-After": str(int(wait) + 1)},
+        )
 
 
 @app.get("/health")
@@ -131,42 +143,40 @@ class ChatIn(BaseModel):
     vehicle_id: str = Field(min_length=1)
     session_id: str = Field(min_length=1)
     message: str = Field(min_length=1, max_length=2000)
-    conversation_id: str | None = None
+    state: str | None = Field(default=None, max_length=400_000)  # подписанное состояние разговора
 
 
 @app.post("/api/chat")
-def chat(req: ChatIn) -> dict[str, Any]:
-    """Вопрос механика агенту. Разговор привязан к машине и проверке: сменились — новый разговор."""
+def chat(req: ChatIn, request: Request) -> dict[str, Any]:
+    """Вопрос механика агенту. Разговор привязан к машине и проверке: сменились — новый разговор.
+    Состояние разговора хранит клиент (подписанная строка), поэтому любой экземпляр стенда продолжит его."""
+    _rate_limit(request)
     try:
         ag = agent()
-        conv = CONVERSATIONS.get(req.conversation_id or "")
+        conv = conv_state.load(req.state, fleet()) if req.state else None
         if conv is None or conv.vehicle.vehicle_id != req.vehicle_id or conv.session_id != req.session_id:
             conv = ag.start(req.vehicle_id, req.session_id)
-            if len(CONVERSATIONS) >= MAX_CONVERSATIONS:
-                CONVERSATIONS.pop(next(iter(CONVERSATIONS)))
-            CONVERSATIONS[conv.id] = conv
         reply = ag.ask(conv, req.message)
     except ServiceError as exc:
         raise HTTPException(exc.http_status, exc.message) from exc
-    return {"conversation_id": conv.id, **reply.__dict__}
+    return {"conversation_id": conv.id, "state": conv_state.dump(conv), **reply.__dict__}
 
 
 class TicketIn(BaseModel):
-    conversation_id: str
+    state: str = Field(min_length=1, max_length=400_000)
     fingerprint: str = Field(min_length=1)
 
 
 @app.post("/api/tickets", status_code=201)
-def send_ticket(req: TicketIn) -> dict[str, Any]:
-    """Отправка в ТОиР показанного черновика: только если отпечаток совпал с последним черновиком."""
-    conv = CONVERSATIONS.get(req.conversation_id)
-    if conv is None:
-        raise HTTPException(404, "Разговор не найден — откройте проверку заново.")
+def send_ticket(req: TicketIn, request: Request) -> dict[str, Any]:
+    """Отправка в ТОиР показанного черновика: только если отпечаток совпал с последним черновиком разговора."""
+    _rate_limit(request)
     try:
+        conv = conv_state.load(req.state, fleet())
         resp = agent().confirm_ticket(conv, req.fingerprint)
     except ServiceError as exc:
         raise HTTPException(exc.http_status, exc.message) from exc
-    return resp.model_dump()
+    return {**resp.model_dump(), "state": conv_state.dump(conv)}
 
 
 @app.get("/manuals/{manual_id}")
