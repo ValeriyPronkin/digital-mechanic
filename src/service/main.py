@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
-from service import IMPORT_STARTED, INSTANCE_ID, __version__, conv_state, kb_store, passport, stand_log
+from service import IMPORT_STARTED, INSTANCE_ID, __version__, api_v2, conv_state, kb_store, passport, stand_log
 from service import parts_supplier as parts_supplier_mod
 from service.agent import Agent, Level
 from service.clients import MLClient, ServiceError, ToirClient
@@ -466,3 +466,9 @@ def manual(manual_id: str) -> FileResponse:
     if path is None:
         raise HTTPException(404, "Файл руководства недоступен на этом сервере.")
     return FileResponse(path, media_type="application/pdf")
+
+
+# Интерфейс v2 (issue #52): его API — /api/v2 поверх нашей логики (слой совместимости `api_v2`).
+app.include_router(
+    api_v2.build_router(lambda: agent(), lambda: store(), lambda: fleet(), _rate_limit, api_v2.ThreadStore.from_env())
+)
