@@ -98,8 +98,7 @@ def test_several_queries_merge_without_repeats(ml: MLClient, toir: ToirClient) -
 
     ag, _ = make_agent([say("ок")], ml, toir, Two())
     merged = ag._search_many(["а", "б"], "ЗМЗ-5234.10", 4)
-    # сумма RRF: стр. 2 нашли оба запроса — она первая; дальше лучшие каждого; без повтора; равенство — по странице
-    assert [h.pdf_page for h in merged] == [2, 1, 4, 3]
+    assert [h.pdf_page for h in merged] == [1, 2, 4, 3]  # по очереди лучшие из каждого, без повтора стр. 2
 
 
 def test_deepseek_without_tools_sends_no_tools_key() -> None:

@@ -366,7 +366,6 @@ def _quote_label(q: Any) -> str:
     return f"{short + ' — ' if short else ''}{doc.designation if doc else q.doc}, стр. {q.page}"
 
 
-MERGE_RRF_K = 60  # слияние выдачи нескольких запросов (как RRF внутри поиска)
 OPINION_MARK = "(мнение помощника, не из руководства)"
 # Утверждение о причине или диагнозе (#28, проверка с телефона): без ссылки [R…] — рассуждение модели
 _DIAG = re.compile(
@@ -1004,9 +1003,7 @@ class Agent:
                 if self.plan_search
                 else {"lang": "ru", "question_ru": mask_pii(question), "queries": [mask_pii(question)]}
             )
-            # русский вопрос — первым запросом сам вопрос механика (без ПДн), а не пересказ моделью: он не меняется
-            first = mask_pii(question) if plan["lang"] in ("ru", "rus") else plan["question_ru"]
-            query = {"query": first, "more_queries": plan["queries"], "k": PREFETCH_K}
+            query = {"query": plan["question_ru"], "more_queries": plan["queries"], "k": PREFETCH_K}
             if plan["lang"] not in ("ru", "rus"):
                 query["answer_language"] = plan["lang"]
             calls.append(ToolCall(f"pre-search-{len(conv.messages)}", "search_manual", query))
@@ -1263,20 +1260,16 @@ class Agent:
         return {"engine": conv.vehicle.engine_model, "found": out, **hint}
 
     def _search_many(self, queries: list[str], engine: str, k: int) -> list[Any]:
-        """Несколько запросов → одна выдача: сумма RRF по страницам (глубина 2k), без повторов страниц.
-        Страница, которую находят разные формулировки, стабильно наверху: план поиска модели от прогона к прогону
-        формулирует запросы по-разному, а очерёдность «лучший из каждого» меняла выдачу (штурман 26.11, Q16)."""
-        score: dict[tuple[str, int], float] = {}
-        best: dict[tuple[str, int], Any] = {}
-        for q in dict.fromkeys(queries):
-            if not q:
-                continue
-            for rank, h in enumerate(self.searcher.search(q, engine, k=2 * k)):
-                key = (h.manual_id, h.pdf_page)
-                score[key] = score.get(key, 0.0) + 1.0 / (MERGE_RRF_K + rank + 1)
-                best.setdefault(key, h)
-        order = sorted(score, key=lambda key: (-score[key], key))  # равенство — по документу и странице
-        return [best[key] for key in order[:k]]
+        """Несколько запросов → одна выдача: по очереди лучшие из каждого, без повторов страниц."""
+        lists = [self.searcher.search(q, engine, k=k) for q in dict.fromkeys(queries) if q]
+        merged: list[Any] = []
+        seen: set[tuple[str, int]] = set()
+        for rank in range(k):
+            for hits in lists:
+                if rank < len(hits) and (hits[rank].manual_id, hits[rank].pdf_page) not in seen:
+                    seen.add((hits[rank].manual_id, hits[rank].pdf_page))
+                    merged.append(hits[rank])
+        return merged[:k]
 
     def _search_plan(
         self, conv: Conversation, question: str, request_id: str, steps: list[dict[str, Any]]

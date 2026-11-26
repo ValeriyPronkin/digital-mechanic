@@ -1,4 +1,4 @@
-.PHONY: logs spend-probe eval-open setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch
+.PHONY: logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch
 
 PORT ?= 8000
 
@@ -46,6 +46,11 @@ cost-xlsx: install
 ## Открытая половина вопросов приёмщика на настоящей модели (issue #28): reports/eval-open.md (вопросы — вне git)
 eval-open: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/eval_open.py --label $(or $(LABEL),$(shell date +%Y%m%d-%H%M))
+
+## Стабильность (штурман 26.11): RUNS прогонов eval-open с префиксом PREFIX и сводка по ним
+eval-stability: install
+	for i in $(shell seq 1 $(or $(RUNS),3)); do uv run $(if $(wildcard .env),--env-file .env,) python scripts/eval_open.py --label $(PREFIX)-$$i || exit 1; done
+	uv run python scripts/eval_stability.py $(PREFIX)
 
 ## Проверка условной записи на настоящем бакете (issue #11): объект spend/probe-*, после — удаляется. Запускает человек
 spend-probe: install
