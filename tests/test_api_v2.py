@@ -78,6 +78,7 @@ def test_c1_through_v2(v2: tuple[TestClient, Any, Store]) -> None:
     restored = c.get(f"/api/v2/threads/current?vehicle_id={vid}").json()
     assert restored["session_id"] == sid and len(restored["transcript"]) == 2
     assert restored["transcript"][1]["passport"]["total"]["model_rub"] >= 0  # паспорт — и после перезагрузки
+    assert restored["transcript"][1]["speech"]["url"] == "/api/voice/speak"  # «Прослушать» — и после перезагрузки
 
     r2 = c.post("/api/v2/chat", json={"vehicle_id": vid, "session_id": sid, "message": "Создать заявку на дефектовку"})
     pending = next(e for e in events(r2) if e["type"] == "ticket_pending")

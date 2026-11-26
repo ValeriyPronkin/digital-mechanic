@@ -10,6 +10,7 @@ import {
   type ToolTrace,
   type UsageEvent,
   type Passport,
+  type SpeechInfo,
   type Verification,
 } from './api'
 import { copy } from './copy'
@@ -23,6 +24,7 @@ export interface AssistantTurn {
   usage: UsageEvent[]
   verification?: Verification
   passport?: Passport // our request passport (#31): steps, context, tokens, ₽
+  speech?: SpeechInfo // the short spoken version (#14) for «Прослушать»
   progress?: string // the line shown while a tool runs
   error?: string
   reason?: string
@@ -77,6 +79,10 @@ function apply(turn: AssistantTurn, e: ChatEvent): AssistantTurn {
     case 'passport': {
       const { type: _, ...passport } = e
       return { ...turn, passport }
+    }
+    case 'speech': {
+      const { type: _, ...speech } = e
+      return { ...turn, speech }
     }
     case 'error':
       return { ...turn, error: e.message, progress: undefined }
@@ -148,7 +154,13 @@ export function useThread(vehicleId: string, attempt = 0) {
       abort.current = new AbortController()
       try {
         await streamChat(
-          { vehicle_id: vehicleId, message, session_id: options.sessionId, new_thread: options.newThread, level: getLevel() },
+          {
+            vehicle_id: vehicleId,
+            message,
+            session_id: options.sessionId,
+            new_thread: options.newThread,
+            level: getLevel(),
+          },
           onEvent,
           abort.current.signal,
         )

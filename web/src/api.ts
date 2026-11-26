@@ -269,6 +269,14 @@ export interface Passport {
   }
 }
 
+/** The short spoken version of an answer (our #14): built by the code from the checked answer, every number
+ *  from the page it cites; synthesized only with the server's signature (voice zahar, phrases cached). */
+export interface SpeechInfo {
+  text: string
+  sig: string
+  url: string
+}
+
 export type TranscriptEntry =
   | { role: 'user'; text: string }
   | {
@@ -279,6 +287,7 @@ export type TranscriptEntry =
       usage: UsageEvent[]
       verification?: Verification
       passport?: Passport
+      speech?: SpeechInfo
     }
   | { role: 'ticket'; ticket: TicketView }
 
@@ -320,6 +329,7 @@ export type ChatEvent =
   | ({ type: 'ticket_pending' } & TicketPending)
   | ({ type: 'usage' } & UsageEvent)
   | ({ type: 'passport' } & Passport)
+  | ({ type: 'speech' } & SpeechInfo)
   | { type: 'error'; message: string }
   | { type: 'done'; reason: string }
 
