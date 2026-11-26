@@ -23,6 +23,7 @@ import { Answer } from './Answer'
 import { ContradictionCard } from './ContradictionCard'
 import { GuideCard } from './GuideCard'
 import { PageSheet } from './PageSheet'
+import { SpeakButton } from './SpeakButton'
 import { getLevel, setLevel, type Level } from '../lib/level'
 import { ScoreChart } from './ScoreChart'
 import { TicketCard } from './TicketCard'
@@ -116,6 +117,8 @@ function AssistantBlock({
           onOpen={onOpenSource}
         />
       )}
+      {/* the short spoken version: value, document, page — for busy hands (#14) */}
+      {!turn.live && turn.speech && <SpeakButton speech={turn.speech} />}
       {/* manuals disagree: under the direct answer, as the code put it there (D-20) */}
       {turn.blocks
         .filter((b) => b.kind === 'contradiction')

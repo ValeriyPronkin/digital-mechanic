@@ -652,6 +652,11 @@ def build_router(
                     "usage": usage,
                     "verification": {k: ver[k] for k in ver if k not in ("type", "text")},
                     "passport": pp,
+                    "speech": {
+                        "text": spoken.text,
+                        "sig": conv_state.sign_text(spoken.text),
+                        "url": "/api/voice/speak",
+                    },
                 },
             ]
             thread["pending"] = {k: pending[k] for k in pending if k != "type"} if pending else None
