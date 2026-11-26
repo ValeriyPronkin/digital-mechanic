@@ -7,7 +7,9 @@
 Неверная отметка хуже никакой. Строка отмечается, только если на странице ровно одна такая:
 - строка совпадает с цитатой (без пробелов, после нормализации); иначе
 - строка содержит цитату целиком (таблица в тексте страницы порвана иначе, чем в печати); иначе
-- строка — бо́льшая часть цитаты и в ней все числа цитаты (к строке в тексте приклеилась соседняя ячейка).
+- строка — бо́льшая часть цитаты и в ней все числа цитаты (к строке в тексте приклеилась соседняя ячейка); иначе
+- цитата — предложение, перенесённое на 2–4 строки печати: кратчайший ряд соседних строк, содержащий её целиком;
+  рамка обводит этот ряд.
 Повёрнутые страницы не размечаются.
 """
 
@@ -31,10 +33,12 @@ _SPACE = re.compile(r"\s+")
 _NUM = re.compile(r"\d+(?:[.,]\d+)?")
 _MIN_PART = 8  # цитата или строка короче — слишком мало, чтобы отличить её от соседних
 _MOST = 0.6  # доля цитаты, которую должна покрыть строка без её хвоста
+_MAX_RUN = 4  # предложение длиннее четырёх строк печати не обводим: рамка на полстраницы ничего не показывает
 
 
 def key(text: str) -> str:
-    return _SPACE.sub("", text.translate(_DASHES).lower())
+    """Без пробелов и дефисов: перенос «креп-/ления» и тире списка не мешают сравнению (числа сверяются отдельно)."""
+    return _SPACE.sub("", text.translate(_DASHES).lower()).replace("-", "")
 
 
 def numbers(text: str) -> set[str]:
@@ -125,7 +129,26 @@ def find_mark(lines: list[dict[str, Any]], quote: str) -> Box | None:
             return (b[0], b[1], b[2], b[3])
         if len(found) > 1:
             return None  # несколько одинаковых строк — не угадываем
-    return None
+    return _run_mark([(k, ln) for k, ln in keyed if k], q) if len(q) >= 2 * _MIN_PART else None
+
+
+def _run_mark(keyed: list[tuple[str, dict[str, Any]]], q: str) -> Box | None:
+    """Кратчайший ряд из 2–4 соседних строк, в котором цитата целиком; только если такой ряд на странице один."""
+    runs = []
+    for i in range(len(keyed)):
+        for n in range(2, _MAX_RUN + 1):
+            part = keyed[i : i + n]
+            if len(part) < n:
+                break
+            if q in "".join(k for k, _ in part):
+                # без первой или последней строки цитата уже не помещается — ряд кратчайший
+                if q not in "".join(k for k, _ in part[1:]) and q not in "".join(k for k, _ in part[:-1]):
+                    runs.append(part)
+                break
+    if len(runs) != 1:
+        return None
+    boxes = [ln["b"] for _, ln in runs[0]]
+    return (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
 
 
 class PageMarks:
