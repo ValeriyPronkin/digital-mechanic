@@ -18,14 +18,19 @@ class Compat:
     ok: bool
     why: str  # пусто, если совместимо
     source: str = ""  # «документ, стр. N» — основание вывода «узла нет»
+    doc: str = ""  # основание: документ, страница PDF и цитата (факт о конструкции, issue #40 п. 3)
+    page: int = 0
+    quote: str = ""
 
 
 def check(code: str, engine: str) -> Compat:
     cell = cell_for(code, engine)
     if cell is None or cell.applicable != "false":
         return Compat(True, "")
-    src = f"{cell.basis.doc}, стр. {cell.basis.page}" if cell.basis else ""
-    return Compat(False, cell.why, src)
+    if cell.basis is None:
+        return Compat(False, cell.why)
+    b = cell.basis
+    return Compat(False, cell.why, f"{b.doc}, стр. {b.page}", b.doc, b.page, b.quote)
 
 
 def is_compatible(code: str, engine: str) -> bool:
