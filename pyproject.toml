@@ -5,7 +5,10 @@ description = "Каркас сервиса хакатона: /health, стран
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
+    "httpx>=0.28.1",
+    "numpy>=2.4.6",
     "pdfplumber>=0.11.11",
+    "pillow>=13.0.0",
     "pymorphy3>=2.0.6",
     "pypdfium2>=5.15.2",
     "uvicorn>=0.30",
@@ -43,6 +46,10 @@ ignore = ["RUF001", "RUF002", "RUF003"]  # кириллица в строках 
 python_version = "3.11"
 strict = true
 files = ["src", "scripts"]
+
+[[tool.mypy.overrides]]
+module = ["pdfplumber", "pdfplumber.*", "pypdfium2", "pypdfium2.*", "pymorphy3", "pymorphy3.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

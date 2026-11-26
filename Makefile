@@ -1,4 +1,4 @@
-.PHONY: setup install run check lint types test stubs third-party secrets hooks smoke fmt
+.PHONY: setup install run check lint types test stubs third-party secrets hooks smoke fmt index
 
 PORT ?= 8000
 
@@ -15,6 +15,10 @@ hooks:
 ## Одна команда для запуска: зависимости и сервис на http://localhost:$(PORT)
 run: install
 	uv run $(if $(wildcard .env),--env-file .env,) uvicorn service.main:app --host 0.0.0.0 --port $(PORT)
+
+## Индекс руководств одной командой: PDF из MANUALS_DIR → INDEX_DIR (по умолчанию .index/). Повторно — из кэша
+index: install
+	uv run $(if $(wildcard .env),--env-file .env,) python -m service.manuals build
 
 ## Всё, что проверяет CI, кроме смоука в Docker. Зелёный = код возврата 0.
 check: lint types test stubs third-party secrets
