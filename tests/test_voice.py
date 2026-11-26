@@ -230,3 +230,17 @@ def test_chat_returns_signed_speech(
     sp = r["speech"]
     assert "0,1 МПа" in sp["text"] and "страница 42" in sp["text"]
     assert conv_state.verify_text(sp["text"], sp["sig"])
+
+
+def test_voice_prices_from_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    from service.store import price_table
+    from service.voice import TTS_RUB_PER_1M_UPPER, stt_cost_rub, tts_cost_rub
+
+    monkeypatch.delenv("STT_PRICE_RUB_PER_15S", raising=False)
+    monkeypatch.delenv("TTS_PRICE_RUB_PER_1M_CHARS", raising=False)
+    stt = price_table()["other"]["stt_sync"]["value"]
+    assert stt_cost_rub(3) == pytest.approx(stt) and stt_cost_rub(16) == pytest.approx(2 * stt)
+    tts = price_table()["other"]["tts"]["value"]
+    assert tts_cost_rub(1000) == pytest.approx((tts if tts is not None else TTS_RUB_PER_1M_UPPER) / 1000)
+    monkeypatch.setenv("TTS_PRICE_RUB_PER_1M_CHARS", "200")
+    assert tts_cost_rub(1000) == pytest.approx(0.2)

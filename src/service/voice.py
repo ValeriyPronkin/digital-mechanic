@@ -78,7 +78,7 @@ class SpeechKit:
     def __init__(self, key: str, http: httpx.Client | None = None) -> None:
         self.key = key
         self.http = http or httpx.Client(timeout=30)
-        self.voice = os.environ.get("TTS_VOICE", "filipp")  # D-14: ждёт выбора человека (#18)
+        self.voice = os.environ.get("TTS_VOICE", "filipp")  # D-15: ждёт выбора человека (#18)
         self.speed = os.environ.get("TTS_SPEED", "0.95")
 
     @classmethod
@@ -189,15 +189,26 @@ def speech_for(answer: str, sources: dict[str, Source]) -> Speech:
 # ---------- расход ----------
 
 
+# Тариф синтеза в data/prices.json пока не найден (вопрос #19): источники дают 183,05 и 1 342 ₽ за 1 млн символов.
+# До ответа журнал считает по верхней оценке — расход не занижается.
+TTS_RUB_PER_1M_UPPER = 1342.0
+
+
 def stt_cost_rub(seconds: float) -> float:
-    """Синхронное распознавание тарифицируется блоками по 15 с (цена — допущение, `STT_PRICE_RUB_PER_15S`)."""
+    """Синхронное распознавание — блоками по 15 с; цена — `data/prices.json` (`STT_PRICE_RUB_PER_15S` перекрывает)."""
+    from service.store import price_table
+
     blocks = max(1, int(np.ceil(seconds / 15)))
-    return blocks * float(os.environ.get("STT_PRICE_RUB_PER_15S", "0.16"))
+    price = os.environ.get("STT_PRICE_RUB_PER_15S") or price_table()["other"]["stt_sync"]["value"] or 0.0
+    return blocks * float(price)
 
 
 def tts_cost_rub(chars: int) -> float:
-    """Синтез — за символы (цена — допущение, `TTS_PRICE_RUB_PER_1K_CHARS`)."""
-    return chars / 1000 * float(os.environ.get("TTS_PRICE_RUB_PER_1K_CHARS", "1.32"))
+    """Синтез — за символы; цена — `data/prices.json` (`TTS_PRICE_RUB_PER_1M_CHARS` перекрывает) или верхняя оценка."""
+    from service.store import price_table
+
+    price = os.environ.get("TTS_PRICE_RUB_PER_1M_CHARS") or price_table()["other"]["tts"]["value"]
+    return chars * float(price if price is not None else TTS_RUB_PER_1M_UPPER) / 1_000_000
 
 
 def timed(fn: Any, *args: Any) -> tuple[Any, int]:

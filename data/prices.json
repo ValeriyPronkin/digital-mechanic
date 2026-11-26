@@ -1,0 +1,29 @@
+{
+ "_comment": "Тарифы для расчёта себестоимости (issue #16). Каждая цена — с единицей, источником и уверенностью. Перед сдачей сверить с официальными страницами (вопрос — issue #8). LLM_PRICE_IN_RUB / LLM_PRICE_OUT_RUB / LLM_PRICE_CACHED_RUB в окружении перекрывают цены модели.",
+ "checked": "2026-11-26",
+ "usd_rub": {"value": 100.0, "source": "допущение агента для пересчёта долларовых тарифов; задать по курсу на дату сдачи", "confidence": "допущение"},
+ "llm": {
+  "deepseek": {
+   "unit": "₽ за 1 млн токенов",
+   "usd": {"in": 0.30, "in_cached": 0.006, "out": 1.20},
+   "note": "deepseek-flash, пиковый тариф (вне пика — вдвое дешевле); считаем по пиковому — оценка сверху",
+   "source": "https://costgoat.com/pricing/deepseek-api, https://www.aipricing.guru/deepseek-pricing/ (вторичные; официальная страница в поиске не найдена)",
+   "confidence": "вторичный источник"
+  },
+  "gigachat": {
+   "unit": "₽ за 1 млн токенов",
+   "rub": {"in": 1500.0, "in_cached": 1500.0, "out": 1500.0},
+   "note": "значение из S2 (store.DEFAULT_PRICES), источник не записан",
+   "source": "не указан",
+   "confidence": "не проверено"
+  }
+ },
+ "other": {
+  "embedding": {"value": 0.0101, "unit": "₽ за 1000 токенов", "source": "https://aistudio.yandex.ru/ru/docs/ai-studio/pricing", "confidence": "официальная страница, по выдаче поиска; единицу сверить"},
+  "stt_sync": {"value": 0.1626, "unit": "₽ за 15 с распознавания (синхронно/потоково)", "source": "https://pawetta.com/servisy/speechkit/ (вторичный, 27.08.2026)", "confidence": "вторичный источник; источники расходятся (0,1515–0,1626)"},
+  "tts": {"value": null, "unit": "₽ за 1 млн символов", "source": "вторичные источники расходятся: 183,05 и 1 342 ₽", "confidence": "не найдено — уточнить"},
+  "container_vcpu_hour": {"value": null, "unit": "₽ за vCPU×час", "source": "https://github.com/yandex-cloud/docs/blob/master/ru/serverless-containers/pricing.md", "confidence": "не найдено — уточнить; есть бесплатный уровень 5 vCPU×ч и 10 ГБ×ч RAM в месяц"},
+  "container_ram_gb_hour": {"value": null, "unit": "₽ за ГБ×час", "source": "там же", "confidence": "не найдено — уточнить"},
+  "object_storage_gb_month": {"value": null, "unit": "₽ за ГБ в месяц", "source": "https://yandex.cloud/en/prices", "confidence": "не найдено — уточнить"}
+ }
+}

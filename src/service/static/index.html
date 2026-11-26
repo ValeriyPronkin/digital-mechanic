@@ -173,6 +173,19 @@ async function runDiagnose() {
   screenCard(card);
 }
 
+// Пояснение по руководству из матрицы «код × двигатель» — без ИИ, 0 токенов (issue #16)
+function manualBlock(m) {
+  if (!m) return null;
+  if (m.status !== "confirmed")
+    return el("section", {class:"manual"}, el("h3", {}, "По руководству"), el("p", {}, m.note));
+  const link = r => el("a", {href: r.url, target:"_blank", rel:"noopener"}, " — стр. PDF " + r.pdf_page);
+  return el("section", {class:"manual"},
+    el("h3", {}, "Что делать — по руководству"),
+    el("ol", {}, ...m.steps.map(r => el("li", {}, r.text, link(r)))),
+    ...m.safety.map(r => el("div", {class:"note"}, "⚠ " + r.text, link(r))),
+    m.note ? el("p", {class:"sub"}, m.note) : null);
+}
+
 function screenCard(card) {
   conversationId = null; convState = null; lastCard = card;
   const s = current.sessions.find(x => x.session_id === selected);
@@ -186,6 +199,7 @@ function screenCard(card) {
       el("p", {}, card.action),
       meta.length ? el("div", {class:"meta"}, meta.join(" · ")) : null),
     el("blockquote", {}, el("cite", {}, card.ml_quote_label), card.ml_quote),
+    manualBlock(card.manual),
     el("p", {class:"sub"}, current.vehicle_id + " · " + current.engine_model + " · проверка " + selected +
       (s ? " от " + fmtDate(s.checked_at) : "")),
     chatBlock(card));
@@ -224,10 +238,14 @@ function renderAnswer(r) {
   if (r.sources.length) body.append(el("div", {class:"src"}, ...r.sources.map(s =>
     el("a", {href: s.url, target:"_blank", rel:"noopener"}, s.manual + ", стр. PDF " + s.pdf_page))));
   const t = r.trace;
-  body.append(el("details", {class:"trace"}, el("summary", {}, "Трасса: " + t.tokens_in + "+" + t.tokens_out + " токенов, " + t.cost_rub.toFixed(2) + " ₽"),
+  const rub = x => x < 0.01 ? x.toFixed(4) : x.toFixed(2);
+  const cached = t.tokens_cached ? ", из кэша " + t.tokens_cached : "";
+  body.append(el("details", {class:"trace"}, el("summary", {}, "Трасса: " + t.tokens_in + "+" + t.tokens_out + " токенов" + cached + ", " + rub(t.cost_rub) + " ₽"),
     el("table", {}, ...t.steps.map(s => el("tr", {},
       el("td", {}, s.step), el("td", {}, s.kind === "llm" ? "модель " + s.name : "→ " + s.name + (s.ok ? "" : " (отказ)")),
-      el("td", {}, s.kind === "llm" ? s.tokens_in + "+" + s.tokens_out : ""), el("td", {}, s.ms + " мс"))))));
+      el("td", {}, s.kind === "llm" ? s.tokens_in + "+" + s.tokens_out + (s.tokens_cached ? " (кэш " + s.tokens_cached + ")" : "") : ""),
+      el("td", {}, s.kind === "llm" ? rub(s.cost_rub) + " ₽" : "0 ₽"),
+      el("td", {}, s.ms + " мс"))))));
   $("chatlog").append(body);
   if (r.draft) $("chatlog").append(draftCard(r.draft));
 }

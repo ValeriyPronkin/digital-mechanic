@@ -1,7 +1,8 @@
 """SQLite: журнал вызовов модели и инструментов (стоимость запроса) и память по ТС (B1).
 
-Файл — `STATE_DB` (по умолчанию `.state/agent.db`, в git не входит). Цены — из окружения (₽ за 1 млн токенов),
-по умолчанию — значения из `DEFAULT_PRICES` (проверить по действующему тарифу провайдера).
+Файл — `STATE_DB` (по умолчанию `.state/agent.db`, в git не входит). Цены — `data/prices.json` (с источниками,
+issue #16); окружение `LLM_PRICE_IN_RUB` / `LLM_PRICE_OUT_RUB` / `LLM_PRICE_CACHED_RUB` перекрывает
+(₽ за 1 млн токенов).
 """
 
 from __future__ import annotations
@@ -11,23 +12,39 @@ import os
 import sqlite3
 import threading
 import time
+from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-# ₽ за 1 млн токенов: (вход, выход). Это настройка: LLM_PRICE_IN_RUB / LLM_PRICE_OUT_RUB перекрывают.
-DEFAULT_PRICES: dict[str, tuple[float, float]] = {
-    "deepseek": (25.0, 100.0),
-    "gigachat": (1500.0, 1500.0),
-}
+PRICES_PATH = Path(__file__).resolve().parents[2] / "data" / "prices.json"
+
+
+@lru_cache(maxsize=1)
+def price_table() -> dict[str, Any]:
+    data: dict[str, Any] = json.loads(PRICES_PATH.read_text(encoding="utf-8"))
+    return data
+
+
+@dataclass(frozen=True)
+class LLMPrice:
+    """₽ за 1 млн токенов: вход без кэша, вход из кэша провайдера, выход."""
+
+    tokens_in: float
+    tokens_cached: float
+    tokens_out: float
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS llm_calls (
     id INTEGER PRIMARY KEY, request_id TEXT, step INTEGER, provider TEXT, model TEXT,
-    tokens_in INTEGER, tokens_out INTEGER, cost_rub REAL, ms INTEGER, ts REAL);
+    tokens_in INTEGER, tokens_out INTEGER, cost_rub REAL, ms INTEGER, ts REAL, tokens_cached INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS tool_calls (
     id INTEGER PRIMARY KEY, request_id TEXT, step INTEGER, tool TEXT, args TEXT, ok INTEGER, ms INTEGER, ts REAL);
 CREATE TABLE IF NOT EXISTS card_views (
     id INTEGER PRIMARY KEY, vehicle_id TEXT, session_id TEXT, status TEXT, fault_code TEXT, ts REAL);
+CREATE TABLE IF NOT EXISTS answer_cache (
+    key TEXT PRIMARY KEY, value TEXT, hits INTEGER DEFAULT 0, ts REAL);
 CREATE TABLE IF NOT EXISTS voice_calls (
     id INTEGER PRIMARY KEY, kind TEXT, units REAL, cost_rub REAL, ms INTEGER, ts REAL);
 CREATE TABLE IF NOT EXISTS tickets (
@@ -36,16 +53,27 @@ CREATE TABLE IF NOT EXISTS tickets (
 """
 
 
-def prices(provider: str) -> tuple[float, float]:
-    base = DEFAULT_PRICES.get(provider, (0.0, 0.0))
-    p_in = float(os.environ.get("LLM_PRICE_IN_RUB", base[0]))
-    p_out = float(os.environ.get("LLM_PRICE_OUT_RUB", base[1]))
-    return p_in, p_out
+def prices(provider: str) -> LLMPrice:
+    t = price_table()
+    row = t["llm"].get(provider) or {}
+    if "rub" in row:
+        base = row["rub"]
+    elif "usd" in row:
+        rate = float(t["usd_rub"]["value"])
+        base = {k: float(v) * rate for k, v in row["usd"].items()}
+    else:
+        base = {"in": 0.0, "in_cached": 0.0, "out": 0.0}
+    p_in = float(os.environ.get("LLM_PRICE_IN_RUB", base["in"]))
+    p_cached = float(os.environ.get("LLM_PRICE_CACHED_RUB", base.get("in_cached", p_in)))
+    p_out = float(os.environ.get("LLM_PRICE_OUT_RUB", base["out"]))
+    return LLMPrice(p_in, p_cached, p_out)
 
 
-def cost_rub(provider: str, tokens_in: int, tokens_out: int) -> float:
-    p_in, p_out = prices(provider)
-    return (tokens_in * p_in + tokens_out * p_out) / 1_000_000
+def cost_rub(provider: str, tokens_in: int, tokens_out: int, tokens_cached: int = 0) -> float:
+    """tokens_in — весь вход, из него tokens_cached попали в кэш провайдера и стоят дешевле."""
+    p = prices(provider)
+    cached = min(tokens_cached, tokens_in)
+    return ((tokens_in - cached) * p.tokens_in + cached * p.tokens_cached + tokens_out * p.tokens_out) / 1_000_000
 
 
 class Store:
@@ -58,6 +86,10 @@ class Store:
         self._lock = threading.Lock()
         with self._lock:
             self._db.executescript(SCHEMA)
+            cols = {r[1] for r in self._db.execute("PRAGMA table_info(llm_calls)")}
+            if "tokens_cached" not in cols:  # журнал из S2 — без колонки кэша
+                self._db.execute("ALTER TABLE llm_calls ADD COLUMN tokens_cached INTEGER DEFAULT 0")
+                self._db.commit()
             cols = {r[1] for r in self._db.execute("PRAGMA table_info(tickets)")}
             if "fingerprint" not in cols:  # база от S2
                 self._db.execute("ALTER TABLE tickets ADD COLUMN fingerprint TEXT")
@@ -73,13 +105,21 @@ class Store:
 
     # ---- журнал ----
     def log_llm(
-        self, request_id: str, step: int, provider: str, model: str, tokens_in: int, tokens_out: int, ms: int
+        self,
+        request_id: str,
+        step: int,
+        provider: str,
+        model: str,
+        tokens_in: int,
+        tokens_out: int,
+        ms: int,
+        tokens_cached: int = 0,
     ) -> float:
-        cost = cost_rub(provider, tokens_in, tokens_out)
+        cost = cost_rub(provider, tokens_in, tokens_out, tokens_cached)
         self._exec(
-            "INSERT INTO llm_calls (request_id, step, provider, model, tokens_in, tokens_out, cost_rub, ms, ts)"
-            " VALUES (?,?,?,?,?,?,?,?,?)",
-            (request_id, step, provider, model, tokens_in, tokens_out, cost, ms, time.time()),
+            "INSERT INTO llm_calls (request_id, step, provider, model, tokens_in, tokens_out, cost_rub, ms, ts,"
+            " tokens_cached) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (request_id, step, provider, model, tokens_in, tokens_out, cost, ms, time.time(), tokens_cached),
         )
         return cost
 
@@ -107,6 +147,21 @@ class Store:
         """Сумма ₽ по журналу; `since` — unix-время начала периода (0 — за всё время)."""
         rows = self._rows("SELECT COALESCE(SUM(cost_rub), 0) AS s FROM llm_calls WHERE ts >= ?", (since,))
         return float(rows[0]["s"])
+
+    # ---- кэш ответов (issue #16) ----
+    def cached_answer(self, key: str) -> dict[str, Any] | None:
+        rows = self._rows("SELECT value FROM answer_cache WHERE key=?", (key,))
+        if not rows:
+            return None
+        self._exec("UPDATE answer_cache SET hits = hits + 1 WHERE key=?", (key,))
+        value: dict[str, Any] = json.loads(rows[0]["value"])
+        return value
+
+    def save_answer(self, key: str, value: dict[str, Any]) -> None:
+        self._exec(
+            "INSERT OR REPLACE INTO answer_cache (key, value, hits, ts) VALUES (?,?,0,?)",
+            (key, json.dumps(value, ensure_ascii=False), time.time()),
+        )
 
     # ---- память по ТС ----
     def remember_view(self, vehicle_id: str, session_id: str, status: str, fault_code: str | None) -> None:

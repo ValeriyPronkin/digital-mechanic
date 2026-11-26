@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -36,6 +36,7 @@ class VerdictCard(BaseModel):
     confidence_pct: int | None
     ml_quote: str  # цитата ML-сервиса как есть; показывать как текст, не исполнять
     ml_quote_label: str
+    manual: dict[str, Any] | None = None  # пояснение из матрицы по руководству (#16), без модели
 
 
 def _pct(value: float | None) -> int | None:
