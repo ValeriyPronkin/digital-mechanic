@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from service import absent_parts, contradictions
+from service import absent_parts, contradictions, norm_limits
 from service.clients import (
     Diagnosis,
     MLClient,
@@ -262,6 +262,7 @@ class Conversation:
     fact_numbers: set[str] = field(default_factory=set)  # цифры из ответов кода (сводка парка) — факты, не выдумка
     # Паспорт запроса (#31): данные текущего вопроса — план поиска, итоги guard. Не сериализуется в состояние.
     passport: dict[str, Any] = field(default_factory=dict)
+    norm_limit: Any = None  # норма и предел параметра для текущего вопроса (#40 п. 2)
     contradiction: Any = None  # известное противоречие в руководствах для текущего вопроса: (Known, [Quote])
 
 
@@ -366,6 +367,7 @@ def _quote_label(q: Any) -> str:
     return f"{short + ' — ' if short else ''}{doc.designation if doc else q.doc}, стр. {q.page}"
 
 
+PAGE_EDGE = 500  # знаков соседней страницы, где может продолжаться фраза (#40 п. 5)
 OPINION_MARK = "(мнение помощника, не из руководства)"
 # Утверждение о причине или диагнозе (#28, проверка с телефона): без ссылки [R…] — рассуждение модели
 _DIAG = re.compile(
@@ -622,6 +624,7 @@ class Agent:
         # Уровень — приставкой к вопросу, а не системным сообщением: GigaChat принимает system только первым.
         conv.messages.append({"role": "user", "content": f"[{LEVEL_PROMPT[level]}]\n\n{mask_pii(question)}"})
         self._note_contradiction(conv, question)
+        self._note_norm_limit(conv, question)
         absent = self._absent_reply(conv, question, request_id)
         if absent is not None:  # узла у двигателя нет — ответ кода, без модели (ТЗ F4)
             return absent
@@ -682,6 +685,7 @@ class Agent:
         final, grounded, notes, cited = self.guard(conv, text)
         final, cited, more = self._contradiction_text(conv, final, cited)
         notes += more
+        final, cited = self._norm_limit_text(conv, final, cited)
         final = _mark_bench(final, conv.sources)
         if cache_key and conv.draft is None and final:
             self.store.save_answer(
@@ -918,8 +922,12 @@ class Agent:
 
     def _allowed_numbers(self, conv: Conversation, cited: list[Source]) -> set[str]:
         allowed = self._context_numbers(conv)
+        page_text = getattr(self.searcher, "page_text", None)
         for src in cited:
             allowed |= numbers(src.text)
+            if page_text is not None:  # фраза, перенесённая через границу страницы (#40 п. 5): окно соседних страниц
+                nxt, prev = page_text(src.manual_id, src.pdf_page + 1), page_text(src.manual_id, src.pdf_page - 1)
+                allowed |= numbers((prev or "")[-PAGE_EDGE:]) | numbers((nxt or "")[:PAGE_EDGE])
         return allowed
 
     def _context_numbers(self, conv: Conversation) -> set[str]:
@@ -1083,6 +1091,28 @@ class Agent:
             draft=None,
             trace=trace,
         )
+
+    # ---- норма и предел (#40 п. 2) ----
+    def _note_norm_limit(self, conv: Conversation, question: str) -> None:
+        conv.norm_limit = None
+        n = norm_limits.match(conv.vehicle.engine_model, question)
+        if n is None or not norm_limits.verified(n, getattr(self.searcher, "page_text", None)):
+            return
+        for q in (n.norm, n.limit):
+            self._source_for(conv, q.doc, q.page, n.title, q.quote)
+        conv.norm_limit = n
+
+    def _norm_limit_text(self, conv: Conversation, text: str, cited: list[Source]) -> tuple[str, list[Source]]:
+        n = conv.norm_limit
+        if n is None or norm_limits.HEADER in text:
+            return text, cited
+        pages = {(n.norm.doc, n.norm.page), (n.limit.doc, n.limit.page)}
+        srcs = [s for s in conv.sources.values() if (s.manual_id, s.pdf_page) in pages]
+        refs = {(s.manual_id, s.pdf_page): s.ref for s in srcs}
+        parts = text.split("\n\n", 1)
+        blk = norm_limits.block(n, refs)
+        text = "\n\n".join(p for p in (parts[0], blk, parts[1] if len(parts) > 1 else "") if p.strip())
+        return text, cited + [s for s in srcs if s not in cited]
 
     # ---- противоречивые инструкции (требование заказчика, 26.11) ----
     def _note_contradiction(self, conv: Conversation, question: str) -> None:
