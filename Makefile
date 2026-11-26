@@ -1,4 +1,4 @@
-.PHONY: web web-test logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch
+.PHONY: web web-test logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
 
 PORT ?= 8000
 
@@ -38,6 +38,13 @@ kb-publish: install
 ## Проверить выкладку: скачать index/LATEST из бакета в каталог KB_OUT (по умолчанию .state/kb-check)
 kb-fetch: install
 	uv run $(if $(wildcard .env),--env-file .env,) python -m service.kb_store fetch --out $(or $(KB_OUT),.state/kb-check)
+
+## Картинки страниц для «стр. N»: отрисовать в .state/pages (по одному PDF) — pages-render; загрузить в pages/ — pages-publish
+pages-render: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/pages_publish.py $(if $(DOC),--doc $(DOC),)
+
+pages-publish: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/pages_publish.py --upload $(if $(DOC),--doc $(DOC),)
 
 ## Шаблон организаторов по замеру: reports/cost-template-<замер>.xlsx (шаблон — COST_TEMPLATE, в git не входит)
 cost-xlsx: install
