@@ -20,6 +20,7 @@
 | pillow | >=13.0.0 | MIT-CMU | рендер страницы PDF в JPEG для OCR |
 | pymorphy3 | >=2.0.6 | MIT | приведение слов к начальной форме для BM25 (словари pymorphy3-dicts-ru, MIT) |
 | pypdfium2 | >=5.15.2 | BSD-3-Clause, Apache-2.0 | текст страниц PDF, рендер страниц (PyMuPDF не берём: AGPL) |
+| pyyaml | >=6.0 | MIT | реестры поиска из прототипа Никиты (`registry/glossary.yaml`, `registry/page_scope.yaml`) |
 | openpyxl | >=3.1.5 | MIT | dev: заполнение шаблона организаторов (`make cost-xlsx`) |
 | hatchling | >=1.25 | MIT | сборка пакета |
 

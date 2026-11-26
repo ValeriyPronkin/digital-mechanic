@@ -78,10 +78,51 @@ class IndexSearcher:
         ]
 
 
+class NikitaSearcher(IndexSearcher):
+    """Поиск по документам из прототипа Никиты (`service.nikita.search`, SEARCH_ENGINE=nikita) над нашим
+    индексом: BM25 по страницам, пересортировка по лучшему отрезку 1–3 строки, глоссарий, страницы другой
+    модификации вне индекса. Текст страницы для окна и проверки цифр — как у нашего поиска."""
+
+    def __init__(self, index: Any) -> None:
+        super().__init__(index)
+        from service.nikita import pages, search
+
+        pages.bind(index)
+        search._indexes.clear()  # индекс страниц Никиты строится заново над привязанным индексом
+
+    def search(self, query: str, engine: str, k: int = 5) -> list[ManualHit]:
+        from service.manuals.catalog import DOCS_BY_ID, canonical_engine
+        from service.nikita import search as nikita
+
+        canon = canonical_engine(engine)
+        if canon is None:
+            return []
+        hits = nikita.search(canon, query, k=k)
+        out = []
+        for h in hits:
+            doc = DOCS_BY_ID[h.manual_id]
+            page = self.page_text(h.manual_id, h.page) or h.snippet
+            out.append(ManualHit(manual_id=h.manual_id, manual=doc.designation, pdf_page=int(h.page),
+                                 section=_nikita_section(canon, h.manual_id, h.page), text=page))  # fmt: skip
+        return out
+
+
+def _nikita_section(engine: str, manual_id: str, page: int) -> str:
+    from service.nikita import pages
+
+    return pages.get_section(engine, manual_id, page)
+
+
+def search_engine() -> str:
+    """SEARCH_ENGINE=ours (по умолчанию) | nikita — архитектура поиска по документам (решение команды 27.11)."""
+    return os.environ.get("SEARCH_ENGINE", "ours").strip().lower()
+
+
 def default_searcher() -> ManualSearcher:
     try:
         mod = importlib.import_module("service.manuals.search")
-        return IndexSearcher(mod.ManualIndex.load())
+        index = mod.ManualIndex.load()
+        return NikitaSearcher(index) if search_engine() == "nikita" else IndexSearcher(index)
     except (ImportError, FileNotFoundError, OSError) as exc:
         log.warning("поиск по руководствам недоступен (%s) — работает заглушка", exc)
         return EmptySearcher()

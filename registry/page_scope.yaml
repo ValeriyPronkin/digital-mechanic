@@ -1,0 +1,42 @@
+# Pages of a shared manual that are wholly about another engine variant (review finding 6, spec §4.1).
+# They are left out of the search index of `engine`; `read_pages` still returns one when asked by number,
+# with a note. Only whole pages checked against the rendered PDF are listed: a page that mixes variants
+# stays in the index (236.01.01 РК p272 has tables for the ЯМЗ-238 next to one for the ЯМЗ-236М2).
+#
+# engine: the fleet engine whose index drops the pages; manual: id from app/manuals.py; pages: PDF pages;
+# reason: shown to the model, in Russian, naming the variants the page is for.
+# A number on such a page is never confirmed for `engine`: the verifier withdraws the claim.
+
+- engine: ЯМЗ-236М2
+  manual: yamz-236-rk
+  pages: [260]
+  reason: >-
+    пп. 5.15.4 и 5.15.5 — натяжение ремней и установка генератора Г290В на двигателях ЯМЗ-238Н-1,
+    ЯМЗ-238В, ЯМЗ-238ВМ и ЯМЗ-238Б
+
+# Crankcase ventilation is described twice, once per variant, with different winter limits (−15 °С on
+# the 40904, −30 °С on the 40905). Found by the held-out question h409-vent-winter: the answer gave both
+# limits without saying which one is this engine's. p66 and p71 mix both variants and stay in the index.
+- engine: ЗМЗ-40904.10
+  manual: zmz-409-rk
+  pages: [68, 69, 70]
+  reason: >-
+    раздел «2. Двигатель ЗМЗ-40905.10» — система вентиляции картера двигателя ЗМЗ-40905.10
+
+- engine: ЗМЗ-40905.10
+  manual: zmz-409-rk
+  pages: [67]
+  reason: >-
+    раздел «1. Двигатель ЗМЗ-40904.10» — система вентиляции картера двигателя ЗМЗ-40904.10
+
+# `part: true`: the page stays in the index, the reason is shown to the model with the page. p71 opens
+# with the last lines of the 40905 warning (its limit is on p70) and then turns to both variants. A live
+# question on a 40904 was answered with −30 °С from here before this note.
+- engine: ЗМЗ-40904.10
+  manual: zmz-409-rk
+  pages: [71]
+  part: true
+  reason: >-
+    первые строки, до п. 3, заканчивают предупреждение из раздела «2. Двигатель ЗМЗ-40905.10»;
+    предупреждение об обмерзании для ЗМЗ-40904.10 — в разделе «1. Двигатель ЗМЗ-40904.10»
+    системы вентиляции картера
