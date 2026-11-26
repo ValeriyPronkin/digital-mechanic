@@ -279,10 +279,43 @@ def test_pii_masked_before_llm(ml: MLClient, toir: ToirClient) -> None:
 
 
 def test_budget_checked_before_call(ml: MLClient, toir: ToirClient) -> None:
-    ag, llm = make_agent([say("ок")], ml, toir, budget_rub=0.0)
-    with pytest.raises(BudgetExceededError):
+    ag, llm = make_agent([say("ок")], ml, toir, budget_total_rub=0.0)
+    with pytest.raises(BudgetExceededError, match="Общий лимит"):
         ag.ask(ag.start(*ANOMALY), "?")
     assert llm.seen == []
+
+
+def test_daily_budget_moscow_day(ml: MLClient, toir: ToirClient) -> None:
+    from datetime import datetime
+
+    from service.agent import MSK, moscow_day_start
+
+    late = datetime(2026, 11, 26, 23, 30, tzinfo=MSK).timestamp()
+    next_day = datetime(2026, 11, 27, 0, 5, tzinfo=MSK).timestamp()
+    assert moscow_day_start(late) == datetime(2026, 11, 26, tzinfo=MSK).timestamp()
+    now = [late]
+    ag, _ = make_agent([say("ок")] * 3, ml, toir, budget_day_rub=100.0, budget_total_rub=1000.0, clock=lambda: now[0])
+    ag.store._exec(  # 100 ₽ потрачено сегодня вечером по Москве
+        "INSERT INTO llm_calls (request_id, step, provider, model, tokens_in, tokens_out, cost_rub, ms, ts)"
+        " VALUES ('r', 1, 'deepseek', 'm', 0, 0, 100.0, 0, ?)",
+        (late - 60,),
+    )
+    conv = ag.start(*ANOMALY)
+    with pytest.raises(BudgetExceededError, match="00:00 по Москве"):
+        ag.ask(conv, "?")
+    now[0] = next_day  # новые сутки по Москве — снова можно
+    assert ag.ask(conv, "?").text == "ок"
+
+
+def test_ticket_works_after_budget_exhausted(ml: MLClient, toir: ToirClient) -> None:
+    ag, _ = make_agent(c1_steps(*ANOMALY), ml, toir)
+    conv = ag.start(*ANOMALY)
+    draft = ag.ask(conv, "Оформи заявку").draft
+    assert draft is not None
+    ag.budget_total_rub = 0.0  # лимит кончился после показа черновика
+    with pytest.raises(BudgetExceededError):
+        ag.ask(conv, "ещё вопрос")
+    assert ag.confirm_ticket(conv, draft["fingerprint"]).ticket_id.startswith("TKT-")
 
 
 def test_journal_and_trace(ml: MLClient, toir: ToirClient) -> None:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -50,28 +52,92 @@ def test_display_name_no_duplicate_make() -> None:
     assert all(n for n in names.values())
 
 
-def test_chat_and_ticket_endpoints(ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def _agent(ml: MLClient, toir: ToirClient, steps: list[Any]) -> Any:
     from service.agent import Agent
     from service.store import Store
-    from test_agent import ANOMALY, FixtureSearch, ScriptedLLM, c1_steps
+    from test_agent import FixtureSearch, ScriptedLLM
 
-    ag = Agent(ScriptedLLM(c1_steps(*ANOMALY)), ml, toir, FixtureSearch(), Store(":memory:"), main.fleet())
-    monkeypatch.setattr(main, "agent", lambda: ag)
-    r = client.post("/api/chat", json={"vehicle_id": ANOMALY[0], "session_id": ANOMALY[1], "message": "Оформи заявку"})
-    assert r.status_code == 200
-    data = r.json()
-    assert data["draft"]["body"]["anomaly_type"] == "F02" and data["trace"]["steps"]
-    bad = client.post("/api/tickets", json={"conversation_id": data["conversation_id"], "fingerprint": "nope"})
-    assert bad.status_code == 409
-    ok = client.post(
-        "/api/tickets", json={"conversation_id": data["conversation_id"], "fingerprint": data["draft"]["fingerprint"]}
+    return Agent(ScriptedLLM(steps), ml, toir, FixtureSearch(), Store(":memory:"), main.fleet())
+
+
+def test_chat_and_ticket_survive_instance_switch(
+    ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Вопрос и «Отправить» попадают в разные экземпляры (разные Agent и Store) — заявка всё равно уходит."""
+    from test_agent import ANOMALY, call, say
+
+    vid, sid = ANOMALY
+    first = _agent(ml, toir, [call("get_diagnosis", vehicle_id=vid, session_id=sid), say("Это F02.")])
+    monkeypatch.setattr(main, "agent", lambda: first)
+    r1 = client.post("/api/chat", json={"vehicle_id": vid, "session_id": sid, "message": "Что случилось?"}).json()
+
+    second = _agent(
+        ml,
+        toir,
+        [
+            call("search_manual", query="масло"),
+            call(
+                "draft_ticket",
+                conclusion="Низкое давление масла",
+                operations=["Замерить давление масла"],
+                reference_ids=["R1"],
+            ),
+            say("Черновик готов [R1]"),
+        ],
     )
+    monkeypatch.setattr(main, "agent", lambda: second)
+    r2 = client.post(
+        "/api/chat", json={"vehicle_id": vid, "session_id": sid, "message": "Оформи заявку", "state": r1["state"]}
+    ).json()
+    assert r2["conversation_id"] == r1["conversation_id"]
+    seen = second.provider.seen[0]  # type: ignore[attr-defined]
+    assert any(m["role"] == "tool" and m["name"] == "get_diagnosis" for m in seen)  # история пришла из state
+
+    third = _agent(ml, toir, [])
+    monkeypatch.setattr(main, "agent", lambda: third)
+    bad = client.post("/api/tickets", json={"state": r2["state"], "fingerprint": "nope"})
+    assert bad.status_code == 409
+    ok = client.post("/api/tickets", json={"state": r2["state"], "fingerprint": r2["draft"]["fingerprint"]})
     assert ok.status_code == 201 and ok.json()["ticket_id"].startswith("TKT-")
+    again = client.post("/api/tickets", json={"state": r2["state"], "fingerprint": r2["draft"]["fingerprint"]})
+    assert again.status_code == 409 and "уже отправлена" in again.json()["detail"]
 
 
-def test_ticket_unknown_conversation() -> None:
-    r = client.post("/api/tickets", json={"conversation_id": "nope", "fingerprint": "x"})
-    assert r.status_code == 404
+def test_tampered_state_rejected(ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import base64
+    import zlib
+
+    from test_agent import ANOMALY, say
+
+    monkeypatch.setattr(main, "agent", lambda: _agent(ml, toir, [say("ok")]))
+    r = client.post("/api/chat", json={"vehicle_id": ANOMALY[0], "session_id": ANOMALY[1], "message": "?"}).json()
+    blob = base64.urlsafe_b64decode(r["state"])
+    raw = zlib.decompress(blob[16:]).replace(b"ok", b"OK")
+    forged = base64.urlsafe_b64encode(blob[:16] + zlib.compress(raw)).decode()
+    resp = client.post("/api/tickets", json={"state": forged, "fingerprint": "x"})
+    assert resp.status_code == 400
+    assert client.post("/api/tickets", json={"state": "мусор", "fingerprint": "x"}).status_code == 400
+
+
+def test_chat_rate_limited(ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from service.rate_limit import RateLimiter
+    from test_agent import ANOMALY, say
+
+    monkeypatch.setattr(main, "agent", lambda: _agent(ml, toir, [say("ok")] * 5))
+    monkeypatch.setattr(main, "limiter", lambda: lim)
+    lim = RateLimiter(per_client=2, total=100)
+    body = {"vehicle_id": ANOMALY[0], "session_id": ANOMALY[1], "message": "?"}
+    h = {"X-Forwarded-For": "6.6.6.6, 10.0.0.1"}
+    assert client.post("/api/chat", json=body, headers=h).status_code == 200
+    assert client.post("/api/chat", json=body, headers=h).status_code == 200
+    third = client.post("/api/chat", json=body, headers=h)
+    assert third.status_code == 429 and int(third.headers["retry-after"]) > 0
+    other = client.post("/api/chat", json=body, headers={"X-Forwarded-For": "6.6.6.6, 10.0.0.2"})
+    assert other.status_code == 200  # клиент — последний адрес, его дописал прокси
+
+
+def test_ticket_requires_state() -> None:
+    assert client.post("/api/tickets", json={"fingerprint": "x"}).status_code == 422
 
 
 def test_manual_pdf_missing() -> None:

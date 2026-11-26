@@ -9,7 +9,10 @@ services:
       LLM_MODEL: ${LLM_MODEL:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS:-}
-      LLM_BUDGET_RUB: ${LLM_BUDGET_RUB:-300}
+      LLM_BUDGET_DAY_RUB: ${LLM_BUDGET_DAY_RUB:-100}
+      LLM_BUDGET_TOTAL_RUB: ${LLM_BUDGET_TOTAL_RUB:-1000}
+      LLM_PRICE_IN_RUB: ${LLM_PRICE_IN_RUB:-}
+      LLM_PRICE_OUT_RUB: ${LLM_PRICE_OUT_RUB:-}
       # Внутри compose сервис ходит в заглушки по именам сервисов, а не по адресам из .env.
       MOCK_ML_URL: http://mock-ml:8001
       MOCK_TOIR_URL: http://mock-toir:8002
@@ -30,7 +33,9 @@ services:
     build:
       context: .
       dockerfile: docker/mock.Dockerfile
-    command: ["uvicorn", "mock_ml.app:app", "--host", "0.0.0.0", "--port", "8001"]
+    environment:
+      MOCK_APP: mock_ml.app:app
+      PORT: "8001"
     ports:
       - "8001:8001"
     healthcheck: &mock-health
@@ -44,7 +49,9 @@ services:
     build:
       context: .
       dockerfile: docker/mock.Dockerfile
-    command: ["uvicorn", "mock_toir.app:app", "--host", "0.0.0.0", "--port", "8002"]
+    environment:
+      MOCK_APP: mock_toir.app:app
+      PORT: "8002"
     ports:
       - "8002:8002"
     healthcheck:

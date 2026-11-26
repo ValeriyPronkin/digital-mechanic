@@ -20,6 +20,7 @@ import time
 import uuid
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -135,6 +136,16 @@ class TicketRefusedError(ServiceError):
 
 class BudgetExceededError(LLMError):
     http_status = 429
+
+
+MSK = timezone(timedelta(hours=3))  # Москва без перехода на летнее время с 2014 г.
+NO_MODEL_HINT = "Карточка результата и отправка уже показанной заявки работают и без модели."
+
+
+def moscow_day_start(now: float | None = None) -> float:
+    """Unix-время начала текущих суток по Москве."""
+    t = datetime.fromtimestamp(time.time() if now is None else now, MSK)
+    return t.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
 
 
 @dataclass
@@ -313,8 +324,10 @@ class Agent:
         searcher: ManualSearcher,
         store: Store,
         fleet: Fleet,
-        budget_rub: float = 300.0,
         prefetch: bool = True,
+        budget_day_rub: float = 100.0,
+        budget_total_rub: float = 1000.0,
+        clock: Any = time.time,
     ) -> None:
         self.provider = provider
         self.ml = ml
@@ -322,8 +335,10 @@ class Agent:
         self.searcher = searcher
         self.store = store
         self.fleet = fleet
-        self.budget_rub = budget_rub
         self.prefetch = prefetch  # код сам получает диагноз и ищет по руководству до вызова модели (#16)
+        self.budget_day_rub = budget_day_rub
+        self.budget_total_rub = budget_total_rub
+        self.clock = clock
 
     # ---- разговор ----
     def start(self, vehicle_id: str, session_id: str) -> Conversation:
@@ -362,8 +377,7 @@ class Agent:
             self._prefetch(conv, question, request_id, steps)
         text = ""
         for step in range(1, MAX_STEPS + 1):
-            if self.store.spent_rub() >= self.budget_rub:
-                raise BudgetExceededError("Лимит расходов на модель исчерпан. Обратитесь к администратору.")
+            self.check_budget()
             t0 = time.monotonic()
             reply = self.provider.chat(conv.messages, TOOLS)
             ms = int((time.monotonic() - t0) * 1000)
@@ -510,6 +524,19 @@ class Agent:
             draft=None,
             trace=trace,
         )
+
+    def check_budget(self) -> None:
+        """Лимиты D-11: в сутки по Москве и всего. Проверка до каждого вызова модели."""
+        if self.store.spent_rub() >= self.budget_total_rub:
+            raise BudgetExceededError(
+                f"Общий лимит расходов на модель ({self.budget_total_rub:g} ₽) исчерпан — помощник отключён. "
+                + NO_MODEL_HINT
+            )
+        if self.store.spent_rub(since=moscow_day_start(self.clock())) >= self.budget_day_rub:
+            raise BudgetExceededError(
+                f"Лимит на сегодня ({self.budget_day_rub:g} ₽) исчерпан — помощник снова заработает "
+                "в 00:00 по Москве. " + NO_MODEL_HINT
+            )
 
     # ---- проверка ответа ----
     def guard(self, conv: Conversation, text: str) -> tuple[str, bool, list[str], list[Source]]:
@@ -864,7 +891,11 @@ class Agent:
             raise TicketRefusedError(refusal)
         if not draft.body.references or not draft.body.operations:
             raise TicketRefusedError("В заявке нет работ или ссылок на руководство.")
+        already = self.store.ticket_for(draft.fingerprint)
+        if already:
+            conv.draft = None
+            raise TicketRefusedError(f"Эта заявка уже отправлена: {already}.")
         resp = self.toir.create_ticket(draft.body)
-        self.store.remember_ticket(resp.ticket_id, draft.body.model_dump())
+        self.store.remember_ticket(resp.ticket_id, draft.body.model_dump(), draft.fingerprint)
         conv.draft = None
         return resp
