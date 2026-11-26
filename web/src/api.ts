@@ -112,7 +112,25 @@ export interface GuideBlock {
   pages: { source: string; why: string }[]
 }
 
-export type Block = VerdictBlock | GuideBlock | ErrorBlock | { kind: string; [key: string]: unknown }
+/** Manuals disagree (our D-20): every wording verbatim with its page; the code builds it, not the model. */
+export interface ContradictionBlock {
+  kind: 'contradiction'
+  title: string
+  // note: a mark the code put on that page, e.g. «испытания на стенде»
+  items: {
+    handle: string | null
+    label: string
+    quote: string
+    manual_id: string
+    pdf_page: number
+    note?: string | null
+  }[]
+  conclusion: string
+  advice: string
+}
+
+export type Block =
+  VerdictBlock | GuideBlock | ErrorBlock | ContradictionBlock | { kind: string; [key: string]: unknown }
 
 export interface SourceItem {
   handle: string
@@ -228,7 +246,15 @@ export interface PassportFragment {
 export interface Passport {
   request_id: string | null
   searches: { by: string; engine: string | null; queries: string[]; found: number; fragments: PassportFragment[] }[]
-  llm: { name: string; provider: string; tokens_in: number; tokens_cached: number; tokens_out: number; ms: number; cost_rub: number }[]
+  llm: {
+    name: string
+    provider: string
+    tokens_in: number
+    tokens_cached: number
+    tokens_out: number
+    ms: number
+    cost_rub: number
+  }[]
   voice: { stt_seconds: number; stt_rub: number; tts_chars: number; tts_rub_estimate: number }
   rules: string[]
   total: {

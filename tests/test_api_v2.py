@@ -150,3 +150,31 @@ def test_quote_line_is_the_line_with_the_number() -> None:
     assert api_v2.quote_line("Без чисел [R1].", "R1", page) == "22 ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ"
     # число из предложения с другой ссылкой не уводит строку этой страницы
     assert api_v2.quote_line("Момент 22 Н·м [R2]. Без чисел [R1].", "R1", page) == "22 ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ"
+
+
+def test_contradiction_as_block_and_not_repeated_in_text(ml: MLClient, toir: ToirClient) -> None:
+    """Противоречие руководств (D-20) — отдельный блок v2: обе формулировки дословно со страницами, вывод, совет;
+    тот же блок из текста ответа убран, чтобы механик не читал его дважды."""
+    from service import contradictions
+
+    ag, _ = make_agent([], ml, toir)
+    conv = ag.start(*ANOMALY)
+    k = next(k for k in contradictions.known() if conv.vehicle.engine_model in k.engines)
+    quotes = list(k.quotes)
+    for q in quotes:
+        ag._source_for(conv, q.doc, q.page, k.title, q.quote)
+    conv.contradiction = (k, quotes)
+    pages = {(q.doc, q.page) for q in quotes}
+    refs = {(s.manual_id, s.pdf_page): s.ref for s in conv.sources.values() if (s.manual_id, s.pdf_page) in pages}
+    blk = contradictions.block(k, quotes, refs)
+    first = blk.split("\n")[1]
+    marked = blk.replace(first, first + " (испытания на стенде)")  # пометку дописывает код после вставки
+    text = "Прямой ответ.\n\n" + marked + "\n\nДальше по шагам."
+    block, rest = api_v2.contradiction_block(conv, text)
+    assert block is not None and block["kind"] == "contradiction" and len(block["items"]) >= 2
+    assert all(i["quote"] and i["handle"].startswith("S") for i in block["items"])
+    assert block["items"][0]["note"] == "испытания на стенде" and block["items"][1]["note"] is None
+    assert block["advice"] == contradictions.ADVICE and block["conclusion"]
+    assert rest == "Прямой ответ.\n\nДальше по шагам." and contradictions.HEADER not in rest
+    conv.contradiction = None
+    assert api_v2.contradiction_block(conv, text) == (None, text)
