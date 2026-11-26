@@ -79,8 +79,7 @@ def test_chat_and_ticket_survive_instance_switch(
             call(
                 "draft_ticket",
                 conclusion="Низкое давление масла",
-                operations=["Замерить давление масла"],
-                reference_ids=["R1"],
+                operations=[{"text": "Замерить давление масла", "ref": "R1"}],
             ),
             say("Черновик готов [R1]"),
         ],

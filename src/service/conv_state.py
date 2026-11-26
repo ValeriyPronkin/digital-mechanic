@@ -37,6 +37,15 @@ def _key() -> bytes:
     return secret.encode("utf-8") if secret else secrets.token_bytes(32)
 
 
+def sign_text(text: str) -> str:
+    """Подпись текста, который сервер разрешает озвучить (#14): синтезируется только то, что собрал код."""
+    return hmac.new(_key(), b"speech:" + text.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def verify_text(text: str, sig: str) -> bool:
+    return hmac.compare_digest(sign_text(text), sig)
+
+
 def _msg_out(m: dict[str, Any]) -> dict[str, Any]:
     out = dict(m)
     if out.get("tool_calls"):

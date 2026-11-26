@@ -113,7 +113,7 @@ def comment(run: dict[str, Any], price_note: str) -> list[str]:
         f"Другие сценарии, ₽: {rest}.",
         "Без модели: карточка проверки и пояснение по руководству — код, 0 ₽; поиск по смыслу ≈0,0002 ₽ на запрос "
         f"(эмбеддинг {o['embedding']['value']} ₽/1000 ток. с НДС); голос (не в этой таблице): распознавание "
-        f"{o['stt_sync']['value']} ₽/15 с и синтез {o['tts_v3']['value']} ₽/250 знаков с НДС.",
+        f"{o['stt_sync']['value']} ₽/15 с и синтез {o['tts_v1']['value']} ₽/1 млн символов (API v1) с НДС.",
         f"Инфраструктура: Serverless Containers {o['container_vcpu_hour']['value']} ₽/vCPU·ч и "
         f"{o['container_ram_gb_hour']['value']} ₽/ГБ·ч с НДС сверх бесплатного уровня; хранилище "
         f"{o['object_storage_gb_month']['value']} ₽/ГБ·мес с НДС (индекс и PDF ~0,2 ГБ). Цены — официальные "

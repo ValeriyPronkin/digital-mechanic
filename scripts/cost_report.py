@@ -200,9 +200,10 @@ def _other(name: str) -> float:
 
 
 def voice_rub(answer: str) -> tuple[float, str]:
-    """Оценка по тарифу без НДС: вопрос до 15 с — один отрезок распознавания; синтез API v3 — за каждые 250 знаков."""
-    units = max(1, -(-len(answer) // 250))
-    return _other("stt_sync") + units * _other("tts_v3"), f"распознавание 15 с + синтез {len(answer)} знаков"
+    """Голос по тарифу без НДС — как в src/service/voice.py: распознавание 15 с + синтез API v1 за символы."""
+    from service.voice import stt_cost_rub, tts_cost_rub
+
+    return stt_cost_rub(15) + tts_cost_rub(len(answer)), f"распознавание 15 с + синтез {len(answer)} знаков (API v1)"
 
 
 def run(sc: Scenario, provider: Any, searcher: Any) -> Result:
