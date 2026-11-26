@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from service import absent_parts, contradictions
+from service import absent_parts, clean_refusal, contradictions, glossary, other_engine, row_check
 from service.clients import (
     Diagnosis,
     MLClient,
@@ -41,7 +41,7 @@ from service.llm import LLMError, LLMProvider, LLMReply, Message, ToolCall, Tool
 from service.manual_search import ManualSearcher, manual_pdf
 from service.manuals.catalog import DOCS_BY_ID
 from service.manuals.lexical import tokenize
-from service.manuals.search import make_quote
+from service.manuals.search import deterministic_mode, make_quote
 from service.spend import SpendLedger
 from service.store import Store
 from service.verdict_policy import CRITICAL_CODES, Urgency, VerdictCard, build_card, urgency_for  # noqa: F401
@@ -360,6 +360,14 @@ def _part_label(r: Any) -> str:
     return f"{name} ({r.designation}), стр. {r.page}" if r.designation else f"{name}, стр. {r.page}"
 
 
+def _last_question(conv: Any) -> str:
+    """Текущий вопрос механика (без приставки уровня ответа)."""
+    for m in reversed(conv.messages):
+        if m.get("role") == "user":
+            return str(m.get("content") or "").split("\n\n", 1)[-1]
+    return ""
+
+
 def _quote_label(q: Any) -> str:
     doc = DOCS_BY_ID.get(q.doc)
     short = _DOC_SHORT.get(q.doc.rsplit("-", 1)[-1], "")
@@ -622,6 +630,9 @@ class Agent:
         # Уровень — приставкой к вопросу, а не системным сообщением: GigaChat принимает system только первым.
         conv.messages.append({"role": "user", "content": f"[{LEVEL_PROMPT[level]}]\n\n{mask_pii(question)}"})
         self._note_contradiction(conv, question)
+        other = self._other_engine_reply(conv, question, request_id)
+        if other is not None:  # вопрос про другой двигатель — ответ кода без цифр (независимый прогон, п. 2)
+            return other
         absent = self._absent_reply(conv, question, request_id)
         if absent is not None:  # узла у двигателя нет — ответ кода, без модели (ТЗ F4)
             return absent
@@ -683,6 +694,9 @@ class Agent:
         final, cited, more = self._contradiction_text(conv, final, cited)
         notes += more
         final = _mark_bench(final, conv.sources)
+        final, refusal_cleaned = clean_refusal.clean(final)  # отказ — без чисел с единицами (независимый прогон, п. 5)
+        if refusal_cleaned:
+            notes.append(clean_refusal.NOTE)
         if conv.card is not None and conv.card.trend and _CARD_ASK.search(question) and conv.card.trend not in final:
             final = f"{final.rstrip()}\n\n📈 {conv.card.trend}"  # тенденция по истории ТС — кодом (#40 п. 4)
         if cache_key and conv.draft is None and final:
@@ -883,9 +897,15 @@ class Agent:
         text = _REF.sub(lambda m: m.group(0) if m.group(1) in conv.sources else "", text)
 
         allowed = self._allowed_numbers(conv, cited)
+        question = _last_question(conv)
+        page_text = getattr(self.searcher, "page_text", None)
+
+        def pages_for(part: str) -> list[str]:
+            srcs = [conv.sources[r] for r in _REF.findall(part) if r in conv.sources] or cited
+            return [(page_text(s.manual_id, s.pdf_page) if page_text else None) or s.text for s in srcs]
 
         kept: list[str] = []
-        dropped = 0
+        dropped = row_dropped = 0
         for line in text.split("\n"):
             mark = _LIST_MARK.match(line)
             prefix = mark.group(0) if mark else ""
@@ -893,6 +913,9 @@ class Agent:
             for part in _SENTENCE.split(line[len(prefix) :]):
                 if numbers(part) - allowed:
                     dropped += 1
+                    continue
+                if cited and not row_check.row_ok(part, question, pages_for(part)):
+                    row_dropped += 1  # число из строки таблицы про другую деталь
                     continue
                 good.append(part)
             if good:
@@ -908,9 +931,16 @@ class Agent:
             notes.append("Часть выводов — рассуждение помощника, а не руководство: они помечены.")
         if dropped:
             notes.append("Часть цифр не нашёл в руководстве — убрал их. Точные значения уточнит дефектовка.")
+        if row_dropped:
+            notes.append("Цифру из строки таблицы про другую деталь убрал — в руководстве она относится не к этому.")
 
         grounded = bool(cited)
-        conv.passport["guard"] = {"numbers_dropped": dropped, "opinions_marked": opinions, "ungrounded": not grounded}
+        conv.passport["guard"] = {
+            "numbers_dropped": dropped,
+            "row_dropped": row_dropped,
+            "opinions_marked": opinions,
+            "ungrounded": not grounded,
+        }
         if not grounded and text:
             if conv.card and conv.card.status == "anomaly":
                 notes.append("Без ссылки на руководство: это пояснение, а не инструкция. Рекомендую дефектовку.")
@@ -998,9 +1028,10 @@ class Agent:
         # Сбой записи — без поиска: выводов о двигателе нет, фрагменты подталкивали бы к догадкам.
         skip = card.status == "check_failed"  # несовместимый код — вопрос по руководству всё равно ищем (#28, Q19)
         if PREFETCH_K > 0 and not _TICKET_ASK.search(question) and not skip:
+            # план от модели — только для перевода (язык — кодом); русский вопрос ищется сам + глоссарий
             plan = (
                 self._search_plan(conv, question, request_id, steps)
-                if self.plan_search
+                if self.plan_search and (not deterministic_mode() or glossary.needs_translation(question))
                 else {"lang": "ru", "question_ru": mask_pii(question), "queries": [mask_pii(question)]}
             )
             query = {"query": plan["question_ru"], "more_queries": plan["queries"], "k": PREFETCH_K}
@@ -1037,7 +1068,7 @@ class Agent:
             return {"error": err}
         diag, card = self._ensure_diag(conv)
         self.store.remember_view(conv.vehicle.vehicle_id, conv.session_id, card.status, card.fault_code)
-        out = card.model_dump(exclude={"ml_quote", "ml_quote_label", "manual"})
+        out = card.model_dump(exclude={"ml_quote", "ml_quote_label", "ml_injection", "manual", "passport"})
         out.update(
             {
                 "engine_model": conv.vehicle.engine_model,
@@ -1051,6 +1082,31 @@ class Agent:
         if matrix is not None:
             out["manual_matrix"] = matrix
         return out
+
+    # ---- вопрос про другой двигатель (независимый прогон 26.11, п. 2) ----
+    def _other_engine_reply(self, conv: Conversation, question: str, request_id: str) -> AgentReply | None:
+        name = other_engine.other(question, conv.vehicle.engine_model)
+        if name is None:
+            return None
+        text = other_engine.answer(name, conv.vehicle.vehicle_id, conv.vehicle.engine_model)
+        conv.messages.append({"role": "assistant", "content": text})
+        trace = {
+            "request_id": request_id,
+            "provider": self.provider.name,
+            "steps": [{"step": 0, "kind": "code", "name": "другой двигатель", "ok": True, "ms": 0}],
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "tokens_cached": 0,
+            "cost_rub": 0.0,
+        }
+        return AgentReply(
+            text=text,
+            grounded=False,
+            notes=[f"В вопросе {name}, а у машины {conv.vehicle.engine_model}: отвечаю только по её руководствам."],
+            sources=[],
+            draft=None,
+            trace=trace,
+        )
 
     # ---- узел, которого у двигателя нет (ТЗ F4, приёмка «нет в руководстве») ----
     def _absent_reply(self, conv: Conversation, question: str, request_id: str) -> AgentReply | None:

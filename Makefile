@@ -1,4 +1,4 @@
-.PHONY: web web-test logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch
+.PHONY: web web-test engineer-pack logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
 
 PORT ?= 8000
 
@@ -28,6 +28,11 @@ index: install
 
 ## Себестоимость по участкам на настоящей модели (issue #16): reports/cost.md + reports/cost/<LABEL>.csv
 LABEL ?= $(shell date +%Y%m%d-%H%M)
+## Пакет для инженера (#40 п. 7): все отклонения и сбои на стенде → reports/engineer-pack-<дата>.html (≈15 мин, ≈11 ₽)
+STAND_URL ?= https://bbab8qkqhuhg3ere9dam.containers.yandexcloud.net/
+engineer-pack: install
+	uv run python scripts/engineer_pack.py $(STAND_URL) $(PACK_ARGS)
+
 cost: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/cost_report.py --label $(LABEL)
 
@@ -38,6 +43,13 @@ kb-publish: install
 ## Проверить выкладку: скачать index/LATEST из бакета в каталог KB_OUT (по умолчанию .state/kb-check)
 kb-fetch: install
 	uv run $(if $(wildcard .env),--env-file .env,) python -m service.kb_store fetch --out $(or $(KB_OUT),.state/kb-check)
+
+## Картинки страниц для «стр. N»: отрисовать в .state/pages (по одному PDF) — pages-render; загрузить в pages/ — pages-publish
+pages-render: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/pages_publish.py $(if $(DOC),--doc $(DOC),)
+
+pages-publish: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/pages_publish.py --upload $(if $(DOC),--doc $(DOC),)
 
 ## Шаблон организаторов по замеру: reports/cost-template-<замер>.xlsx (шаблон — COST_TEMPLATE, в git не входит)
 cost-xlsx: install
