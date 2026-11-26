@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from service import __version__
 from service.agent import Agent, Conversation
 from service.clients import MLClient, ServiceError, ToirClient
+from service.fault_matrix import card_explanation
 from service.fleet import fleet
 from service.llm import provider_from_env
 from service.manual_search import default_searcher, manual_pdf
@@ -123,6 +124,8 @@ def diagnose(req: DiagnoseIn) -> VerdictCard:
         raise HTTPException(502, "Сервис диагностики вернул результат для другой проверки.")
     vehicle = fleet().vehicle(req.vehicle_id)
     card = build_card(diag, fleet().fault_titles, vehicle.engine_model if vehicle else None)
+    if card.status == "anomaly" and card.compatible and card.fault_code and vehicle:
+        card.manual = card_explanation(card.fault_code, vehicle.engine_model)
     store().remember_view(req.vehicle_id, req.session_id, card.status, card.fault_code)
     return card
 

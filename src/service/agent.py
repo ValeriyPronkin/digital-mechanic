@@ -658,7 +658,7 @@ class Agent:
             return {"error": err}
         diag, card = self._ensure_diag(conv)
         self.store.remember_view(conv.vehicle.vehicle_id, conv.session_id, card.status, card.fault_code)
-        out = card.model_dump(exclude={"ml_quote", "ml_quote_label"})
+        out = card.model_dump(exclude={"ml_quote", "ml_quote_label", "manual"})
         out.update(
             {
                 "engine_model": conv.vehicle.engine_model,
