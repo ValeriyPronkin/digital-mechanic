@@ -54,9 +54,9 @@ def test_made_up_repair_number_is_still_cut(ml: MLClient, toir: ToirClient) -> N
 
 
 def test_page_of_unfound_document_is_not_allowed(ml: MLClient, toir: ToirClient) -> None:
-    # Без search_manual источника нет — «стр. 42» ничем не подтверждена
-    text, _ = _answer(ml, toir, "Смотрите руководство, стр. 42.", search=False)
-    assert "42" not in text
+    # Найдена только стр. 42 — «стр. 77» ничем не подтверждена
+    text, _ = _answer(ml, toir, "Смотрите руководство, стр. 77.", search=False)
+    assert "77" not in text
 
 
 def test_empty_source_section_is_filled_by_code(ml: MLClient, toir: ToirClient) -> None:

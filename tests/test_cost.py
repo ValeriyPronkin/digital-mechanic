@@ -86,3 +86,51 @@ def test_truncated_answer_is_marked(ml: MLClient, toir: ToirClient) -> None:
     ag, _ = make_agent([long], ml, toir)
     reply = ag.ask(ag.start(*ANOMALY), "Что с двигателем?")
     assert "сокращён по длине" in reply.text
+
+
+def test_prefetch_answers_in_one_model_call(ml: MLClient, toir: ToirClient) -> None:
+    """Код сам даёт модели диагноз и 3 фрагмента: при отклонении хватает одного вызова модели."""
+    ag, llm = make_agent([say("Давление масла ниже нормы [R1].")], ml, toir)
+    reply = ag.ask(ag.start(*ANOMALY), "Что с двигателем?")
+    assert len(llm.seen) == 1
+    tools = [s["name"] for s in reply.trace["steps"] if s["kind"] == "tool"]
+    assert tools == ["get_diagnosis (код)", "search_manual (код)"]
+    assert reply.grounded
+
+
+def test_prefetch_does_not_search_for_normal_or_failed(ml: MLClient, toir: ToirClient) -> None:
+    from test_agent import FAILED, NORMAL
+
+    for pair in (NORMAL, FAILED):
+        ag, _ = make_agent([say("ок")], ml, toir)
+        reply = ag.ask(ag.start(*pair), "Что с двигателем?")
+        assert [s["name"] for s in reply.trace["steps"] if s["kind"] == "tool"] == ["get_diagnosis (код)"]
+
+
+def test_diagnosis_prefetched_once_per_conversation(ml: MLClient, toir: ToirClient) -> None:
+    ag, _ = make_agent([say("Раз."), say("Два.")], ml, toir)
+    conv = ag.start(*ANOMALY)
+    ag.ask(conv, "Что с двигателем?")
+    second = ag.ask(conv, "А что проверить?")
+    assert "get_diagnosis (код)" not in [s["name"] for s in second.trace["steps"]]
+
+
+def test_model_sees_short_fragment_numbers_checked_against_full(ml: MLClient, toir: ToirClient) -> None:
+    import json
+
+    from test_agent import FixtureSearch
+
+    long_text = "Общие сведения о системе. " * 40 + "Давление масла на холостом ходу не менее 0,1 МПа."
+    steps = [call("search_manual", query="давление масла холостой ход"), say("Не менее 0,1 МПа [R1].")]
+    ag, llm = make_agent(steps, ml, toir, FixtureSearch(long_text), prefetch=False)
+    reply = ag.ask(ag.start(*ANOMALY), "Какое давление масла?")
+    tool = next(m for m in llm.seen[-1] if m["role"] == "tool")
+    found = json.loads(str(tool["content"]))["found"][0]["text"]
+    assert len(found) <= 450 and "0,1 МПа" in found
+    assert "0,1 МПа" in reply.text
+
+
+def test_ticket_request_does_not_prefetch_search(ml: MLClient, toir: ToirClient) -> None:
+    ag, _ = make_agent([say("ок")], ml, toir)
+    reply = ag.ask(ag.start(*ANOMALY), "Оформи заявку")
+    assert "search_manual (код)" not in [s["name"] for s in reply.trace["steps"]]
