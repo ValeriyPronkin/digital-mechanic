@@ -127,10 +127,10 @@ def build(
     queries = [q for s in searches for q in s["queries"]]
     search_rub = sum(approx_tokens(q) for q in queries) * _price("embedding") / 1000
     stt_rub = float(stt["cost_rub"]) if stt else 0.0
-    tts_chars = len(speech_text) if by_voice else 0
-    from service.voice import tts_cost_rub
+    from service.voice import choose_tts_api, for_tts, tts_cost_rub
 
-    tts_rub = tts_cost_rub(tts_chars) if tts_chars else 0.0
+    tts_chars = len(for_tts(speech_text)) if by_voice else 0  # символы, уходящие в синтез
+    tts_rub = tts_cost_rub(tts_chars, choose_tts_api(tts_chars)) if tts_chars else 0.0  # без кэша — оценка сверху
     model_rub = float(trace.get("cost_rub") or 0.0)
     return {
         "request_id": trace.get("request_id"),

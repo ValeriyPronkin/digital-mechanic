@@ -105,7 +105,7 @@ class _FakeSpeech:
     def recognize(self, pcm: bytes) -> str:
         return "какое давление масла"
 
-    def synthesize(self, text: str) -> bytes:
+    def synthesize(self, text: str, api: str = "v1") -> bytes:
         return b"ID3"
 
 
@@ -131,7 +131,9 @@ def test_api_passport_for_voice_question_and_card(
     pp = r["passport"]
     assert pp["question"]["level"] == "expert"  # уровень механика из #30
     assert pp["question"]["by_voice"] and pp["question"]["stt_seconds"] == pytest.approx(3.0)
-    assert pp["voice"]["stt_rub"] > 0 and pp["voice"]["tts_chars"] == len(r["speech"]["text"])
+    from service.voice import for_tts
+
+    assert pp["voice"]["stt_rub"] > 0 and pp["voice"]["tts_chars"] == len(for_tts(r["speech"]["text"]))
     assert pp["total"]["voice_rub"] == pytest.approx(pp["voice"]["stt_rub"] + pp["voice"]["tts_rub_estimate"], abs=1e-4)
 
     card = client.post("/api/diagnose", json={"vehicle_id": vid, "session_id": sid}).json()

@@ -33,6 +33,9 @@ from service.voice import (
     NOT_HEARD,
     SpeechClient,
     SpeechKit,
+    TtsCache,
+    choose_tts_api,
+    for_tts,
     pcm_from_wav,
     speech_for,
     stt_cost_rub,
@@ -149,6 +152,11 @@ def shared_ledger() -> SharedLedger | None:
 @lru_cache(maxsize=1)
 def speech() -> SpeechClient:
     return SpeechKit.from_env()
+
+
+@lru_cache(maxsize=1)
+def tts_cache() -> TtsCache:
+    return TtsCache.from_env()
 
 
 @lru_cache(maxsize=1)
@@ -355,14 +363,22 @@ def voice_speak(req: SpeakIn, request: Request) -> Response:
     _rate_limit(request)
     if not conv_state.verify_text(req.text, req.sig):
         raise HTTPException(400, "Этот текст сервер не готовил к озвучке.")
+    chars = len(for_tts(req.text))  # тарифицируется текст, который уходит в синтез (единицы — словами)
+    t0 = time.monotonic()
+    audio = tts_cache().get(req.text)
+    if audio is not None:  # одинаковая фраза уже синтезирована — 0 ₽
+        store().log_voice("tts_cache", chars, 0.0, int((time.monotonic() - t0) * 1000))
+        return Response(content=audio, media_type="audio/mpeg", headers={"Cache-Control": "no-store", "X-TTS": "cache"})
+    api = choose_tts_api(chars)
     try:
-        audio, ms = timed(speech().synthesize, req.text)
+        audio, ms = timed(speech().synthesize, req.text, api)
     except ServiceError as exc:
         raise HTTPException(exc.http_status, exc.message) from exc
-    store().log_voice("tts", len(req.text), tts_cost_rub(len(req.text)), ms)
+    tts_cache().put(req.text, audio)
+    store().log_voice("tts", chars, tts_cost_rub(chars, api), ms)
     if (slog := journal()) is not None:
         slog.event("step", step="tts", ms=ms)
-    return Response(content=audio, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
+    return Response(content=audio, media_type="audio/mpeg", headers={"Cache-Control": "no-store", "X-TTS": api})
 
 
 class TicketIn(BaseModel):

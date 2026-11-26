@@ -65,13 +65,13 @@
   },
   "tts_v1": {
    "value": 1342.0,
-   "unit": "₽ за 1 млн символов (API v1 — его использует голос, src/service/voice.py)",
+   "unit": "₽ за 1 млн символов (API v1; голос выбирает v1 или v3 по цене фразы — src/service/voice.py)",
    "vat_included": true,
    "source": "https://aistudio.yandex.ru/docs/ru/speechkit/pricing («Синтез с использованием API v1, за 1 млн символов»)"
   },
   "tts_v3": {
    "value": 0.1626,
-   "unit": "₽ за 250 символов (API v3, модель general; голос пока на v1 — переход вдвое дешевле)",
+   "unit": "₽ за запрос (API v3, модель general): до 250 символов — одна единица, длиннее (unsafeMode) — каждые начатые 250 символов",
    "vat_included": true,
    "source": "https://aistudio.yandex.ru/docs/ru/speechkit/pricing"
   },

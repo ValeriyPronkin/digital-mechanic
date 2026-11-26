@@ -174,7 +174,8 @@ jobs:
             --environment "MOCK_TOIR_URL=${TOIR_URL%/}" \
             --environment MOCK_TIMEOUT=30 \
             --environment STATE_DB=/tmp/agent.db \
-            --environment INDEX_DIR=/tmp/index
+            --environment INDEX_DIR=/tmp/index \
+            --environment TTS_CACHE_BUCKET=1
           if [ -n "${S3_BUCKET:-}" ]; then
             set -- "$@" --environment "S3_BUCKET=${S3_BUCKET}"
           else
