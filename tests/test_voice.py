@@ -74,9 +74,29 @@ def test_speech_numbers_always_in_cited_fragment(answer: str) -> None:
     assert numbers(sp.body) <= allowed, sp
 
 
+def test_speech_drops_reference_group_cleanly() -> None:
+    sp = speech_for("Зазор регулируется в пределах **0,25–0,30 мм** [R1], [R2].", SOURCES)
+    assert sp.body == "Зазор регулируется в пределах 0,25–0,30 мм." and " ," not in sp.text
+
+
 def test_speech_not_in_manual() -> None:
     assert speech_for("В руководстве не нашёл, как это проверить. Нужна дефектовка.", SOURCES).text == NOT_IN_MANUAL
     assert speech_for("Зазор 0,45 мм [R1].", SOURCES).text == NOT_IN_MANUAL  # единственная цифра не подтвердилась
+
+
+def test_speech_not_in_manual_long_phrasing() -> None:
+    """Живой ответ DeepSeek (26.11): «нет» далеко от «руководстве», первая фраза с цифрами из названия двигателя."""
+    answer = (
+        "**Коротко:** в руководстве по этому двигателю (ЯМЗ-236М2) данных о давлении воздуха в шинах передней оси "
+        "нет — это руководство по двигателю, а не по шасси/шинам.\n\n**Что нашёл:** только фрагменты по двигателю "
+        "(испытания, ТНВД, воздушный фильтр, сцепление) — к шинам они не относятся."
+    )
+    assert speech_for(answer, {}).text == NOT_IN_MANUAL
+
+
+def test_speech_off_topic_is_not_called_manual_gap() -> None:
+    sp = speech_for("Я не знаю пароль от Wi-Fi в гараже — такими данными не располагаю. Уточните у диспетчера.", {})
+    assert sp.text == "Я не знаю пароль от Wi-Fi в гараже — такими данными не располагаю."
 
 
 def test_speech_without_manual_uses_plain_sentence() -> None:

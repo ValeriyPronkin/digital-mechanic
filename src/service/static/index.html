@@ -60,6 +60,15 @@
     .draft h3 { margin:0 0 .5rem; } .draft ul { list-style:disc; padding-left:1.2rem; margin:.2rem 0 .6rem; }
     .draft button.send { width:100%; background:var(--red); font-size:1.1rem; }
     .ok { background:#e3f4e8; color:var(--green); border-radius:12px; padding:.8rem 1rem; font-weight:700; margin-bottom:.6rem; }
+    .actionbar .row { display:flex; gap:.5rem; max-width:34rem; margin:.5rem auto 0; }
+    .actionbar .row button { margin:0; flex:1; min-height:52px; }
+    .actionbar button.secondary { background:#eef2f7; color:var(--accent); font-weight:600; min-height:48px; margin-top:.5rem; }
+    #voice { min-height:84px; font-size:1.3rem; border-radius:20px; }
+    #voice.rec { background:var(--red); animation:pulse 1.2s infinite; }
+    #voice.busy { background:#5f6b7a; }
+    @keyframes pulse { 50% { opacity:.75; } }
+    .msg.me button.fix { margin-left:.5rem; font:inherit; font-size:.85rem; border:0; background:none; color:var(--accent);
+                         text-decoration:underline; padding:.2rem; min-height:32px; }
     details.trace { margin-top:1rem; font-size:.88rem; color:var(--muted); }
     details.trace table { width:100%; border-collapse:collapse; } details.trace td { padding:.2rem .3rem; border-top:1px solid var(--line); }
   </style>
@@ -71,6 +80,11 @@
   </header>
   <main id="main"></main>
   <div class="actionbar" id="actionbar" hidden>
+    <button id="voice" hidden aria-live="polite">🎤 Спросить голосом</button>
+    <div class="row" id="voicectl" hidden>
+      <button id="replay" class="secondary">🔁 Повторить</button>
+      <button id="stop" class="secondary">■ Стоп</button>
+    </div>
     <button id="diagnose" disabled>Получить результат диагностики</button>
   </div>
 
@@ -132,6 +146,7 @@ async function openVehicle(id) {
 }
 
 function screenHistory() {
+  voiceReset(); $("voice").hidden = true; $("diagnose").classList.remove("secondary");
   $("diagnose").disabled = !selected;
   $("diagnose").textContent = "Получить результат диагностики";
   const items = current.sessions.map((s, i) => el("li", {}, el("button", {
@@ -175,7 +190,8 @@ function screenCard(card) {
       (s ? " от " + fmtDate(s.checked_at) : "")),
     chatBlock(card));
   const btn = $("diagnose");
-  btn.disabled = false; btn.textContent = "Выбрать другую проверку";
+  btn.disabled = false; btn.textContent = "Выбрать другую проверку"; btn.classList.add("secondary");
+  voiceReset(); $("voice").hidden = false;
   window.scrollTo(0, 0);
 }
 
@@ -240,22 +256,135 @@ function draftCard(d) {
   return box;
 }
 
-async function ask(q) {
-  $("chatlog").append(el("div", {class:"msg me"}, q));
+async function ask(q, byVoice = false) {
+  const mine = el("div", {class:"msg me"}, byVoice ? "🎤 " + q : q);
+  if (byVoice) mine.append(el("button", {class:"fix", onclick: () => { $("question").value = q; $("question").focus(); }}, "Исправить"));
+  $("chatlog").append(mine);
   const wait = el("div", {class:"msg muted"}, "Думаю…");
   $("chatlog").append(wait);
+  wait.scrollIntoView({block:"nearest"});
   try {
     const r = await api("/api/chat", {method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({vehicle_id: current.vehicle_id, session_id: selected, message: q, state: convState})});
     conversationId = r.conversation_id; convState = r.state;
     wait.remove(); renderAnswer(r);
-  } catch (e) { wait.remove(); $("chatlog").append(el("div", {class:"err"}, e.message)); }
+    return r;
+  } catch (e) { wait.remove(); $("chatlog").append(el("div", {class:"err"}, e.message)); return null; }
 }
+
+// ---------- голос (#14): запись WAV 16 кГц через WebAudio, ответ вслух — короткая версия от сервера ----------
+const VOICE_LABEL = {idle:"🎤 Спросить голосом", rec:"● Слушаю… нажмите — отправить", stt:"Распознаю…",
+                     think:"Думаю…", say:"🔊 Говорю… нажмите — новый вопрос"};
+const MAX_REC_S = 30;
+const player = new Audio();
+const vs = {state:"idle", stream:null, ctx:null, proc:null, chunks:[], rate:48000, timer:null, speech:null, url:null};
+
+function voiceState(st) {
+  vs.state = st;
+  const b = $("voice");
+  b.textContent = VOICE_LABEL[st];
+  b.classList.toggle("rec", st === "rec");
+  b.classList.toggle("busy", st === "stt" || st === "think");
+  b.disabled = st === "stt" || st === "think";
+  $("voicectl").hidden = !vs.url || st === "rec";
+}
+function voiceReset() {
+  stopRecording(); player.pause();
+  if (vs.url) URL.revokeObjectURL(vs.url);
+  vs.url = null; vs.speech = null; voiceState("idle");
+}
+function voiceError(msg) { $("chatlog").append(el("div", {class:"err", role:"alert"}, msg)); voiceState("idle"); }
+
+function unlockAudio() {
+  // iPhone проигрывает звук, только если элемент запущен из нажатия: запускаем тишину сейчас, ответ — позже.
+  player.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+  player.play().catch(() => {});
+}
+
+async function startRecording() {
+  if (!window.isSecureContext || !navigator.mediaDevices) return voiceError("Голос работает только по HTTPS-ссылке стенда.");
+  player.pause(); unlockAudio();
+  try {
+    vs.stream = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1, echoCancellation:true, noiseSuppression:true}});
+  } catch (e) {
+    return voiceError(e && e.name === "NotAllowedError"
+      ? "Нет доступа к микрофону. Разрешите микрофон для этого сайта в настройках браузера."
+      : "Микрофон не найден или занят. Задайте вопрос текстом.");
+  }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  vs.ctx = new Ctx(); vs.rate = vs.ctx.sampleRate; vs.chunks = [];
+  const src = vs.ctx.createMediaStreamSource(vs.stream);
+  vs.proc = vs.ctx.createScriptProcessor(4096, 1, 1);
+  vs.proc.onaudioprocess = (e) => vs.chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  src.connect(vs.proc); vs.proc.connect(vs.ctx.destination);
+  vs.timer = setTimeout(() => { if (vs.state === "rec") finishRecording(); }, MAX_REC_S * 1000);
+  voiceState("rec");
+}
+function stopRecording() {
+  clearTimeout(vs.timer);
+  if (vs.proc) { vs.proc.disconnect(); vs.proc.onaudioprocess = null; vs.proc = null; }
+  if (vs.stream) { vs.stream.getTracks().forEach(t => t.stop()); vs.stream = null; }
+  if (vs.ctx) { vs.ctx.close().catch(() => {}); vs.ctx = null; }
+}
+function toWav16k(chunks, rate) {
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const all = new Float32Array(total); let o = 0;
+  for (const c of chunks) { all.set(c, o); o += c.length; }
+  const ratio = rate / 16000, n = Math.floor(total / ratio);
+  const buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const str = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
+  str(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); str(8, "WAVE"); str(12, "fmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 16000, true); v.setUint32(28, 32000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, "data"); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) {  // усреднение окна — простой фильтр от наложения частот
+    const a = Math.floor(i * ratio), b = Math.min(total, Math.floor((i + 1) * ratio));
+    let s = 0; for (let j = a; j < b; j++) s += all[j];
+    const x = Math.max(-1, Math.min(1, s / Math.max(1, b - a)));
+    v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+  }
+  return new Blob([buf], {type:"audio/wav"});
+}
+async function finishRecording() {
+  const chunks = vs.chunks, rate = vs.rate;
+  stopRecording(); voiceState("stt");
+  let text;
+  try {
+    const r = await api("/api/voice/recognize", {method:"POST", headers:{"Content-Type":"audio/wav"}, body: toWav16k(chunks, rate)});
+    text = r.text;
+  } catch (e) { return voiceError(e.message || "Не расслышал, повторите."); }
+  voiceState("think");
+  const r = await ask(text, true);
+  if (r && r.speech) await speak(r.speech); else voiceState("idle");
+}
+async function speak(sp) {
+  vs.speech = sp; voiceState("think");
+  try {
+    const r = await fetch("/api/voice/speak", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(sp)});
+    if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.detail || "Озвучка недоступна — ответ на экране."); }
+    if (vs.url) URL.revokeObjectURL(vs.url);
+    vs.url = URL.createObjectURL(await r.blob());
+  } catch (e) { return voiceError(e.message); }
+  playSpeech();
+}
+function playSpeech() {
+  if (!vs.url) return;
+  player.src = vs.url; voiceState("say");
+  player.play().catch(() => { voiceState("idle"); $("chatlog").append(el("div", {class:"note"}, "Нажмите «Повторить», чтобы прослушать ответ.")); });
+}
+player.addEventListener("ended", () => { if (vs.state === "say") voiceState("idle"); });
+
+$("voice").addEventListener("click", () => {
+  if (vs.state === "rec") finishRecording();
+  else if (vs.state === "idle" || vs.state === "say") startRecording();
+});
+$("replay").addEventListener("click", () => { unlockAudio(); playSpeech(); });
+$("stop").addEventListener("click", () => { player.pause(); voiceState("idle"); });
 
 $("diagnose").addEventListener("click", () => {
   if ($("diagnose").textContent.startsWith("Выбрать")) screenHistory(); else runDiagnose();
 });
-$("back").addEventListener("click", () => screenList());
+$("back").addEventListener("click", () => { voiceReset(); screenList(); });
 
 api("/api/vehicles").then(v => { vehicles = v; screenList(); })
   .catch(e => { main.replaceChildren(); showError("Не удалось загрузить список машин: " + e.message); });

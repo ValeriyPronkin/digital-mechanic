@@ -98,6 +98,7 @@ def health() -> dict[str, Any]:
         "llm_key_present": any(os.environ.get(k) for k in ("DEEPSEEK_API_KEY", "GIGACHAT_CREDENTIALS", "LLM_API_KEY")),
         "llm_provider": os.environ.get("LLM_PROVIDER", "deepseek"),
         "manuals_index": manuals_index_status(),
+        "voice_key_present": any(os.environ.get(k) for k in ("YANDEX_TTS_API_KEY", "YANDEX_API_KEY")),
     }
 
 

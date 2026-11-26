@@ -133,7 +133,13 @@ def for_tts(text: str) -> str:
 # ---------- короткая версия ответа ----------
 
 _REF = re.compile(r"\[\s*(R\d+)\s*\]")
+_REF_GROUP = re.compile(r"\s*\[\s*R\d+\s*\](?:\s*[,;]?\s*\[\s*R\d+\s*\])*")  # «[R1], [R3]» целиком
 _MD = re.compile(r"[*_#`>]+")
+# «в руководстве не нашёл», «в руководстве по этому двигателю (ЯМЗ-236М2) данных … нет» — в пределах предложения
+_NOT_FOUND = re.compile(
+    r"не\s+наш[её]л|нет\s+в\s+руководств|руководств\w*[^.!?\n]{0,160}?\b(?:нет|не\s+приводится|не\s+указан\w*)\b",
+    re.IGNORECASE,
+)
 _SENT = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
@@ -163,7 +169,7 @@ def speech_for(answer: str, sources: dict[str, Source]) -> Speech:
     fallback: str | None = None
     for raw in _SENT.split(answer):
         refs = tuple(r for r in _REF.findall(raw) if r in sources)
-        text = _clean(_REF.sub("", raw))
+        text = _clean(_REF_GROUP.sub("", raw))
         if len(text) < 8:
             continue
         nums = numbers(text)
@@ -175,8 +181,7 @@ def speech_for(answer: str, sources: dict[str, Source]) -> Speech:
                 return Speech(f"{text.rstrip('.')}. {tail}", text, refs)
         elif fallback is None and not nums and len(text) <= SPEECH_MAX_CHARS:
             fallback = text
-    low = answer.lower()
-    if "не нашёл" in low or "не нашел" in low or "в руководстве нет" in low or not fallback:
+    if _NOT_FOUND.search(answer) or not fallback:
         return Speech(NOT_IN_MANUAL, NOT_IN_MANUAL, ())
     return Speech(fallback, fallback, ())
 
