@@ -1,4 +1,4 @@
-.PHONY: eval-open setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch
+.PHONY: spend-probe eval-open setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch
 
 PORT ?= 8000
 
@@ -46,6 +46,10 @@ cost-xlsx: install
 ## Открытая половина вопросов приёмщика на настоящей модели (issue #28): reports/eval-open.md (вопросы — вне git)
 eval-open: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/eval_open.py --label $(or $(LABEL),$(shell date +%Y%m%d-%H%M))
+
+## Проверка условной записи на настоящем бакете (issue #11): объект spend/probe-*, после — удаляется. Запускает человек
+spend-probe: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/spend_probe.py
 
 ## Всё, что проверяет CI, кроме смоука в Docker. Зелёный = код возврата 0.
 check: lint types test stubs third-party secrets
