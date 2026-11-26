@@ -202,9 +202,10 @@ def _other(name: str) -> float:
 
 
 def voice_rub(answer: str) -> tuple[float, str]:
-    """Оценка по тарифу без НДС: вопрос до 15 с — один отрезок распознавания; синтез API v3 — за каждые 250 знаков."""
-    units = max(1, -(-len(answer) // 250))
-    return _other("stt_sync") + units * _other("tts_v3"), f"распознавание 15 с + синтез {len(answer)} знаков"
+    """Голос по тарифу без НДС — как в src/service/voice.py: распознавание 15 с + синтез API v1 за символы."""
+    from service.voice import stt_cost_rub, tts_cost_rub
+
+    return stt_cost_rub(15) + tts_cost_rub(len(answer)), f"распознавание 15 с + синтез {len(answer)} знаков (API v1)"
 
 
 def _emb_client(searcher: Any) -> Any:
@@ -343,8 +344,8 @@ def render_md() -> None:
         "",
         "1. **Запрос** = модель + эмбеддинг запроса (поиск по смыслу) — таблица выше; только он идёт в шаблон "
         "организаторов (`make cost-xlsx`).",
-        "2. **Голос — опция** к запросу: распознавание вопроса (15 с) и синтез ответа (SpeechKit API v3, за каждые "
-        f"250 знаков) — **+{voice if voice is not None else '—'} ₽** на вопрос (замер Г1). "
+        "2. **Голос — опция** к запросу: распознавание вопроса (15 с) и синтез ответа (SpeechKit API v1, за символы; "
+        f"v3 вдвое дешевле) — **+{voice if voice is not None else '—'} ₽** на вопрос (замер Г1). "
         f"Альтернатива — {LOCAL_VOICE}.",
         f"3. **Постоянные в месяц на парк** (не в запрос): парк {int(a['vehicles'])} ТС × "
         f"{int(a['checks_per_vehicle_month'])} проверки × {int(a['questions_per_check'])} вопроса = "

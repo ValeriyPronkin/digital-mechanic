@@ -9,6 +9,7 @@
     :root { --bg:#f4f5f7; --fg:#1f2933; --muted:#5f6b7a; --card:#fff; --line:#d9dee5;
             --green:#1e7a3c; --yellow:#9a6a00; --red:#b42318; --grey:#5f6b7a; --accent:#1f5fbf; }
     * { box-sizing: border-box; }
+    [hidden] { display:none !important; }
     body { margin:0; font: 17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
            background:var(--bg); color:var(--fg); }
     header { position:sticky; top:0; z-index:2; background:var(--fg); color:#fff;
@@ -60,6 +61,25 @@
     .draft h3 { margin:0 0 .5rem; } .draft ul { list-style:disc; padding-left:1.2rem; margin:.2rem 0 .6rem; }
     .draft button.send { width:100%; background:var(--red); font-size:1.1rem; }
     .ok { background:#e3f4e8; color:var(--green); border-radius:12px; padding:.8rem 1rem; font-weight:700; margin-bottom:.6rem; }
+    .chat h2, .explain h3 { font-size:1.15rem; line-height:1.25; margin:.2rem 0 .6rem; overflow-wrap:anywhere; }
+    .urgency { margin-top:.6rem; padding:.5rem .7rem; border-radius:10px; background:rgba(255,255,255,.16); font-size:1rem; }
+    .explain { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:.9rem 1rem; margin-bottom:1rem; }
+    .explain dl { margin:0; } .explain dt { font-weight:700; margin-top:.6rem; } .explain dd { margin:.2rem 0 0; }
+    .explain ol { margin:.3rem 0; padding-left:1.4rem; } .explain li { margin:.25rem 0; }
+    .explain .warn { background:#fde8e7; color:var(--red); border-radius:8px; padding:.4rem .6rem; margin:.3rem 0; }
+    .level { display:flex; gap:.4rem; margin:.2rem 0 .4rem; }
+    .level button { flex:1; font:inherit; font-weight:600; min-height:48px; border-radius:12px; border:2px solid var(--accent);
+                    background:#fff; color:var(--accent); }
+    .level button[aria-pressed=true] { background:var(--accent); color:#fff; }
+    .actionbar .row { display:flex; gap:.5rem; max-width:34rem; margin:.5rem auto 0; }
+    .actionbar .row button { margin:0; flex:1; min-height:52px; }
+    .actionbar button.secondary { background:#eef2f7; color:var(--accent); font-weight:600; min-height:48px; margin-top:.5rem; }
+    #voice { min-height:84px; font-size:1.3rem; border-radius:20px; }
+    #voice.rec { background:var(--red); animation:pulse 1.2s infinite; }
+    #voice.busy { background:#5f6b7a; }
+    @keyframes pulse { 50% { opacity:.75; } }
+    .msg.me button.fix { margin-left:.5rem; font:inherit; font-size:.85rem; border:0; background:none; color:var(--accent);
+                         text-decoration:underline; padding:.2rem; min-height:32px; }
     details.trace { margin-top:1rem; font-size:.88rem; color:var(--muted); }
     details.trace table { width:100%; border-collapse:collapse; } details.trace td { padding:.2rem .3rem; border-top:1px solid var(--line); }
   </style>
@@ -68,9 +88,15 @@
   <header>
     <button id="back" hidden aria-label="Назад">← Назад</button>
     <h1 id="title">Цифровой механик</h1>
+    <a href="/fleet" style="color:#fff;text-decoration:none;padding:.5rem;min-height:44px;display:inline-flex;align-items:center">Парк →</a>
   </header>
   <main id="main"></main>
   <div class="actionbar" id="actionbar" hidden>
+    <button id="voice" hidden aria-live="polite">🎤 Спросить голосом</button>
+    <div class="row" id="voicectl" hidden>
+      <button id="replay" class="secondary">🔁 Повторить</button>
+      <button id="stop" class="secondary">■ Стоп</button>
+    </div>
     <button id="diagnose" disabled>Получить результат диагностики</button>
   </div>
 
@@ -92,11 +118,29 @@ function el(tag, attrs, ...children) {
 }
 const fmtDate = (iso) => new Date(iso).toLocaleString("ru-RU", {day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit"});
 
-async function api(path, opts) {
-  const r = await fetch(path, opts);
+// Сеть площадки/LTE иногда держит TLS-рукопожатие 16–80 с, и Safari обрывает запрос («Load failed»).
+// Повторяем только при сетевом обрыве или своём таймауте; ответ сервера с ошибкой не повторяем.
+const NET_FAIL = "Связь со стендом оборвалась. Проверьте интернет и повторите.";
+async function fetchRetry(path, opts = {}, {tries = 1, timeoutMs = 0, onRetry = null} = {}) {
+  for (let i = 0; ; i++) {
+    const ctl = timeoutMs ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), timeoutMs) : null;
+    try {
+      return await fetch(path, ctl ? {...opts, signal: ctl.signal} : opts);
+    } catch (e) {
+      if (i + 1 >= tries) throw new Error(NET_FAIL);
+      if (onRetry) onRetry(i + 1);
+    } finally { if (timer) clearTimeout(timer); }
+  }
+}
+async function api(path, opts, retry) {
+  const r = await fetchRetry(path, opts, retry);
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(typeof body.detail === "string" ? body.detail : "Ошибка " + r.status);
   return body;
+}
+function retryNote(where) {
+  return () => { if (where) where.textContent = "Связь плохая — повторяю…"; };
 }
 function showError(msg) { main.prepend(el("div", {class:"err", role:"alert"}, msg)); }
 
@@ -132,6 +176,7 @@ async function openVehicle(id) {
 }
 
 function screenHistory() {
+  voiceReset(); $("voice").hidden = true; $("diagnose").classList.remove("secondary");
   $("diagnose").disabled = !selected;
   $("diagnose").textContent = "Получить результат диагностики";
   const items = current.sessions.map((s, i) => el("li", {}, el("button", {
@@ -158,19 +203,6 @@ async function runDiagnose() {
   screenCard(card);
 }
 
-// Пояснение по руководству из матрицы «код × двигатель» — без ИИ, 0 токенов (issue #16)
-function manualBlock(m) {
-  if (!m) return null;
-  if (m.status !== "confirmed")
-    return el("section", {class:"manual"}, el("h3", {}, "По руководству"), el("p", {}, m.note));
-  const link = r => el("a", {href: r.url, target:"_blank", rel:"noopener"}, " — стр. PDF " + r.pdf_page);
-  return el("section", {class:"manual"},
-    el("h3", {}, "Что делать — по руководству"),
-    el("ol", {}, ...m.steps.map(r => el("li", {}, r.text, link(r)))),
-    ...m.safety.map(r => el("div", {class:"note"}, "⚠ " + r.text, link(r))),
-    m.note ? el("p", {class:"sub"}, m.note) : null);
-}
-
 function screenCard(card) {
   conversationId = null; convState = null; lastCard = card;
   const s = current.sessions.find(x => x.session_id === selected);
@@ -182,17 +214,67 @@ function screenCard(card) {
     el("section", {class:"verdict " + card.color, "aria-live":"polite"},
       el("h2", {}, card.title),
       el("p", {}, card.action),
-      meta.length ? el("div", {class:"meta"}, meta.join(" · ")) : null),
+      meta.length ? el("div", {class:"meta"}, meta.join(" · ")) : null,
+      card.urgency ? el("div", {class:"urgency"}, el("b", {}, "Срочность: " + URG[card.urgency]), " — " + card.urgency_reason) : null),
+    card.status === "anomaly" && card.ticket_possible ? explainBlock(card) : null,
     el("blockquote", {}, el("cite", {}, card.ml_quote_label), card.ml_quote),
-    manualBlock(card.manual),
     el("p", {class:"sub"}, current.vehicle_id + " · " + current.engine_model + " · проверка " + selected +
       (s ? " от " + fmtDate(s.checked_at) : "")),
     chatBlock(card));
   const btn = $("diagnose");
-  btn.disabled = false; btn.textContent = "Выбрать другую проверку";
+  btn.disabled = false; btn.textContent = "Выбрать другую проверку"; btn.classList.add("secondary");
+  voiceReset(); $("voice").hidden = false;
   window.scrollTo(0, 0);
 }
 
+
+// ---------- пояснение к отклонению: из матрицы «код × двигатель» по руководству, без модели, 0 токенов (#16) ----------
+const URG = {high:"высокая", medium:"средняя", low:"низкая"};
+const LEVEL_KEY = "dm-level";  // «Коротко» / «По шагам» — на этом устройстве (задел #17)
+const getLevel = () => localStorage.getItem(LEVEL_KEY) || "steps";
+
+function pageLink(r) {
+  return el("a", {href: r.url, target:"_blank", rel:"noopener"}, r.manual + ", стр. PDF " + r.pdf_page + (r.what ? " — " + r.what : ""));
+}
+function explainBlock(card) {
+  const box = el("section", {class:"explain", "aria-label":"Пояснение по руководству"});
+  const render = () => {
+    const level = getLevel(), m = card.manual;
+    const pick = (lv) => el("button", {"aria-pressed": String(level === lv), onclick: () => { localStorage.setItem(LEVEL_KEY, lv); render(); }},
+      lv === "short" ? "Коротко" : "По шагам");
+    const dl = el("dl", {},
+      el("dt", {}, "Что произошло"),
+      el("dd", {}, "Сервис диагностики услышал по звуку: " + card.fault_title +
+        (card.confidence_pct !== null ? " (уверенность " + card.confidence_pct + "%)" : "") + "."),
+      el("dt", {}, "Чем грозит"),
+      el("dd", {}, card.urgency_reason ? card.urgency_reason[0].toUpperCase() + card.urgency_reason.slice(1) + "." : "—"));
+    if (!m || m.status !== "confirmed") {
+      dl.append(el("dt", {}, "Что проверить"), el("dd", {}, (m && m.note) || "В руководстве этого двигателя нет порядка работ по этому узлу — нужна дефектовка."));
+    } else if (level === "short") {
+      dl.append(el("dt", {}, "Что проверить"),
+        el("dd", {}, m.steps.length ? m.steps[0].text + (m.steps.length > 1 ? " — и ещё " + (m.steps.length - 1) + " по руководству." : "") : "—"));
+      if (m.safety.length) dl.append(el("dd", {class:"warn"}, "⚠ " + m.safety[0].text));
+    } else {
+      dl.append(el("dt", {}, "Что проверить — по шагам"),
+        el("dd", {}, el("ol", {}, ...m.steps.map(x => el("li", {}, x.text, " ", el("span", {class:"sub"}, "(стр. " + x.pdf_page + ")"))))));
+      if (m.safety.length) dl.append(el("dt", {}, "Безопасность"), ...m.safety.map(x => el("dd", {class:"warn"}, "⚠ " + x.text)));
+    }
+    if (m && m.status === "confirmed" && m.note) dl.append(el("dd", {class:"sub"}, m.note));
+    const pages = m && m.status === "confirmed" ? (m.pages.length ? m.pages : m.steps) : [];
+    const uniq = [...new Map(pages.map(r => [r.manual + r.pdf_page, r])).values()];
+    if (uniq.length) dl.append(el("dt", {}, "Страницы руководства"), el("dd", {class:"src"}, ...uniq.map(pageLink)));
+    box.replaceChildren(el("h3", {}, "По руководству"), el("div", {class:"level"}, pick("short"), pick("steps")), dl);
+  };
+  render();
+  return box;
+}
+
+// Нижняя панель (голос + кнопки) не должна закрывать текст: отступ снизу = её высота.
+function fitActionbar() {
+  const bar = $("actionbar");
+  main.style.paddingBottom = bar.hidden ? "" : (bar.offsetHeight + 16) + "px";
+}
+new ResizeObserver(fitActionbar).observe($("actionbar"));
 
 // ---------- чат с агентом ----------
 function chatBlock(card) {
@@ -202,7 +284,7 @@ function chatBlock(card) {
   if (card.ticket_possible) quick.push("Оформить заявку на дефектовку");
   if (card.status === "check_failed") quick.splice(0, 1, "Как правильно повторить запись?");
   return el("section", {class:"chat"},
-    el("h2", {}, "Спросить механика-помощника"),
+    el("h2", {}, "Вопрос помощнику"),
     log,
     el("div", {class:"quick"}, ...quick.map(q => el("button", {onclick: () => ask(q)}, q))),
     el("form", {class:"ask", onsubmit: (e) => { e.preventDefault(); const q = input.value.trim(); if (q) { input.value = ""; ask(q); } }},
@@ -232,6 +314,8 @@ function renderAnswer(r) {
       el("td", {}, s.ms + " мс"))))));
   $("chatlog").append(body);
   if (r.draft) $("chatlog").append(draftCard(r.draft));
+  // связь с неисправностью из карточки — строит код по матрице (#28); кнопка задаёт вопрос об этой проверке
+  if (r.followup) $("chatlog").append(el("div", {class:"quick"}, el("button", {onclick: () => ask(r.followup.question)}, r.followup.label + " →")));
 }
 
 function draftCard(d) {
@@ -258,22 +342,138 @@ function draftCard(d) {
   return box;
 }
 
-async function ask(q) {
-  $("chatlog").append(el("div", {class:"msg me"}, q));
+async function ask(q, byVoice = false) {
+  const mine = el("div", {class:"msg me"}, byVoice ? "🎤 " + q : q);
+  if (byVoice) mine.append(el("button", {class:"fix", onclick: () => { $("question").value = q; $("question").focus(); }}, "Исправить"));
+  $("chatlog").append(mine);
   const wait = el("div", {class:"msg muted"}, "Думаю…");
   $("chatlog").append(wait);
+  wait.scrollIntoView({block:"nearest"});
   try {
     const r = await api("/api/chat", {method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({vehicle_id: current.vehicle_id, session_id: selected, message: q, state: convState})});
+      body: JSON.stringify({vehicle_id: current.vehicle_id, session_id: selected, message: q, state: convState})},
+      {tries: 2, onRetry: retryNote(wait)});
     conversationId = r.conversation_id; convState = r.state;
     wait.remove(); renderAnswer(r);
-  } catch (e) { wait.remove(); $("chatlog").append(el("div", {class:"err"}, e.message)); }
+    return r;
+  } catch (e) { wait.remove(); $("chatlog").append(el("div", {class:"err"}, e.message)); return null; }
 }
+
+// ---------- голос (#14): запись WAV 16 кГц через WebAudio, ответ вслух — короткая версия от сервера ----------
+const VOICE_LABEL = {idle:"🎤 Спросить голосом", rec:"● Слушаю… нажмите — отправить", stt:"Распознаю…",
+                     think:"Думаю…", say:"🔊 Говорю… нажмите — новый вопрос"};
+const MAX_REC_S = 30;
+const player = new Audio();
+const vs = {state:"idle", stream:null, ctx:null, proc:null, chunks:[], rate:48000, timer:null, speech:null, url:null};
+
+function voiceState(st) {
+  vs.state = st;
+  const b = $("voice");
+  b.textContent = VOICE_LABEL[st];
+  b.classList.toggle("rec", st === "rec");
+  b.classList.toggle("busy", st === "stt" || st === "think");
+  b.disabled = st === "stt" || st === "think";
+  $("voicectl").hidden = !vs.url || st === "rec";
+}
+function voiceReset() {
+  stopRecording(); player.pause();
+  if (vs.url) URL.revokeObjectURL(vs.url);
+  vs.url = null; vs.speech = null; voiceState("idle");
+}
+function voiceError(msg) { $("chatlog").append(el("div", {class:"err", role:"alert"}, msg)); voiceState("idle"); }
+
+function unlockAudio() {
+  // iPhone проигрывает звук, только если элемент запущен из нажатия: запускаем тишину сейчас, ответ — позже.
+  player.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+  player.play().catch(() => {});
+}
+
+async function startRecording() {
+  if (!window.isSecureContext || !navigator.mediaDevices) return voiceError("Голос работает только по HTTPS-ссылке стенда.");
+  player.pause(); unlockAudio();
+  try {
+    vs.stream = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1, echoCancellation:true, noiseSuppression:true}});
+  } catch (e) {
+    return voiceError(e && e.name === "NotAllowedError"
+      ? "Нет доступа к микрофону. Разрешите микрофон для этого сайта в настройках браузера."
+      : "Микрофон не найден или занят. Задайте вопрос текстом.");
+  }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  vs.ctx = new Ctx(); vs.rate = vs.ctx.sampleRate; vs.chunks = [];
+  const src = vs.ctx.createMediaStreamSource(vs.stream);
+  vs.proc = vs.ctx.createScriptProcessor(4096, 1, 1);
+  vs.proc.onaudioprocess = (e) => vs.chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  src.connect(vs.proc); vs.proc.connect(vs.ctx.destination);
+  vs.timer = setTimeout(() => { if (vs.state === "rec") finishRecording(); }, MAX_REC_S * 1000);
+  voiceState("rec");
+}
+function stopRecording() {
+  clearTimeout(vs.timer);
+  if (vs.proc) { vs.proc.disconnect(); vs.proc.onaudioprocess = null; vs.proc = null; }
+  if (vs.stream) { vs.stream.getTracks().forEach(t => t.stop()); vs.stream = null; }
+  if (vs.ctx) { vs.ctx.close().catch(() => {}); vs.ctx = null; }
+}
+function toWav16k(chunks, rate) {
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const all = new Float32Array(total); let o = 0;
+  for (const c of chunks) { all.set(c, o); o += c.length; }
+  const ratio = rate / 16000, n = Math.floor(total / ratio);
+  const buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const str = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
+  str(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); str(8, "WAVE"); str(12, "fmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 16000, true); v.setUint32(28, 32000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, "data"); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) {  // усреднение окна — простой фильтр от наложения частот
+    const a = Math.floor(i * ratio), b = Math.min(total, Math.floor((i + 1) * ratio));
+    let s = 0; for (let j = a; j < b; j++) s += all[j];
+    const x = Math.max(-1, Math.min(1, s / Math.max(1, b - a)));
+    v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+  }
+  return new Blob([buf], {type:"audio/wav"});
+}
+async function finishRecording() {
+  const chunks = vs.chunks, rate = vs.rate;
+  stopRecording(); voiceState("stt");
+  let text;
+  try {
+    const r = await api("/api/voice/recognize", {method:"POST", headers:{"Content-Type":"audio/wav"}, body: toWav16k(chunks, rate)},
+      {tries: 3, timeoutMs: 25000, onRetry: () => { $("voice").textContent = "Связь плохая — повторяю…"; }});
+    text = r.text;
+  } catch (e) { return voiceError(e.message || "Не расслышал, повторите."); }
+  voiceState("think");
+  const r = await ask(text, true);
+  if (r && r.speech) await speak(r.speech); else voiceState("idle");
+}
+async function speak(sp) {
+  vs.speech = sp; voiceState("think");
+  try {
+    const r = await fetchRetry("/api/voice/speak", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(sp)},
+      {tries: 3, timeoutMs: 25000, onRetry: () => { $("voice").textContent = "Связь плохая — повторяю…"; }});
+    if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.detail || "Озвучка недоступна — ответ на экране."); }
+    if (vs.url) URL.revokeObjectURL(vs.url);
+    vs.url = URL.createObjectURL(await r.blob());
+  } catch (e) { return voiceError(e.message); }
+  playSpeech();
+}
+function playSpeech() {
+  if (!vs.url) return;
+  player.src = vs.url; voiceState("say");
+  player.play().catch(() => { voiceState("idle"); $("chatlog").append(el("div", {class:"note"}, "Нажмите «Повторить», чтобы прослушать ответ.")); });
+}
+player.addEventListener("ended", () => { if (vs.state === "say") voiceState("idle"); });
+
+$("voice").addEventListener("click", () => {
+  if (vs.state === "rec") finishRecording();
+  else if (vs.state === "idle" || vs.state === "say") startRecording();
+});
+$("replay").addEventListener("click", () => { unlockAudio(); playSpeech(); });
+$("stop").addEventListener("click", () => { player.pause(); voiceState("idle"); });
 
 $("diagnose").addEventListener("click", () => {
   if ($("diagnose").textContent.startsWith("Выбрать")) screenHistory(); else runDiagnose();
 });
-$("back").addEventListener("click", () => screenList());
+$("back").addEventListener("click", () => { voiceReset(); screenList(); });
 
 api("/api/vehicles").then(v => { vehicles = v; screenList(); })
   .catch(e => { main.replaceChildren(); showError("Не удалось загрузить список машин: " + e.message); });

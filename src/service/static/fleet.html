@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f2933">
+  <title>Главный механик — Цифровой механик</title>
+  <style>
+    :root { --bg:#f4f5f7; --fg:#1f2933; --muted:#5f6b7a; --card:#fff; --line:#d9dee5;
+            --green:#1e7a3c; --yellow:#9a6a00; --red:#b42318; --grey:#5f6b7a; --accent:#1f5fbf; }
+    * { box-sizing: border-box; }
+    body { margin:0; font: 17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+           background:var(--bg); color:var(--fg); }
+    header { position:sticky; top:0; z-index:2; background:var(--fg); color:#fff;
+             padding:.75rem 1rem; display:flex; align-items:center; gap:.75rem; }
+    header h1 { font-size:1.1rem; margin:0; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    header a, header button { color:#fff; background:none; border:0; font:inherit; font-size:1rem; padding:.5rem;
+                              min-height:44px; display:inline-flex; align-items:center; text-decoration:none; }
+    main { max-width:40rem; margin:0 auto; padding:1rem 1rem 3rem; }
+    .tiles { display:grid; grid-template-columns:repeat(2, 1fr); gap:.5rem; margin-bottom:1rem; }
+    @media (min-width: 34rem) { .tiles { grid-template-columns:repeat(4, 1fr); } }
+    .tile { border-radius:14px; padding:.7rem .8rem; color:#fff; border:0; font:inherit; text-align:left; min-height:72px; }
+    .tile b { display:block; font-size:1.7rem; line-height:1.1; }
+    .tile[aria-pressed=true] { outline:3px solid var(--fg); outline-offset:2px; }
+    .quarantine { background:var(--red); } .attention { background:var(--yellow); }
+    .rerecord { background:var(--grey); } .normal { background:var(--green); }
+    ul { list-style:none; margin:0; padding:0; }
+    li > button { width:100%; text-align:left; background:var(--card); border:1px solid var(--line); border-radius:12px;
+                  padding:.75rem 1rem; margin-bottom:.5rem; font:inherit; color:inherit; min-height:56px; display:block; }
+    .chip { display:inline-block; color:#fff; border-radius:8px; padding:.05rem .5rem; font-size:.85rem; font-weight:600;
+            margin-right:.4rem; }
+    .plate { font-weight:700; letter-spacing:.03em; }
+    .sub { color:var(--muted); font-size:.92rem; }
+    .why { margin:.3rem 0 0; padding-left:1.1rem; list-style:disc; font-size:.95rem; }
+    h2 { font-size:1.15rem; margin:1.2rem 0 .5rem; }
+    .panel { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:1rem; margin-bottom:1rem; }
+    .trend { font-weight:700; margin:.4rem 0 0; }
+    .trend.down { color:var(--yellow); } .trend.up { color:var(--red); }
+    svg { width:100%; height:auto; display:block; }
+    table { width:100%; border-collapse:collapse; font-size:.92rem; }
+    td, th { text-align:left; padding:.35rem .3rem; border-top:1px solid var(--line); vertical-align:top; }
+    .err { background:#fde8e7; color:var(--red); border-radius:12px; padding:.8rem 1rem; margin-bottom:1rem; }
+    details summary { cursor:pointer; min-height:44px; display:flex; align-items:center; font-weight:600; }
+    .rule { font-size:.85rem; color:var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/" aria-label="К выбору машины">← Машины</a>
+    <h1 id="title">Главный механик · парк</h1>
+    <button id="back" hidden>← Сводка</button>
+  </header>
+  <main id="main" aria-live="polite"><p class="sub">Загружаю сводку…</p></main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const main = $("main");
+function el(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined) e.append(c.nodeType ? c : String(c));
+  return e;
+}
+const fmtDate = (iso) => new Date(iso).toLocaleDateString("ru-RU", {day:"2-digit", month:"2-digit", year:"numeric"});
+const STATUS_TEXT = {normal:"норма", anomaly:"отклонение", check_failed:"сбой записи"};
+async function api(path) {
+  const r = await fetch(path);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || ("Ошибка " + r.status));
+  return body;
+}
+let data = null, filter = null;
+
+function showError(e) { main.replaceChildren(el("div", {class:"err", role:"alert"}, e.message)); }
+
+function rowButton(r) {
+  return el("li", {}, el("button", {onclick: () => openVehicle(r.vehicle_id)},
+    el("div", {},
+      el("span", {class:"chip " + r.status}, r.status_label),
+      el("span", {class:"plate"}, r.garage_no + " · " + r.vehicle_id)),
+    el("div", {class:"sub"}, r.name + " · " + r.engine_model +
+      (r.last_checked_at ? " · проверка " + fmtDate(r.last_checked_at) : "")),
+    r.reasons.length ? el("ul", {class:"why"}, ...r.reasons.map(x => el("li", {}, x))) : null));
+}
+
+function screenSummary() {
+  $("back").hidden = true; $("title").textContent = "Главный механик · парк";
+  const order = ["quarantine", "attention", "rerecord", "normal"];
+  const tiles = el("div", {class:"tiles", role:"group", "aria-label":"Счётчики по статусам"},
+    ...order.map(k => el("button", {class:"tile " + k, "aria-pressed": filter === k ? "true" : "false",
+      onclick: () => { filter = filter === k ? null : k; screenSummary(); }},
+      el("b", {}, data.counts[k]), data.labels[k])));
+  const rows = filter === "normal" ? data.normal
+             : data.priority.filter(r => !filter || r.status === filter);
+  main.replaceChildren(
+    el("p", {class:"sub"}, "Машин в парке: " + data.total + ". Статус — по последней проверке, правилом в коде."),
+    tiles,
+    el("h2", {}, filter ? data.labels[filter] : "Сначала — эти машины"),
+    rows.length ? el("ul", {}, ...rows.map(rowButton)) : el("p", {class:"sub"}, "Таких машин нет."),
+    !filter ? el("details", {}, el("summary", {}, "Норма — " + data.normal.length),
+      el("ul", {}, ...data.normal.map(rowButton))) : null,
+    el("p", {class:"rule"}, "Карантин — критичный код (F02, F03, F14), оценка ≥ 0,85 или код не подходит к двигателю. " +
+      "Требует внимания — прочие отклонения, запись с помехами, норма с оценкой ≥ " +
+      data.rule.attention_score.toFixed(2).replace(".", ",") + ". Нужна перезапись — сбой записи."));
+  window.scrollTo(0, 0);
+}
+
+// График оценки: 3–5 последних проверок; сбой — разрыв линии и отметка «×», а не ноль
+function chart(t) {
+  const W = 320, H = 170, L = 34, R = 10, T = 12, B = 34;
+  const n = t.points.length, xs = i => L + (n === 1 ? (W - L - R) / 2 : i * (W - L - R) / (n - 1));
+  const ys = v => T + (1 - v) * (H - T - B);
+  const ns = "http://www.w3.org/2000/svg";
+  const s = (tag, a, text) => { const e = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); if (text) e.textContent = text; return e; };
+  const svg = s("svg", {viewBox: `0 0 ${W} ${H}`, role:"img",
+    "aria-label": "Оценка отклонения по последним проверкам: " + t.trend});
+  for (const v of [0, 0.3, 0.85, 1]) {
+    svg.append(s("line", {x1:L, x2:W-R, y1:ys(v), y2:ys(v), stroke: v === 0.3 || v === 0.85 ? "#c9a227" : "#d9dee5",
+      "stroke-dasharray": v === 0.3 || v === 0.85 ? "4 3" : ""}));
+    svg.append(s("text", {x:L-4, y:ys(v)+4, "text-anchor":"end", "font-size":10, fill:"#5f6b7a"},
+      v.toFixed(2).replace(".", ",")));
+  }
+  let seg = [];
+  const flush = () => { if (seg.length > 1) svg.append(s("polyline", {points: seg.join(" "), fill:"none",
+    stroke:"#1f5fbf", "stroke-width":2.5})); seg = []; };
+  t.points.forEach((p, i) => {
+    if (p.score === null || p.score === undefined) { flush(); return; }
+    seg.push(xs(i) + "," + ys(p.score));
+  });
+  flush();
+  t.points.forEach((p, i) => {
+    const x = xs(i);
+    if (p.score === null || p.score === undefined) {
+      svg.append(s("text", {x, y:ys(0.5)+5, "text-anchor":"middle", "font-size":16, fill:"#5f6b7a"}, "×"));
+      svg.append(s("text", {x, y:ys(0.5)+20, "text-anchor":"middle", "font-size":9, fill:"#5f6b7a"}, "сбой"));
+    } else {
+      svg.append(s("circle", {cx:x, cy:ys(p.score), r:4.5,
+        fill: p.status === "anomaly" ? "#b42318" : "#1e7a3c"}));
+      svg.append(s("text", {x, y:ys(p.score)-8, "text-anchor":"middle", "font-size":10, fill:"#1f2933"},
+        p.score.toFixed(2).replace(".", ",")));
+    }
+    svg.append(s("text", {x, y:H-12, "text-anchor":"middle", "font-size":10, fill:"#5f6b7a"},
+      fmtDate(p.checked_at).slice(0, 5)));
+  });
+  return svg;
+}
+
+async function openVehicle(id) {
+  main.replaceChildren(el("p", {class:"sub"}, "Загружаю историю…"));
+  let v;
+  try { v = await api("/api/fleet/" + encodeURIComponent(id)); } catch (e) { showError(e); return; }
+  $("back").hidden = false; $("title").textContent = v.garage_no + " · " + v.vehicle_id;
+  const tcls = v.trend.trend.startsWith("снижается") ? "down" : v.trend.trend === "растёт" ? "up" : "";
+  main.replaceChildren(
+    el("div", {class:"panel"},
+      el("div", {}, el("span", {class:"chip " + v.status}, v.status_label), el("b", {}, v.name)),
+      el("div", {class:"sub"}, v.engine_model),
+      v.reasons.length ? el("ul", {class:"why"}, ...v.reasons.map(x => el("li", {}, x))) : null),
+    el("div", {class:"panel"},
+      el("h2", {style:"margin-top:0"}, "Оценка отклонения — последние проверки"),
+      chart(v.trend),
+      el("p", {class:"trend " + tcls}, "Тенденция: " + v.trend.trend),
+      el("p", {class:"rule"}, "Сбой записи — разрыв линии, а не ноль. Пунктир — 0,30 (повторить раньше срока) и 0,85 (высокая оценка).")),
+    el("h2", {}, "История проверок"),
+    el("div", {class:"panel"}, el("table", {},
+      el("tr", {}, el("th", {}, "Дата"), el("th", {}, "Итог"), el("th", {}, "Оценка")),
+      ...v.history.map(h => el("tr", {},
+        el("td", {}, fmtDate(h.checked_at)),
+        el("td", {}, STATUS_TEXT[h.status] + (h.fault_code ? " · " + h.fault_code + (h.fault_title ? " " + h.fault_title : "") : "")
+          + (h.signal_quality === "warning" ? " · с помехами" : "")),
+        el("td", {}, h.anomaly_score === null || h.status === "check_failed" ? "—" : h.anomaly_score.toFixed(2).replace(".", ",")))))),
+    el("h2", {}, "Заявки по машине"),
+    v.tickets.length
+      ? el("ul", {}, ...v.tickets.map(t => el("li", {class:"panel"},
+          el("b", {}, t.ticket_id), " · " + (t.anomaly_type || "") + " · срочность " + (t.urgency || ""),
+          el("div", {class:"sub"}, (t.session_id ? "проверка " + t.session_id : "") +
+            (t.ts ? " · " + fmtDate(new Date(t.ts * 1000).toISOString()) : "")))))
+      : el("p", {class:"sub"}, "Заявок ещё не было."),
+    el("p", {}, el("a", {href: "/"}, "← К выбору машины (экран механика)")));
+  window.scrollTo(0, 0);
+}
+
+$("back").addEventListener("click", screenSummary);
+api("/api/fleet").then(d => { data = d; screenSummary(); }).catch(showError);
+</script>
+</body>
+</html>

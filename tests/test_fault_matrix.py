@@ -180,3 +180,12 @@ def test_every_quote_is_on_its_page() -> None:
         checked, problems = verify_cell(c, page_text)
         assert problems == [], (c.code, c.engine, problems)
         assert checked.status == c.status
+
+
+def test_card_explanation_has_pages_for_confirmed_cell() -> None:
+    from service.fault_matrix import _load, card_explanation
+
+    cell = next(c for c in _load().values() if c.status == "confirmed" and c.pages)
+    exp = card_explanation(cell.code, cell.engine)
+    assert exp is not None and exp["pages"]
+    assert {p["pdf_page"] for p in exp["pages"]} == {r.page for r in cell.pages}

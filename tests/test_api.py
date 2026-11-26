@@ -57,7 +57,7 @@ def _agent(ml: MLClient, toir: ToirClient, steps: list[Any]) -> Any:
     from service.store import Store
     from test_agent import FixtureSearch, ScriptedLLM
 
-    return Agent(ScriptedLLM(steps), ml, toir, FixtureSearch(), Store(":memory:"), main.fleet())
+    return Agent(ScriptedLLM(steps), ml, toir, FixtureSearch(), Store(":memory:"), main.fleet(), plan_search=False)
 
 
 def test_chat_and_ticket_survive_instance_switch(
@@ -79,8 +79,7 @@ def test_chat_and_ticket_survive_instance_switch(
             call(
                 "draft_ticket",
                 conclusion="Низкое давление масла",
-                operations=["Замерить давление масла"],
-                reference_ids=["R1"],
+                operations=[{"text": "Замерить давление масла", "ref": "R1"}],
             ),
             say("Черновик готов [R1]"),
         ],

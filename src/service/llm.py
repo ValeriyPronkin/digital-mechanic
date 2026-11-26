@@ -137,16 +137,17 @@ class DeepSeekProvider:
         body = {
             "model": self.model,
             "messages": self.to_wire(messages),
-            "tools": [
+            "temperature": 0.2,
+            "max_tokens": max_tokens(),
+        }
+        if tools:  # пустой список инструментов API не принимает — без инструментов ключа нет
+            body["tools"] = [
                 {
                     "type": "function",
                     "function": {"name": t.name, "description": t.description, "parameters": t.parameters},
                 }
                 for t in tools
-            ],
-            "temperature": 0.2,
-            "max_tokens": max_tokens(),
-        }
+            ]
         data = _post(self.http, "/chat/completions", json=body, headers=self._auth)
         msg = data["choices"][0]["message"]
         finish = data["choices"][0].get("finish_reason")
@@ -223,11 +224,14 @@ class GigaChatProvider:
         body = {
             "model": self.model,
             "messages": self.to_wire(messages),
-            "functions": [{"name": t.name, "description": t.description, "parameters": t.parameters} for t in tools],
-            "function_call": "auto",
             "temperature": 0.2,
             "max_tokens": max_tokens(),
         }
+        if tools:
+            body["functions"] = [
+                {"name": t.name, "description": t.description, "parameters": t.parameters} for t in tools
+            ]
+            body["function_call"] = "auto"
         headers = {"Authorization": f"Bearer {self._access_token()}"}
         data = _post(self.http, f"{self.API_URL}/chat/completions", json=body, headers=headers)
         msg = data["choices"][0]["message"]
