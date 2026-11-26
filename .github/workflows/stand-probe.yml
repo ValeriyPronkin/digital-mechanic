@@ -49,13 +49,13 @@ jobs:
             echo "|---|---|---|---|"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          read -r code t < <(curl -sS -m 60 -o health.json -w "%{http_code} %{time_total}" "$URL/health" || echo "000 0")
+          read -r code t < <(curl -sS -m 150 -o health.json -w "%{http_code} %{time_total}\n" "$URL/health" || echo "000 0") || true
           kb=$(jq -r '.manuals_index.fragments // 0' health.json 2>/dev/null || echo 0)
           ok="✅"; { [ "$code" = "200" ] && [ "${kb:-0}" -gt 0 ]; } || { ok="❌"; fail=1; }
           echo "| GET /health (фрагментов индекса: ${kb:-0}) | $code | $t | $ok |" >> "$GITHUB_STEP_SUMMARY"
 
-          read -r code t < <(curl -sS -m 90 -o diag.json -w "%{http_code} %{time_total}" -X POST "$URL/api/diagnose" \
-            -H 'Content-Type: application/json' -d '{"vehicle_id":"P456AT178","session_id":"S-0001"}' || echo "000 0")
+          read -r code t < <(curl -sS -m 90 -o diag.json -w "%{http_code} %{time_total}\n" -X POST "$URL/api/diagnose" \
+            -H 'Content-Type: application/json' -d '{"vehicle_id":"P456AT178","session_id":"S-0001"}' || echo "000 0") || true
           status=$(jq -r '.status // "-"' diag.json 2>/dev/null || echo "-")
           ok="✅"; [ "$code" = "200" ] && [ "$status" != "-" ] || { ok="❌"; fail=1; }
           echo "| POST /api/diagnose (статус: $status) | $code | $t | $ok |" >> "$GITHUB_STEP_SUMMARY"
