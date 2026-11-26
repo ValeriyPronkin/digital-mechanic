@@ -83,6 +83,12 @@ def test_timing_claim_without_digits_replaced(ml: MLClient, toir: ToirClient) ->
     assert "пока он не остыл" not in reply.text and reply.text.startswith("Регулировать на холодном двигателе")
 
 
+def test_safe_line_once_outside_list(ml: MLClient, toir: ToirClient) -> None:
+    answer = "Не сразу после остановки.\n\n1. Снять крышки [R1].\n\nДо 15 мин после остановки не начинать."
+    reply, _ = _ask(ml, toir, answer)
+    assert reply.text.count("формулировки руководств о 15 минутах расходятся") == 1
+
+
 def test_model_own_conclusion_dropped_one_conclusion_left(ml: MLClient, toir: ToirClient) -> None:
     reply, _ = _ask(ml, toir, "Нет, дайте остыть.\n\nВывод: можно через 15 минут.\n\n1. Снять крышки [R1].")
     assert reply.text.count("Вывод:") == 1 and "можно через 15 минут" not in reply.text

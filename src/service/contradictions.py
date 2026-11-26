@@ -108,6 +108,8 @@ def neutralize(k: Known, text: str) -> str:
             continue
         if k.claim.search(ln):
             m = _LIST_PREFIX.match(ln)
+            if m is None and k.safe_line in out:
+                continue  # вне списка вывод — один раз
             ln = (m.group(1) if m else "") + k.safe_line
         out.append(ln)
     return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
