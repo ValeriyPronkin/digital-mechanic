@@ -233,3 +233,13 @@ def test_fragments_carry_labels_and_ocr_source() -> None:
     assert "Причина: Нет бензина" in row.text and "Способ устранения: Залить" in row.text
     assert all(f.engines == ["ЗМЗ-40904.10", "ЗМЗ-40905.10"] and f.section == "ВВЕДЕНИЕ" for f in frags)
     assert passport["low_text_pages"] == [2] and passport["ocr_pages"] == [2]
+
+
+def test_engine_name_in_query_does_not_drown_the_answer() -> None:
+    """Модель пишет в запрос «ЯМЗ-536», а номер двигателя стоит в колонтитуле каждой страницы РК.
+    Двигатель уже отфильтрован — его название из запроса не должно решать, какая страница выше."""
+    noise = "Тепловой зазор клапанов: порядок работ. Вывернуть пробку. ЯМЗ-536 ЯМЗ-536 536"
+    answer = "Тепловой зазор клапанов: впускных 0,30-0,40 мм, выпускных 0,40-0,50 мм."
+    frags = [_frag(i, "yamz-536-rk", noise) for i in range(1, 6)] + [_frag(9, "yamz-536-rk", answer)]
+    idx = ManualIndex(frags)
+    assert idx.search("тепловой зазор клапанов ЯМЗ-536", "ЯМЗ-536", k=1)[0].fragment.page == 9

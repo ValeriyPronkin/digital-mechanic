@@ -23,6 +23,15 @@ RRF_K = 60
 POOL = 50  # сколько лучших из каждого поиска идут в слияние
 
 
+_ENGINE_IN_QUERY = re.compile(r"\b(?:ЯМЗ|ЗМЗ|ЯМ3|3МЗ|YAMZ|ZMZ)\s*[-–]?\s*[\d.]+[А-ЯA-Z]*\d*", re.I)
+
+
+def strip_engine(query: str) -> str:
+    """Название двигателя в запросе лишнее: выдача уже ограничена его руководствами, а номер модели стоит
+    в колонтитулах страниц и вытесняет страницу с ответом (живой прогон #16)."""
+    return " ".join(_ENGINE_IN_QUERY.sub(" ", query).split()) or query
+
+
 class UnknownEngineError(ValueError):
     """Двигателя нет в карте «двигатель → документы»: искать не в чем, всё подряд не ищем."""
 
@@ -118,6 +127,7 @@ class ManualIndex:
     def search(self, query: str, engine: str, k: int = 5) -> list[Hit]:
         cand = self.candidates(engine)
         allowed_docs = {d.doc_id for d in documents_for_engine(engine)}
+        query = strip_engine(query)
         q_tokens = tokenize(query)
 
         with ThreadPoolExecutor(2) as pool:

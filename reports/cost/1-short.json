@@ -1,0 +1,67 @@
+{
+ "label": "1-short",
+ "at": "2026-11-26 15:40",
+ "repeat": 1,
+ "scenarios": {
+  "С1": {
+   "title": "Отклонение → объяснение → заявка (F02, ЯМЗ-536)",
+   "rub": 0.148,
+   "rub_llm": 0.148,
+   "llm_calls": 4.0,
+   "tokens_in": 9802,
+   "tokens_cached": 7168,
+   "tokens_out": 538,
+   "problems": []
+  },
+  "С2": {
+   "title": "Норма: вопрос механика (ЯМЗ-536)",
+   "rub": 0.0402,
+   "rub_llm": 0.0402,
+   "llm_calls": 2.0,
+   "tokens_in": 3037,
+   "tokens_cached": 2560,
+   "tokens_out": 203,
+   "problems": []
+  },
+  "С3": {
+   "title": "Сбой проверки + инъекция в описании (ЗМЗ)",
+   "rub": 0.0684,
+   "rub_llm": 0.0684,
+   "llm_calls": 2.0,
+   "tokens_in": 3467,
+   "tokens_cached": 2560,
+   "tokens_out": 330,
+   "problems": []
+  },
+  "Р1": {
+   "title": "Вопрос по руководству: тепловой зазор (F01, ЯМЗ-536)",
+   "rub": 0.1007,
+   "rub_llm": 0.1005,
+   "llm_calls": 2.0,
+   "tokens_in": 4391,
+   "tokens_cached": 2560,
+   "tokens_out": 367,
+   "problems": []
+  },
+  "Н1": {
+   "title": "Несовместимый код: бензин на дизеле (ЯМЗ-536)",
+   "rub": 0.0484,
+   "rub_llm": 0.0484,
+   "llm_calls": 2.0,
+   "tokens_in": 3114,
+   "tokens_cached": 2560,
+   "tokens_out": 252,
+   "problems": []
+  },
+  "Г1": {
+   "title": "Голосовой вопрос (как С1, вопрос 1; распознавание и синтез — оценка, голос — #14)",
+   "rub": 0.2268,
+   "rub_llm": 0.0642,
+   "llm_calls": 2.0,
+   "tokens_in": 3790,
+   "tokens_cached": 3328,
+   "tokens_out": 403,
+   "problems": []
+  }
+ }
+}

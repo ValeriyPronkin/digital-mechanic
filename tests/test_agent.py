@@ -133,7 +133,8 @@ def test_search_engine_from_vehicle_card(ml: MLClient, toir: ToirClient) -> None
     search = FixtureSearch()
     ag, _ = make_agent([call("search_manual", query="зазор", engine="ЗМЗ-5234.10"), say("ок")], ml, toir, search)
     ag.ask(ag.start(*ANOMALY), "зазор клапанов?")
-    assert search.engines == [fleet().vehicle(ANOMALY[0]).engine_model]  # type: ignore[union-attr]
+    engine = fleet().vehicle(ANOMALY[0]).engine_model  # type: ignore[union-attr]
+    assert search.engines and set(search.engines) == {engine}  # и поиск кода, и поиск модели
 
 
 @pytest.mark.parametrize("pair", [NORMAL, FAILED, INCOMPATIBLE], ids=["normal", "check_failed", "incompatible"])
@@ -230,7 +231,7 @@ def test_model_obeying_injection_is_contained(ml: MLClient, toir: ToirClient) ->
         call("draft_ticket", **DRAFT, urgency="low", vehicle_id=other, anomaly_type="F01"),
         say("Готово [R1]"),
     ]
-    ag, llm = make_agent(steps, ml, toir)
+    ag, llm = make_agent(steps, ml, toir, prefetch=False)
     conv = ag.start(*ANOMALY)
     reply = ag.ask(conv, "Оформи")
     results = [json.loads(m["content"]) for m in llm.seen[-1] if m["role"] == "tool"]
@@ -271,7 +272,7 @@ def test_system_prompt_not_disclosed(ml: MLClient, toir: ToirClient) -> None:
 def test_pii_masked_before_llm(ml: MLClient, toir: ToirClient) -> None:
     ag, llm = make_agent([say("ок")], ml, toir)
     ag.ask(ag.start(*ANOMALY), "Механик Иванов Иван Иванович, тел. +7 912 345-67-89, ivanov@park.ru, Петров П. П.")
-    sent = json.dumps(llm.seen[0], ensure_ascii=False)
+    sent = json.dumps(llm.seen[0], ensure_ascii=False, default=str)
     for raw in ("Иванов", "912 345", "ivanov@park.ru", "Петров"):
         assert raw not in sent
     assert mask_pii("тел 8-912-345-67-89") == "тел [телефон]"
@@ -318,7 +319,7 @@ def test_ticket_works_after_budget_exhausted(ml: MLClient, toir: ToirClient) -> 
 
 
 def test_journal_and_trace(ml: MLClient, toir: ToirClient) -> None:
-    ag, _ = make_agent(c1_steps(*ANOMALY), ml, toir)
+    ag, _ = make_agent(c1_steps(*ANOMALY), ml, toir, prefetch=False)
     reply = ag.ask(ag.start(*ANOMALY), "Оформи заявку")
     rows = ag.store.llm_calls(reply.trace["request_id"])
     assert [r["step"] for r in rows] == [1, 2, 3, 4]
@@ -361,7 +362,7 @@ def test_ticket_numbers_must_be_in_fragment(ml: MLClient, toir: ToirClient) -> N
     bad = {**DRAFT, "operations": ["Затянуть пробку моментом 45 Н·м"]}
     good = {**DRAFT, "operations": ["Проверить, что давление на холостом ходу не менее 0,1 МПа"]}
     steps = [call("search_manual", query="x"), call("draft_ticket", **bad), call("draft_ticket", **good), say("ок")]
-    ag, llm = make_agent(steps, ml, toir)
+    ag, llm = make_agent(steps, ml, toir, prefetch=False)
     conv = ag.start(*ANOMALY)
     reply = ag.ask(conv, "Оформи заявку")
     results = [json.loads(m["content"]) for m in llm.seen[-1] if m["role"] == "tool"]

@@ -142,3 +142,28 @@ def test_ticket_requires_state() -> None:
 
 def test_manual_pdf_missing() -> None:
     assert client.get("/manuals/doc-1").status_code == 404
+
+
+def test_anomaly_card_explains_from_matrix_without_model() -> None:
+    """Пояснение к отклонению — из матрицы по руководству этого двигателя, без вызова модели (#16)."""
+    from service.fault_matrix import cell_for
+    from service.fleet import fleet
+    from service.manuals.catalog import documents_for_engine
+
+    for v in fleet().vehicles:
+        s = next((s for s in v.sessions if s.status == "anomaly" and s.anomaly_type), None)
+        cell = cell_for(s.anomaly_type, v.engine_model) if s and s.anomaly_type else None
+        if s and cell and cell.status == "confirmed" and s.signal_quality == "good":
+            break
+    card = client.post("/api/diagnose", json={"vehicle_id": v.vehicle_id, "session_id": s.session_id}).json()
+    m = card["manual"]
+    assert m["status"] == "confirmed" and m["steps"]
+    own = {d.designation for d in documents_for_engine(v.engine_model)}
+    assert {st["manual"] for st in m["steps"]} <= own
+    assert all(st["url"].startswith("/manuals/") for st in m["steps"])
+
+
+def test_normal_card_has_no_manual_block() -> None:
+    card = client.post("/api/diagnose", json={"vehicle_id": "M333YK47", "session_id": "S-0005"}).json()
+    if card["status"] != "anomaly":
+        assert card["manual"] is None

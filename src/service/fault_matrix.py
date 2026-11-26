@@ -199,3 +199,29 @@ def cell_for(code: str, engine: str) -> Cell | None:
     if canon is None:
         return None
     return _load().get((code, canon))
+
+
+def card_explanation(code: str, engine: str) -> dict[str, Any] | None:
+    """Пояснение к карточке отклонения из матрицы — без модели, 0 токенов (issue #16).
+
+    Подтверждённая ячейка — работы и предупреждения со ссылками на страницы; «молчит» / «не ясно» — указание
+    на дефектовку. Узла нет — None: карточка и так говорит «повторите проверку».
+    """
+    cell = cell_for(code, engine)
+    if cell is None or cell.status == "not_applicable":
+        return None
+
+    def ref(r: Ref) -> dict[str, Any]:
+        doc = DOCS_BY_ID[r.doc]
+        url = f"/manuals/{r.doc}#page={r.page}"
+        return {"text": r.quote, "manual": doc.designation, "pdf_page": r.page, "url": url}
+
+    if cell.status != "confirmed":
+        note = "В руководстве этого двигателя нет порядка работ по этому узлу — нужна дефектовка."
+        return {"status": cell.status, "steps": [], "safety": [], "note": note}
+    return {
+        "status": "confirmed",
+        "steps": [ref(o) for o in cell.operations],
+        "safety": [ref(x) for x in cell.safety],
+        "note": cell.note,
+    }
