@@ -252,6 +252,61 @@ def verdict_block(conv: Conversation) -> dict[str, Any] | None:
     }
 
 
+def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] | None, str]:
+    """Известное противоречие руководств (D-20, `contradictions`) — отдельным блоком для карточки v2, а текстовый
+    блок, который вставил код, из ответа убирается, чтобы не было повтора. Блок ищется по строкам (заголовок,
+    формулировки «- …», вывод с советом): после вставки код дописывает к строке страницы пометки вроде
+    «(испытания на стенде)» — они сохраняются в `note`. Не нашёлся — текст как есть."""
+    from service import contradictions
+
+    if conv.contradiction is None:
+        return None, text
+    k, quotes = conv.contradiction
+    lines = text.split("\n")
+    head = f"{contradictions.HEADER} — {k.title}:"
+    start = next((i for i, ln in enumerate(lines) if ln.strip() == head), None)
+    if start is None:
+        return None, text
+    end = start + 1
+    item_lines: list[str] = []
+    while end < len(lines) and lines[end].startswith("- "):
+        item_lines.append(lines[end])
+        end += 1
+    if end >= len(lines) or contradictions.ADVICE not in lines[end] or len(item_lines) != len(quotes):
+        return None, text
+    pages = {(q.doc, q.page) for q in quotes}
+    refs = {(s.manual_id, s.pdf_page): s.ref for s in conv.sources.values() if (s.manual_id, s.pdf_page) in pages}
+    items = []
+    for q, line in zip(quotes, item_lines, strict=True):
+        ref = refs.get((q.doc, q.page))
+        tail = line.split(f"[{ref}]", 1)[1] if ref and f"[{ref}]" in line else line.split("»", 1)[-1]
+        items.append(
+            {
+                "handle": handle(ref) if ref else None,
+                "label": q.label(),
+                "quote": q.quote,
+                "manual_id": q.doc,
+                "pdf_page": q.page,
+                "note": tail.strip().strip("()").strip() or None,
+            }
+        )
+    conclusion = (
+        f"{k.conclusion} Основание — {k.basis}."
+        if k.conclusion
+        else "Какое значение верно для вашего двигателя, руководства не уточняют."
+    )
+    rest_lines = lines[:start] + lines[end + 1 :]
+    rest = "\n\n".join(p for p in (part.strip() for part in "\n".join(rest_lines).split("\n\n")) if p)
+    block = {
+        "kind": "contradiction",
+        "title": k.title,
+        "items": items,
+        "conclusion": conclusion,
+        "advice": contradictions.ADVICE,
+    }
+    return block, rest
+
+
 def source_items(reply: AgentReply, conv: Conversation) -> list[dict[str, Any]]:
     out = []
     for s in reply.sources:
@@ -545,7 +600,18 @@ def build_router(
             sources = source_items(reply, conv)
             if sources:
                 yield _sse({"type": "sources", "items": sources})
-            text = to_handles(reply.text)
+            contra, answer_text = contradiction_block(conv, reply.text)
+            if contra is not None:  # блок без шага: в журнале действий его нет, на экране — под ответом
+                yield _sse(
+                    {
+                        "type": "tool_result",
+                        "id": "contradiction",
+                        "name": "contradictions",
+                        "ok": True,
+                        "block": contra,
+                    }
+                )
+            text = to_handles(answer_text)
             yield _sse({"type": "text", "text": text, "round": 1})
             ver = verification(reply, text)
             yield _sse(ver)
@@ -570,6 +636,8 @@ def build_router(
             known = {s["handle"] for s in thread["sources"]}
             thread["sources"] += [s for s in sources if s["handle"] not in known]
             blocks = [e["block"] for e in tools if e.get("type") == "tool_result" and e.get("block")]
+            if contra is not None:
+                blocks.append(contra)
             thread["transcript"] += [
                 {"role": "user", "text": req.message},
                 {

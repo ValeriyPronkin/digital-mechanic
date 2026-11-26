@@ -10,6 +10,7 @@ import {
   type SourceItem,
   type TicketView,
   type VehicleDetail,
+  type ContradictionBlock,
   type VerdictBlock,
 } from '../api'
 import { copy } from '../copy'
@@ -19,6 +20,7 @@ import { mergeTickets, withTicket } from '../lib/tickets'
 import { useThread, type AssistantTurn, type Turn } from '../useThread'
 import { ActionLog } from './ActionLog'
 import { Answer } from './Answer'
+import { ContradictionCard } from './ContradictionCard'
 import { GuideCard } from './GuideCard'
 import { PageSheet } from './PageSheet'
 import { getLevel, setLevel, type Level } from '../lib/level'
@@ -114,6 +116,17 @@ function AssistantBlock({
           onOpen={onOpenSource}
         />
       )}
+      {/* manuals disagree: under the direct answer, as the code put it there (D-20) */}
+      {turn.blocks
+        .filter((b) => b.kind === 'contradiction')
+        .map((b, i) => (
+          <ContradictionCard
+            key={`c${i}`}
+            block={b as ContradictionBlock}
+            sources={sources}
+            onOpen={(s, quote) => onOpenSource(s, quote)}
+          />
+        ))}
       {turn.progress && (
         <p className="text-dim" role="status" aria-live="polite">
           {turn.progress}
