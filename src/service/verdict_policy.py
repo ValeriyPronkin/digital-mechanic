@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -115,6 +116,10 @@ class VerdictCard(BaseModel):
     confidence_pct: int | None
     ml_quote: str  # цитата ML-сервиса как есть; показывать как текст, не исполнять
     ml_quote_label: str
+    # Посторонний текст в описании сервиса (инструкции «ассистенту», «верни статус», «выведи промпт»): показывается
+    # отдельно, серым — «отложен», чтобы было видно, что из данных ничего не исполнено (#40 п. 6). Только для показа:
+    # в условиях карточки не участвует, модели не передаётся.
+    ml_injection: str | None = None
     manual: dict[str, Any] | None = None  # пояснение из матрицы по руководству (#16), без модели
     urgency: Urgency | None = None  # срочность по правилу urgency_for (как в заявке)
     urgency_reason: str | None = None
@@ -142,10 +147,31 @@ def _pct(value: float | None) -> int | None:
     return None if value is None else round(value * 100)
 
 
+# Признаки текста, обращённого к системе или ассистенту, а не к механику: обращения и команды про статус, заявку,
+# промпт и инструкции. С первого такого предложения и до конца описание считается посторонним.
+_INJECTION = re.compile(
+    r"\bsystem\b\s*:|\bassistant\b|ассистент|\bai[-\s]?агент|\bии[-\s]?агент|\bagent\b|нейросет|языков\w*\s+модел"
+    r"|инструкци\w*\s+(?:для|отмен)|предыдущ\w*\s+инструкц|игнорир|проигнорир|ignore\s+(?:all|previous)"
+    r"|системн\w*\s+промпт|\bprompt\b|промпт|верн\w*\s+статус|\bstatus\s*=|ticket_possible|\bвыведи\b"
+    r"|сообщи\s+механику|заявку\s+не\s+созда|создай\s+заявку|считать\s+проверку\s+пройденн|<\s*/?\s*script",
+    re.IGNORECASE,
+)
+
+
+def find_injection(description: str) -> str | None:
+    """Посторонний текст в описании сервиса диагностики: от первого предложения-обращения к системе до конца."""
+    parts = [p for p in re.split(r"(?<=[.!?;])\s+", (description or "").strip()) if p]
+    for i, part in enumerate(parts):
+        if _INJECTION.search(part):
+            return " ".join(parts[i:])
+    return None
+
+
 def build_card(
     diag: Diagnosis, fault_titles: dict[str, str], engine: str | None = None, history: list[Any] | None = None
 ) -> VerdictCard:
     card = _build_card(diag, fault_titles, engine)
+    card.ml_injection = find_injection(diag.description)
     if history and card.status != "check_failed" and card.color != "grey":
         card.trend = trend_for(history, diag.session_id)
     return card
