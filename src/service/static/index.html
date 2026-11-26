@@ -208,10 +208,14 @@ function renderAnswer(r) {
   if (r.sources.length) body.append(el("div", {class:"src"}, ...r.sources.map(s =>
     el("a", {href: s.url, target:"_blank", rel:"noopener"}, s.manual + ", стр. PDF " + s.pdf_page))));
   const t = r.trace;
-  body.append(el("details", {class:"trace"}, el("summary", {}, "Трасса: " + t.tokens_in + "+" + t.tokens_out + " токенов, " + t.cost_rub.toFixed(2) + " ₽"),
+  const rub = x => x < 0.01 ? x.toFixed(4) : x.toFixed(2);
+  const cached = t.tokens_cached ? ", из кэша " + t.tokens_cached : "";
+  body.append(el("details", {class:"trace"}, el("summary", {}, "Трасса: " + t.tokens_in + "+" + t.tokens_out + " токенов" + cached + ", " + rub(t.cost_rub) + " ₽"),
     el("table", {}, ...t.steps.map(s => el("tr", {},
       el("td", {}, s.step), el("td", {}, s.kind === "llm" ? "модель " + s.name : "→ " + s.name + (s.ok ? "" : " (отказ)")),
-      el("td", {}, s.kind === "llm" ? s.tokens_in + "+" + s.tokens_out : ""), el("td", {}, s.ms + " мс"))))));
+      el("td", {}, s.kind === "llm" ? s.tokens_in + "+" + s.tokens_out + (s.tokens_cached ? " (кэш " + s.tokens_cached + ")" : "") : ""),
+      el("td", {}, s.kind === "llm" ? rub(s.cost_rub) + " ₽" : "0 ₽"),
+      el("td", {}, s.ms + " мс"))))));
   $("chatlog").append(body);
   if (r.draft) $("chatlog").append(draftCard(r.draft));
 }

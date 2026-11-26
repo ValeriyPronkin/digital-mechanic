@@ -331,7 +331,14 @@ class Agent:
             reply = self.provider.chat(conv.messages, TOOLS)
             ms = int((time.monotonic() - t0) * 1000)
             cost = self.store.log_llm(
-                request_id, step, self.provider.name, reply.model, reply.tokens_in, reply.tokens_out, ms
+                request_id,
+                step,
+                self.provider.name,
+                reply.model,
+                reply.tokens_in,
+                reply.tokens_out,
+                ms,
+                tokens_cached=reply.tokens_cached,
             )
             steps.append(
                 {
@@ -340,6 +347,7 @@ class Agent:
                     "name": reply.model,
                     "tokens_in": reply.tokens_in,
                     "tokens_out": reply.tokens_out,
+                    "tokens_cached": reply.tokens_cached,
                     "cost_rub": round(cost, 4),
                     "ms": ms,
                 }
@@ -378,6 +386,7 @@ class Agent:
             "steps": steps,
             "tokens_in": sum(c["tokens_in"] for c in calls),
             "tokens_out": sum(c["tokens_out"] for c in calls),
+            "tokens_cached": sum(int(c.get("tokens_cached") or 0) for c in calls),
             "cost_rub": round(sum(c["cost_rub"] for c in calls), 4),
         }
         return AgentReply(

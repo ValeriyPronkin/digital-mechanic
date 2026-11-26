@@ -40,6 +40,7 @@ class LLMReply:
     tool_calls: list[ToolCall] = field(default_factory=list)
     tokens_in: int = 0
     tokens_out: int = 0
+    tokens_cached: int = 0  # из tokens_in — попали в кэш провайдера (дешевле)
     model: str = ""
     functions_state_id: str | None = None  # GigaChat: вернуть в следующем ходе
 
@@ -146,6 +147,7 @@ class DeepSeekProvider:
             ],
             tokens_in=int(usage.get("prompt_tokens", 0)),
             tokens_out=int(usage.get("completion_tokens", 0)),
+            tokens_cached=int(usage.get("prompt_cache_hit_tokens", 0)),
             model=str(data.get("model", self.model)),
         )
 
@@ -222,6 +224,7 @@ class GigaChatProvider:
             tool_calls=calls,
             tokens_in=int(usage.get("prompt_tokens", 0)),
             tokens_out=int(usage.get("completion_tokens", 0)),
+            tokens_cached=int(usage.get("precached_prompt_tokens", 0)),
             model=str(data.get("model", self.model)),
             functions_state_id=msg.get("functions_state_id"),
         )
