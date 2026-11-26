@@ -245,6 +245,7 @@ export interface PassportFragment {
 }
 export interface Passport {
   request_id: string | null
+  question?: { text: string | null; by_voice: boolean; level: 'expert' | 'steps' | null } | null
   searches: { by: string; engine: string | null; queries: string[]; found: number; fragments: PassportFragment[] }[]
   llm: {
     name: string

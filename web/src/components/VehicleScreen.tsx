@@ -24,7 +24,7 @@ import { ContradictionCard } from './ContradictionCard'
 import { GuideCard } from './GuideCard'
 import { PageSheet } from './PageSheet'
 import { SpeakButton } from './SpeakButton'
-import { LEVEL_EVENT, getLevel, setLevel, type Level } from '../lib/level'
+import { LEVEL_EVENT, REDO, getLevel, otherLevel, redoLevel, setLevel, type Level } from '../lib/level'
 import { ScoreChart } from './ScoreChart'
 import { TicketCard } from './TicketCard'
 import { TicketSheet } from './TicketSheet'
@@ -72,7 +72,9 @@ function AssistantBlock({
   sources,
   onOpenSource,
   manualNames,
+  onRedo,
 }: {
+  onRedo?: (level: Level) => void // the last answer only: «Подробнее / Короче» for this answer
   turn: AssistantTurn
   sources: Record<string, SourceItem>
   onOpenSource: (s: SourceItem, quote?: string, scanned?: boolean) => void
@@ -118,6 +120,20 @@ function AssistantBlock({
         />
       )}
       {/* the short spoken version: value, document, page — for busy hands (#14) */}
+      {(() => {
+        const answered = turn.passport?.question?.level
+        if (!onRedo || turn.live || !turn.text || (answered !== 'expert' && answered !== 'steps')) return null
+        const next = otherLevel(answered)
+        return (
+          <button
+            type="button"
+            onClick={() => onRedo(next)}
+            className="min-h-12 rounded-lg border border-accent px-3 text-[13px] font-semibold text-accent"
+          >
+            {REDO[next].label}
+          </button>
+        )
+      })()}
       {!turn.live && turn.speech && <SpeakButton speech={turn.speech} />}
       {/* manuals disagree: under the direct answer, as the code put it there (D-20) */}
       {turn.blocks
@@ -301,13 +317,14 @@ export function VehicleScreen({
     )
   }
 
-  const send = (message: string, newThread = false) => {
+  const send = (message: string, newThread = false, level?: Level) => {
     if (thread.busy || !message.trim()) return
     setDraft('')
     // On a phone the keyboard would cover the answer, so the field lets go of it. With a real keyboard
     // the field stays ready for the next question.
     if (window.matchMedia('(pointer: coarse)').matches) input.current?.blur()
-    void thread.send(message.trim(), { sessionId, newThread })
+    // «подробнее» / «короче» — словами или голосом — меняют уровень только для этого ответа (#17)
+    void thread.send(message.trim(), { sessionId, newThread, level: level ?? redoLevel(message) ?? undefined })
   }
   const manualNames = Object.fromEntries(vehicle.manuals.map((m) => [m.id, m.short]))
   const session = vehicle.sessions.find((s) => s.session_id === sessionId)
@@ -352,6 +369,7 @@ export function VehicleScreen({
         sources={thread.sources}
         onOpenSource={openSource}
         manualNames={manualNames}
+        onRedo={i === thread.turns.length - 1 && !thread.busy ? (l) => send(REDO[l].message, false, l) : undefined}
       />
     )
   const earlierTurns = lastUserIndex < 0 ? thread.turns : thread.turns.slice(0, lastUserIndex)
