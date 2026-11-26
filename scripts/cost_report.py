@@ -31,6 +31,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from mock_ml.app import app as mock_ml_app  # noqa: E402
 from mock_toir.app import app as mock_toir_app  # noqa: E402
 
+from cost_layers import ASSUMPTIONS, LOCAL_VOICE, monthly_fixed, voice_option  # noqa: E402
 from service.agent import Agent, AgentReply  # noqa: E402
 from service.clients import MLClient, ToirClient  # noqa: E402
 from service.fleet import fleet  # noqa: E402
@@ -155,7 +156,7 @@ SCENARIOS = [
     ),
     Scenario(
         "Г1",
-        "Голосовой вопрос (как С1, вопрос 1; распознавание и синтез — оценка, голос — #14)",
+        "Голосовой вопрос (как С1, вопрос 1); речь — опция, считается отдельно",
         "A464EP47",
         "S-0096",
         [Turn("Что с двигателем и что делать?", [grounded_own_engine, no_cut])],
@@ -188,7 +189,8 @@ class Result:
     rows: list[dict[str, Any]] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
     rub_llm: float = 0.0
-    rub_other: float = 0.0
+    rub_emb: float = 0.0  # эмбеддинг запроса (поиск по смыслу) — часть запроса
+    rub_voice: float = 0.0  # голос — опция, в стоимость запроса не входит
     tokens_in: int = 0
     tokens_out: int = 0
     tokens_cached: int = 0
@@ -203,6 +205,12 @@ def voice_rub(answer: str) -> tuple[float, str]:
     """Оценка по тарифу без НДС: вопрос до 15 с — один отрезок распознавания; синтез API v3 — за каждые 250 знаков."""
     units = max(1, -(-len(answer) // 250))
     return _other("stt_sync") + units * _other("tts_v3"), f"распознавание 15 с + синтез {len(answer)} знаков"
+
+
+def _emb_client(searcher: Any) -> Any:
+    """Клиент эмбеддингов поискового индекса (счётчик query_tokens) или None, если поиск без смысла."""
+    embed = getattr(getattr(searcher, "index", None), "embed_query", None)
+    return getattr(embed, "__self__", None)
 
 
 def run(sc: Scenario, provider: Any, searcher: Any) -> Result:
@@ -220,8 +228,18 @@ def run(sc: Scenario, provider: Any, searcher: Any) -> Result:
         ag.ask(ag.start(vid, sid), sc.turns[0].question)
     conv = ag.start(vid, sid)
     res = Result(sc.key, sc.title)
+    emb = _emb_client(searcher)
     for n, turn in enumerate(sc.turns, 1):
+        emb_before = emb.query_tokens if emb else 0
         reply = ag.ask(conv, turn.question)
+        emb_tokens = (emb.query_tokens if emb else 0) - emb_before
+        if emb_tokens:
+            rub = emb_tokens * _other("embedding") / 1000
+            res.rows.append(
+                {"scenario": sc.key, "question": n, "step": 0, "kind": "эмбеддинг", "name": "text-search-query",
+                 "tokens_in": emb_tokens, "tokens_cached": 0, "tokens_out": 0, "rub": round(rub, 6), "ms": 0}
+            )  # fmt: skip
+            res.rub_emb += rub
         for chk in turn.checks:
             bad = chk(reply, conv.vehicle.engine_model)
             if bad:
@@ -250,11 +268,7 @@ def run(sc: Scenario, provider: Any, searcher: Any) -> Result:
                 {"scenario": sc.key, "question": n, "step": 0, "kind": "речь", "name": what, "tokens_in": 0,
                  "tokens_cached": 0, "tokens_out": 0, "rub": round(rub, 4), "ms": 0}
             )  # fmt: skip
-            res.rub_other += rub
-    # эмбеддинг запроса: ~ длина вопроса / 3 токена на каждый search_manual — копейки, считаем по тарифу
-    emb_price = _other("embedding")
-    searches = sum(1 for r in res.rows if r["name"].startswith("search_manual"))
-    res.rub_other += searches * 20 * emb_price / 1000
+            res.rub_voice += rub
     return res
 
 
@@ -274,8 +288,10 @@ def write(label: str, results: list[Result], repeat: int, provider: Any = None) 
         "scenarios": {
             r.scenario: {
                 "title": r.title,
-                "rub": round((r.rub_llm + r.rub_other) / repeat, 4),
+                "rub": round((r.rub_llm + r.rub_emb) / repeat, 4),  # запрос = модель + эмбеддинг
                 "rub_llm": round(r.rub_llm / repeat, 4),
+                "rub_emb": round(r.rub_emb / repeat, 6),
+                "rub_voice": round(r.rub_voice / repeat, 4),  # опция, не в запросе
                 "llm_calls": round(sum(1 for x in r.rows if x["kind"] == "модель") / repeat, 1),
                 "llm_ms": sum(x["ms"] for x in r.rows if x["kind"] == "модель") // repeat,
                 "tokens_in": r.tokens_in // repeat,
@@ -317,6 +333,29 @@ def render_md() -> None:
         lines.append(
             f"| {key} — {sc['title']} | {sc['llm_calls']} | {toks} | {before.get('rub', '—')} | {sc['rub']} | {q} |"
         )
+    # слои: запрос (выше) / голос — опция / постоянные в месяц на парк
+    fixed = monthly_fixed(last)
+    voice = voice_option(last)
+    a = ASSUMPTIONS
+    lines += [
+        "",
+        "## Слои себестоимости",
+        "",
+        "1. **Запрос** = модель + эмбеддинг запроса (поиск по смыслу) — таблица выше; только он идёт в шаблон "
+        "организаторов (`make cost-xlsx`).",
+        "2. **Голос — опция** к запросу: распознавание вопроса (15 с) и синтез ответа (SpeechKit API v3, за каждые "
+        f"250 знаков) — **+{voice if voice is not None else '—'} ₽** на вопрос (замер Г1). "
+        f"Альтернатива — {LOCAL_VOICE}.",
+        f"3. **Постоянные в месяц на парк** (не в запрос): парк {int(a['vehicles'])} ТС × "
+        f"{int(a['checks_per_vehicle_month'])} проверки × {int(a['questions_per_check'])} вопроса = "
+        f"{fixed['questions']} вопросов, {fixed['hours']} ч работы контейнера ({int(a['vcpu'])} vCPU, "
+        f"{int(a['ram_gb'])} ГБ), хранилище {fixed['storage_gb']} ГБ (индекс и PDF):",
+        f"   - контейнер (Serverless Containers): **{fixed['container_rub']} ₽/мес** в бесплатном уровне, "
+        f"{fixed['container_rub_no_free_tier']} ₽/мес без него;",
+        f"   - хранилище (Object Storage): **{fixed['storage_rub']} ₽/мес** (первый 1 ГБ бесплатно), "
+        f"{fixed['storage_rub_no_free_tier']} ₽/мес без бесплатного объёма;",
+        "   - простой подготовленных экземпляров контейнера на странице тарифов без цены — не учтён.",
+    ]
     # сравнение моделей: последний замер каждого провайдера
     latest: dict[str, dict[str, Any]] = {}
     for r in runs:
@@ -354,7 +393,8 @@ def render_md() -> None:
         lines.append(f"| `{r['label']}` | {r.get('provider') or 'deepseek'} | " + " | ".join(cells) + " |")
     lines += [
         "",
-        "Замеры до `7-after-main-merge` посчитаны по прежним ценам (вторичные источники, 100 ₽/$, с НДС у Яндекса);",
+        "Замеры до `7-after-main-merge` посчитаны по прежним ценам (вторичные источники, 100 ₽/$, с НДС у Яндекса),",
+        "до `10-layers` — с голосом и оценкой эмбеддинга внутри сценария;",
         "сравнивать их между собой можно, с новыми — только по токенам в CSV.",
         "",
         "## Тарифы (официальные страницы)",
@@ -391,13 +431,15 @@ def main() -> int:
             merged.rows += r.rows
             merged.problems += r.problems
             merged.rub_llm += r.rub_llm
-            merged.rub_other += r.rub_other
+            merged.rub_emb += r.rub_emb
+            merged.rub_voice += r.rub_voice
             merged.tokens_in += r.tokens_in
             merged.tokens_out += r.tokens_out
             merged.tokens_cached += r.tokens_cached
         results.append(merged)
         tag = "ok" if not merged.problems else "; ".join(merged.problems)
-        print(f"{sc.key}: {(merged.rub_llm + merged.rub_other) / args.repeat:.4f} ₽ — {tag}")
+        voice = f" (+ голос {merged.rub_voice / args.repeat:.4f})" if merged.rub_voice else ""
+        print(f"{sc.key}: {(merged.rub_llm + merged.rub_emb) / args.repeat:.4f} ₽{voice} — {tag}")
     write(args.label, results, args.repeat, provider)
     print(f"reports/cost/{args.label}.csv, reports/cost.md")
     return 0 if all(not r.problems for r in results) else 1

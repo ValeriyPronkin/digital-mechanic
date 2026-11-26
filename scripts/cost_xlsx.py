@@ -22,6 +22,7 @@ from typing import Any
 
 import openpyxl
 
+from cost_layers import LOCAL_VOICE, monthly_fixed, other, voice_option
 from service.store import llm_price_native, price_table
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,13 +33,19 @@ STEP_ROWS = (9, 10, 11, 12)
 COMMENT_CELLS = ("A17", "A18", "A19")
 SCENARIO = "С1"
 
-# (вопрос, шаг модели) в С1 → название шага агента для шаблона
-STEP_NAMES = {
-    (1, 1): "Ответ механику: что с двигателем и что делать (диагноз и поиск — кодом)",
-    (2, 1): "Заявка: модель готовит черновик (draft_ticket)",
-    (2, 2): "Заявка: итог механику перед подтверждением",
-}
-EXTRA = "Дополнительный круг: модель сама ищет по руководству"
+# Шаги агента С1 для шаблона. Каждый вызов модели попадает ровно в одну строку (итог шаблона = замер):
+ANSWER = "Ответ механику: что с двигателем и что делать (диагноз и поиск — кодом; доп. круги модели — сюда же)"
+DRAFT = "Заявка: модель готовит черновик (draft_ticket)"
+FINAL = "Заявка: итог механику перед подтверждением (все ходы после черновика)"
+
+
+def step_name(question: int, step: int) -> str:
+    if question == 1:
+        return ANSWER
+    return DRAFT if step == 1 else FINAL
+
+
+EMB_NAME = "Поиск по руководству: эмбеддинг запроса"
 
 
 def pick_run(label: str | None) -> dict[str, Any]:
@@ -59,15 +66,17 @@ def pick_run(label: str | None) -> dict[str, Any]:
 def step_rows(run: dict[str, Any]) -> list[dict[str, Any]]:
     """Шаги С1 с вызовом модели: вызовов на запрос, средние токены вход/из кэша/выход на вызов."""
     groups: dict[str, list[dict[str, str]]] = defaultdict(list)
+    emb: list[dict[str, str]] = []
     with (COST_DIR / f"{run['label']}.csv").open(encoding="utf-8") as f:
         for row in csv.DictReader(f):
+            if row["scenario"] == SCENARIO and row["kind"] == "эмбеддинг":
+                emb.append(row)
             if row["scenario"] != SCENARIO or row["kind"] != "модель":
                 continue
-            key = (int(row["question"]), int(row["step"]))
-            groups[STEP_NAMES.get(key, EXTRA)].append(row)
+            groups[step_name(int(row["question"]), int(row["step"]))].append(row)
     repeat = int(run.get("repeat", 1))
     out: list[dict[str, Any]] = []
-    for name in [*STEP_NAMES.values(), EXTRA]:
+    for name in (ANSWER, DRAFT, FINAL):
         rows = groups.get(name)
         if not rows:
             continue
@@ -82,7 +91,21 @@ def step_rows(run: dict[str, Any]) -> list[dict[str, Any]]:
                 "model": max({r["name"] for r in rows}, key=[r["name"] for r in rows].count),  # как ответил API
             }
         )
-    return out[: len(STEP_ROWS)]
+    limit = len(STEP_ROWS) - (1 if emb else 0)
+    out = out[:limit]
+    if emb:  # поиск по смыслу — тоже вызов модели (эмбеддинги Yandex), строкой в рублях
+        out.append(
+            {
+                "name": EMB_NAME,
+                "calls": round(len(emb) / repeat, 2),
+                "tokens_in": round(sum(int(r["tokens_in"]) for r in emb) / len(emb)),
+                "tokens_cached": 0,
+                "tokens_out": 0,
+                "model": "Yandex text-search-query",
+                "embedding": True,
+            }
+        )
+    return out
 
 
 def effective_in_price(step: dict[str, Any], price: dict[str, float]) -> float:
@@ -94,30 +117,33 @@ def effective_in_price(step: dict[str, Any], price: dict[str, float]) -> float:
 def model_rub(steps: list[dict[str, Any]], price: dict[str, float], currency: str, rate: float) -> float:
     """То же, что формула шаблона в I9:I12 и I13 — для проверки и отчёта."""
     k = rate if currency == "USD" else 1.0
-    return float(
-        sum(
-            s["calls"] * (s["tokens_in"] * effective_in_price(s, price) + s["tokens_out"] * price["out"]) / 1e6 * k
-            for s in steps
-        )
-    )
+    total = 0.0
+    for s in steps:
+        if s.get("embedding"):
+            total += s["calls"] * s["tokens_in"] * other("embedding") / 1000
+        else:
+            per_call = s["tokens_in"] * effective_in_price(s, price) + s["tokens_out"] * price["out"]
+            total += s["calls"] * per_call / 1e6 * k
+    return total
 
 
 def comment(run: dict[str, Any], price_note: str) -> list[str]:
+    """Три строки: запрос и допущения; голос — опция; постоянные в месяц на парк."""
     t = price_table()
-    o = t["other"]
-    scen = run["scenarios"]
-    rest = ", ".join(f"{k} {v['rub']}" for k, v in scen.items() if k != SCENARIO)
+    rest = ", ".join(f"{k} {v['rub']}" for k, v in run["scenarios"].items() if k != SCENARIO)
+    fixed = monthly_fixed(run)
+    voice = voice_option(run)
+    voice_txt = f"+{voice} ₽ на вопрос" if voice is not None else "в замере нет"
     return [
-        f"Запрос = сценарий видео С1 (вопрос + черновик заявки), токены — среднее {run['repeat']} прогонов на демо "
-        f"(make cost, замер {run['label']}); вход — с учётом скидки за кэш по замеренной доле. {price_note} "
-        f"Другие сценарии, ₽: {rest}.",
-        "Без модели: карточка проверки и пояснение по руководству — код, 0 ₽; поиск по смыслу ≈0,0002 ₽ на запрос "
-        f"(эмбеддинг {o['embedding']['value']} ₽/1000 ток. с НДС); голос (не в этой таблице): распознавание "
-        f"{o['stt_sync']['value']} ₽/15 с и синтез {o['tts_v3']['value']} ₽/250 знаков с НДС.",
-        f"Инфраструктура: Serverless Containers {o['container_vcpu_hour']['value']} ₽/vCPU·ч и "
-        f"{o['container_ram_gb_hour']['value']} ₽/ГБ·ч с НДС сверх бесплатного уровня; хранилище "
-        f"{o['object_storage_gb_month']['value']} ₽/ГБ·мес с НДС (индекс и PDF ~0,2 ГБ). Цены — официальные "
-        f"страницы, курс ЦБ {t['usd_rub']['value']} ₽/$ на {t['usd_rub']['date']}; суммы без НДС.",
+        f"Запрос = сценарий видео С1 (вопрос + черновик заявки): модель + эмбеддинг запроса, токены — среднее "
+        f"{run['repeat']} прогонов на демо (make cost, замер {run['label']}); вход — со скидкой за кэш по замеренной "
+        f"доле. {price_note} Другие сценарии, ₽: {rest}. Цены — официальные, курс ЦБ {t['usd_rub']['value']} на "
+        f"{t['usd_rub']['date']}, без НДС.",
+        f"Голос — опция, не в итоге: распознавание 15 с + синтез ответа (SpeechKit) — {voice_txt}; {LOCAL_VOICE}.",
+        f"Постоянные в месяц на парк, не в запрос: контейнер {fixed['container_rub']} ₽ в бесплатном уровне "
+        f"({fixed['container_rub_no_free_tier']} ₽ без него) при {fixed['questions']} вопросах; хранилище индекса и "
+        f"PDF {fixed['storage_gb']} ГБ — {fixed['storage_rub']} ₽ ({fixed['storage_rub_no_free_tier']} ₽ без "
+        "бесплатного объёма).",
     ]
 
 
@@ -141,6 +167,9 @@ def fill(template: Path, out: Path, run: dict[str, Any]) -> dict[str, Any]:
         ws[f"C{row}"] = s["calls"]
         ws[f"D{row}"] = s["tokens_in"]
         ws[f"E{row}"] = s["tokens_out"]
+        if s.get("embedding"):  # ₽ без НДС за 1 млн токенов (на странице — за 1000)
+            ws[f"F{row}"], ws[f"G{row}"], ws[f"H{row}"] = round(other("embedding") * 1000, 4), 0, "₽"
+            continue
         ws[f"F{row}"] = round(effective_in_price(s, price), 6)
         ws[f"G{row}"] = round(price["out"], 6)
         ws[f"H{row}"] = "$" if currency == "USD" else "₽"
