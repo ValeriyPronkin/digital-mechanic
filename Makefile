@@ -1,4 +1,4 @@
-.PHONY: web web-test engineer-pack logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
+.PHONY: run-local stop-local mocks-local stop-mocks-local web web-test engineer-pack logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
 
 PORT ?= 8000
 
@@ -78,6 +78,23 @@ web:
 
 web-test:
 	cd web && npm ci --no-audit --no-fund && npm test
+
+## Локальные тестовые серверы с файлом PID (.state/run-local-PORT.pid): гасится только свой процесс, без kill вручную
+PORT_LOCAL ?= 8010
+run-local:
+	sh scripts/local_server.sh start $(or $(PORT),$(PORT_LOCAL))
+
+stop-local:
+	sh scripts/local_server.sh stop $(or $(PORT),$(PORT_LOCAL))
+
+## Заглушки заказчика в фоне: Mock ML :8001, Mock ТОиР :8002 (остановить — make stop-mocks-local)
+mocks-local:
+	sh scripts/local_server.sh start 8001 mock_ml.app:app
+	sh scripts/local_server.sh start 8002 mock_toir.app:app
+
+stop-mocks-local:
+	sh scripts/local_server.sh stop 8001
+	sh scripts/local_server.sh stop 8002
 
 ## Всё, что проверяет CI, кроме смоука в Docker. Зелёный = код возврата 0.
 check: lint types test stubs third-party secrets
