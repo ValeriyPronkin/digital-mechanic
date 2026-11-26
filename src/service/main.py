@@ -25,6 +25,7 @@ from service.rate_limit import RateLimiter, client_key
 from service.store import Store
 from service.verdict_policy import VerdictCard, build_card
 from service.voice import (
+    DEFAULT_VOICE,
     NOT_HEARD,
     SpeechClient,
     SpeechKit,
@@ -107,6 +108,7 @@ def health() -> dict[str, Any]:
         "llm_provider": os.environ.get("LLM_PROVIDER", "deepseek"),
         "manuals_index": manuals_index_status(),
         "voice_key_present": any(os.environ.get(k) for k in ("YANDEX_TTS_API_KEY", "YANDEX_API_KEY")),
+        "tts_voice": os.environ.get("TTS_VOICE", DEFAULT_VOICE),
         "instance": {
             "id": INSTANCE_ID,
             "uptime_s": round(time.monotonic() - IMPORT_STARTED, 1),

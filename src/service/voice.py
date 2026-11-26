@@ -32,6 +32,7 @@ SILENCE_PEAK = 300  # из 32767: тише — считаем, что механ
 NOT_HEARD = "Не расслышал, повторите."
 NOT_IN_MANUAL = "В руководстве этого нет — нужна дефектовка."
 SPEECH_MAX_CHARS = 260
+DEFAULT_VOICE = "zahar"  # D-15: выбор Валерия (#18), запасной — ermil
 
 
 class VoiceError(ServiceError):
@@ -78,7 +79,7 @@ class SpeechKit:
     def __init__(self, key: str, http: httpx.Client | None = None) -> None:
         self.key = key
         self.http = http or httpx.Client(timeout=30)
-        self.voice = os.environ.get("TTS_VOICE", "filipp")  # D-15: ждёт выбора человека (#18)
+        self.voice = os.environ.get("TTS_VOICE", DEFAULT_VOICE)
         self.speed = os.environ.get("TTS_SPEED", "0.95")
 
     @classmethod

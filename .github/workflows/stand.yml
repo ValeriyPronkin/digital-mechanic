@@ -123,6 +123,15 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Замер соединения со стендом (TLS и ответ)
+        if: inputs.logs_minutes != ''
+        run: |
+          set -u
+          URL=$(yc serverless container get --name "$CONTAINER_NAME" --format json | jq -r '.url')
+          for i in $(seq 1 20); do
+            curl -sS -m 90 -o /dev/null -w "#$i code=%{http_code} ip=%{remote_ip} tcp=%{time_connect} tls=%{time_appconnect} ttfb=%{time_starttransfer} total=%{time_total}\n" "${URL%/}/health" || true
+          done
+
       - name: Сборка и push образов
         if: inputs.logs_minutes == ''
         run: |

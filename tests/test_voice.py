@@ -244,3 +244,10 @@ def test_voice_prices_from_table(monkeypatch: pytest.MonkeyPatch) -> None:
     assert tts_cost_rub(1000) == pytest.approx((tts if tts is not None else TTS_RUB_PER_1M_UPPER) / 1000)
     monkeypatch.setenv("TTS_PRICE_RUB_PER_1M_CHARS", "200")
     assert tts_cost_rub(1000) == pytest.approx(0.2)
+
+
+def test_default_voice_is_zahar(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-15: голос выбрал человек (issue #18)."""
+    monkeypatch.delenv("TTS_VOICE", raising=False)
+    assert SpeechKit("k").voice == "zahar"
+    assert TestClient(main.app).get("/health").json()["tts_voice"] == "zahar"
