@@ -224,8 +224,11 @@ def _date_forms(iso: str) -> str:
     return " ".join(forms)
 
 
+_REF_BARE = re.compile(r"\b[RР]\d+\b")  # ссылка без скобок: «R3 — руководство…»
+
+
 def numbers(text: str) -> set[str]:
-    return {_norm_num(n) for n in _NUM.findall(_REF.sub(" ", text))}
+    return {_norm_num(n) for n in _NUM.findall(_REF_BARE.sub(" ", _REF.sub(" ", text)))}
 
 
 def leaks_prompt(text: str) -> bool:

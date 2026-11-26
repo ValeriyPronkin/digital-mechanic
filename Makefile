@@ -1,4 +1,4 @@
-.PHONY: setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt index
+.PHONY: setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost index
 
 PORT ?= 8000
 
@@ -25,6 +25,11 @@ mocks: install
 ## Индекс руководств одной командой: PDF из MANUALS_DIR → INDEX_DIR (по умолчанию .index/). Повторно — из кэша
 index: install
 	uv run $(if $(wildcard .env),--env-file .env,) python -m service.manuals build
+
+## Себестоимость по участкам на настоящей модели (issue #16): reports/cost.md + reports/cost/<LABEL>.csv
+LABEL ?= $(shell date +%Y%m%d-%H%M)
+cost: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/cost_report.py --label $(LABEL)
 
 ## Всё, что проверяет CI, кроме смоука в Docker. Зелёный = код возврата 0.
 check: lint types test stubs third-party secrets
