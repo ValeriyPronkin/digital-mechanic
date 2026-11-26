@@ -24,7 +24,7 @@ import { ContradictionCard } from './ContradictionCard'
 import { GuideCard } from './GuideCard'
 import { PageSheet } from './PageSheet'
 import { SpeakButton } from './SpeakButton'
-import { getLevel, setLevel, type Level } from '../lib/level'
+import { LEVEL_EVENT, getLevel, setLevel, type Level } from '../lib/level'
 import { ScoreChart } from './ScoreChart'
 import { TicketCard } from './TicketCard'
 import { TicketSheet } from './TicketSheet'
@@ -585,6 +585,11 @@ export function VehicleScreen({
 /** «Как объяснять»: коротко (опытный механик) или по шагам — на этом устройстве, для следующих вопросов (#17). */
 function LevelSwitch() {
   const [level, set] = useState<Level>(getLevel)
+  useEffect(() => {
+    const follow = () => set(getLevel())
+    window.addEventListener(LEVEL_EVENT, follow)
+    return () => window.removeEventListener(LEVEL_EVENT, follow)
+  }, [])
   const pick = (l: Level) => {
     setLevel(l)
     set(l)

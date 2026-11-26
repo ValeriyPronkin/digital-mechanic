@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getFleet, type FleetView } from './api'
 import { FleetList, type Role } from './components/FleetList'
+import { LevelQuestion } from './components/LevelQuestion'
 import { VehicleScreen } from './components/VehicleScreen'
 import { copy } from './copy'
+import { isLevelChosen } from './lib/level'
 
 const fromHash = () => decodeURIComponent(window.location.hash.replace(/^#\/?/, '')) || null
 const savedRole = (): Role => (localStorage.getItem('role') === 'chief' ? 'chief' : 'mechanic')
@@ -13,6 +15,8 @@ export default function App() {
   const [failed, setFailed] = useState(false)
   const [selected, setSelected] = useState<string | null>(fromHash)
   const [role, setRole] = useState<Role>(savedRole)
+  // the first visit asks a mechanic once how to explain (#17); the chief mechanic reads the fleet, not answers
+  const [askLevel, setAskLevel] = useState(() => !isLevelChosen())
 
   // Also called after a ticket or an outcome: the list shows «заявка создана» and the outcome counts.
   // If that reload fails, the list already on the screen stays; only an empty screen says it failed.
@@ -46,6 +50,7 @@ export default function App() {
 
   return (
     <div className="flex h-dvh">
+      {askLevel && role === 'mechanic' && <LevelQuestion onDone={() => setAskLevel(false)} />}
       <aside
         className={`w-full shrink-0 border-line min-[900px]:block min-[900px]:w-[360px] min-[900px]:border-r ${selected ? 'hidden' : ''}`}
       >

@@ -17,3 +17,11 @@ test('the level is kept on the device, «По шагам» until the mechanic ch
   store.setItem(LEVEL_KEY, 'boss')
   assert.equal(getLevel(store), 'steps')
 })
+
+test('the first-visit question is asked until the mechanic answers it', async () => {
+  const { isLevelChosen } = await import('../src/lib/level.ts')
+  const store = memory()
+  assert.equal(isLevelChosen(store), false)
+  setLevel('steps', store)
+  assert.equal(isLevelChosen(store), true)
+})
