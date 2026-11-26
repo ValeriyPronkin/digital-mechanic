@@ -13,6 +13,7 @@ dependencies = [
     "pypdfium2>=5.15.2",
     "pydantic>=2.7",
     "uvicorn>=0.30",
+    "pyyaml>=6.0",
 ]
 
 [dependency-groups]
@@ -49,8 +50,14 @@ strict = true
 files = ["src", "scripts"]
 
 [[tool.mypy.overrides]]
-module = ["pdfplumber", "pdfplumber.*", "pypdfium2", "pypdfium2.*", "pymorphy3", "pymorphy3.*", "mock_ml.*", "mock_toir.*", "openpyxl", "openpyxl.*"]
+module = ["pdfplumber", "pdfplumber.*", "pypdfium2", "pypdfium2.*", "pymorphy3", "pymorphy3.*", "mock_ml.*", "mock_toir.*", "openpyxl", "openpyxl.*", "yaml", "yaml.*"]
 ignore_missing_imports = true
+
+# Поиск из прототипа Никиты перенесён дословно (service/nikita/search.py): переменная `count` в _page_terms
+# переиспользуется под другой тип — логику чужого кода не правим.
+[[tool.mypy.overrides]]
+module = ["service.nikita.search", "service.nikita.tokens"]
+disable_error_code = ["assignment", "operator", "no-any-return"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
