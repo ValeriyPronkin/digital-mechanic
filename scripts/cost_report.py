@@ -201,11 +201,23 @@ def _other(name: str) -> float:
     return ex_vat(float(row["value"]), bool(row.get("vat_included")))
 
 
-def voice_rub(answer: str) -> tuple[float, str]:
-    """Голос по тарифу без НДС — как в src/service/voice.py: распознавание 15 с + синтез API v1 за символы."""
-    from service.voice import stt_cost_rub, tts_cost_rub
+def voice_rub(answer: str, sources: list[dict[str, Any]] | None = None) -> tuple[float, str]:
+    """Голос по тарифу без НДС — как в src/service/voice.py: распознавание 15 с + синтез **короткой фразы**,
+    которую озвучивает код (`speech_for`), по более дешёвому API (v1 за символы / v3 за запрос до 250 символов).
+    Повтор одинаковой фразы в приложении берётся из кэша (0 ₽) — здесь не учитывается, оценка сверху."""
+    from service.agent import Source
+    from service.voice import choose_tts_api, for_tts, speech_for, stt_cost_rub, tts_cost_rub
 
-    return stt_cost_rub(15) + tts_cost_rub(len(answer)), f"распознавание 15 с + синтез {len(answer)} знаков (API v1)"
+    by_ref = {
+        s["ref"]: Source(s["ref"], "", s["manual"], int(s["pdf_page"]), s.get("section", ""), s.get("quote", ""))
+        for s in sources or []
+    }
+    chars = len(for_tts(speech_for(answer, by_ref).text))
+    api = choose_tts_api(chars)
+    return (
+        stt_cost_rub(15) + tts_cost_rub(chars, api),
+        f"распознавание 15 с + синтез короткой фразы {chars} знаков (API {api}; весь ответ — {len(answer)})",
+    )
 
 
 def _emb_client(searcher: Any) -> Any:
@@ -264,7 +276,7 @@ def run(sc: Scenario, provider: Any, searcher: Any) -> Result:
             res.tokens_cached += row["tokens_cached"]
             res.rub_llm += row["rub"]
         if sc.voice:
-            rub, what = voice_rub(reply.text)
+            rub, what = voice_rub(reply.text, reply.sources)
             res.rows.append(
                 {"scenario": sc.key, "question": n, "step": 0, "kind": "речь", "name": what, "tokens_in": 0,
                  "tokens_cached": 0, "tokens_out": 0, "rub": round(rub, 4), "ms": 0}

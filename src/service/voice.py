@@ -9,11 +9,18 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import io
+import json
+import logging
+import math
 import os
 import re
+import threading
 import time
 import wave
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -25,6 +32,8 @@ from service.clients import ServiceError
 
 STT_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
 TTS_URL = "https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize"
+TTS_V3_URL = "https://tts.api.cloud.yandex.net/tts/v3/utteranceSynthesis"
+TTS_V3_BLOCK = 250  # v3: запрос до 250 символов — одна единица; длиннее — unsafeMode, каждые 250 — единица
 SAMPLE_RATE = 16_000
 MAX_SECONDS = 30
 MAX_WAV_BYTES = 44 + SAMPLE_RATE * 2 * MAX_SECONDS + 4096
@@ -72,7 +81,7 @@ def pcm_from_wav(data: bytes) -> tuple[bytes, float]:
 class SpeechClient(Protocol):
     def recognize(self, pcm: bytes) -> str: ...
 
-    def synthesize(self, text: str) -> bytes: ...
+    def synthesize(self, text: str, api: str = "v1") -> bytes: ...
 
 
 class SpeechKit:
@@ -102,15 +111,43 @@ class SpeechKit:
             raise VoiceUnavailableError(f"Распознавание не сработало (HTTP {r.status_code}) — спросите текстом.")
         return str(r.json().get("result", "")).strip()
 
-    def synthesize(self, text: str) -> bytes:
-        data = {"text": for_tts(text), "lang": "ru-RU", "voice": self.voice, "speed": self.speed, "format": "mp3"}
+    def synthesize(self, text: str, api: str = "v1") -> bytes:
+        """mp3 короткой версии. `api` — v1 (за символы) или v3 (за запрос до 250 символов); выбор — `choose_tts_api`."""
+        spoken = for_tts(text)
         try:
+            if api == "v3":
+                return self._synthesize_v3(spoken)
+            data = {"text": spoken, "lang": "ru-RU", "voice": self.voice, "speed": self.speed, "format": "mp3"}
             r = self.http.post(TTS_URL, data=data, headers=self._headers())
         except httpx.HTTPError as exc:
             raise VoiceUnavailableError("Озвучка не ответила — ответ на экране.") from exc
         if r.status_code != 200:
             raise VoiceUnavailableError(f"Озвучка не сработала (HTTP {r.status_code}) — ответ на экране.")
         return r.content
+
+    def _synthesize_v3(self, spoken: str) -> bytes:
+        body: dict[str, Any] = {
+            "text": spoken,
+            "hints": [{"voice": self.voice}, {"speed": float(self.speed)}],
+            "outputAudioSpec": {"containerAudio": {"containerAudioType": "MP3"}},
+            "loudnessNormalizationType": "LUFS",
+        }
+        if len(spoken) > TTS_V3_BLOCK:
+            body["unsafeMode"] = True  # без него v3 отвечает 400 «Too long text» (проверено 26.11)
+        r = self.http.post(TTS_V3_URL, json=body, headers=self._headers())
+        if r.status_code != 200:
+            raise VoiceUnavailableError(f"Озвучка не сработала (HTTP {r.status_code}) — ответ на экране.")
+        audio = b""
+        for line in r.text.splitlines():  # ответ — JSON по строке на кусок: result.audioChunk.data в base64
+            try:
+                chunk = ((json.loads(line).get("result") or {}).get("audioChunk") or {}).get("data")
+            except ValueError:
+                continue
+            if chunk:
+                audio += base64.b64decode(chunk)
+        if not audio:
+            raise VoiceUnavailableError("Озвучка вернула пустой ответ — ответ на экране.")
+        return audio
 
 
 _UNITS = [
@@ -211,13 +248,108 @@ def stt_cost_rub(seconds: float) -> float:
     return blocks * float(price)
 
 
-def tts_cost_rub(chars: int) -> float:
-    """Синтез — за символы; цена — `data/prices.json` (`TTS_PRICE_RUB_PER_1M_CHARS` перекрывает) или верхняя оценка."""
+def _tts_price(key: str, fallback: float) -> float:
     from service.store import ex_vat, price_table
 
-    row = price_table()["other"].get("tts_v1") or {"value": TTS_RUB_PER_1M_UPPER, "vat_included": True}
-    price = os.environ.get("TTS_PRICE_RUB_PER_1M_CHARS") or ex_vat(float(row["value"]), bool(row.get("vat_included")))
-    return chars * float(price) / 1_000_000
+    row = price_table()["other"].get(key)
+    return ex_vat(float(row["value"]), bool(row.get("vat_included"))) if row else fallback
+
+
+def tts_cost_rub(chars: int, api: str | None = None) -> float:
+    """Синтез по тарифу без НДС (`data/prices.json`, официальная страница цен SpeechKit).
+    v1 — за символы; v3 — за запрос: до 250 символов одна единица, длиннее (unsafeMode) — каждые начатые 250.
+    `api=None` — по более дешёвому. `TTS_PRICE_RUB_PER_1M_CHARS` перекрывает цену v1."""
+    override = os.environ.get("TTS_PRICE_RUB_PER_1M_CHARS")
+    v1 = chars * (float(override) if override else _tts_price("tts_v1", TTS_RUB_PER_1M_UPPER)) / 1_000_000
+    v3 = max(1, math.ceil(chars / TTS_V3_BLOCK)) * _tts_price("tts_v3", 0.1626)
+    if api == "v1":
+        return v1
+    if api == "v3":
+        return v3
+    return min(v1, v3)
+
+
+def choose_tts_api(chars: int) -> str:
+    """`TTS_API=v1|v3` — принудительно; иначе дешёвый для этой длины (v1 выгоднее для фраз короче ~120 символов)."""
+    forced = os.environ.get("TTS_API", "auto").strip()
+    if forced in ("v1", "v3"):
+        return forced
+    return "v1" if tts_cost_rub(chars, "v1") <= tts_cost_rub(chars, "v3") else "v3"
+
+
+def tts_voice() -> str:
+    return os.environ.get("TTS_VOICE", DEFAULT_VOICE)
+
+
+# ---------- кэш одинаковых фраз ----------
+
+
+class TtsCache:
+    """mp3 одинаковых фраз не синтезируется повторно: «В руководстве этого нет…», частые значения.
+
+    В памяти экземпляра — всегда (до MEMORY_ITEMS фраз). На стенде (`TTS_CACHE_BUCKET=1`) — ещё и общий в бакете
+    `cache/tts/<sha256>.mp3` по IAM-токену стенда (как журнал #27): повтор на другом экземпляре тоже бесплатный.
+    Ключ — голос, скорость и текст, уходящий в синтез. Сбой бакета кэш не роняет: просто синтез."""
+
+    MEMORY_ITEMS = 128
+
+    def __init__(self, bucket: Any = None) -> None:
+        self.bucket = bucket
+        self._mem: OrderedDict[str, bytes] = OrderedDict()
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def key(text: str) -> str:
+        speed = os.environ.get("TTS_SPEED", "0.95")
+        raw = f"{tts_voice()}|{speed}|{for_tts(text)}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def get(self, text: str) -> bytes | None:
+        k = self.key(text)
+        with self._lock:
+            if k in self._mem:
+                self._mem.move_to_end(k)
+                return self._mem[k]
+        if self.bucket is None:
+            return None
+        try:
+            audio: bytes = self.bucket.get(f"cache/tts/{k}.mp3")
+        except Exception:  # нет в бакете или бакет недоступен — синтезируем
+            return None
+        self._remember(k, audio)
+        return audio
+
+    def put(self, text: str, audio: bytes) -> None:
+        k = self.key(text)
+        self._remember(k, audio)
+        if self.bucket is not None:
+            bucket = self.bucket
+
+            def run() -> None:
+                try:
+                    bucket.put(f"cache/tts/{k}.mp3", audio, "audio/mpeg")
+                except Exception as exc:
+                    logging.getLogger(__name__).warning("кэш озвучки не записан в бакет: %s", type(exc).__name__)
+
+            threading.Thread(target=run, name="tts-cache", daemon=True).start()
+
+    def _remember(self, k: str, audio: bytes) -> None:
+        with self._lock:
+            self._mem[k] = audio
+            self._mem.move_to_end(k)
+            while len(self._mem) > self.MEMORY_ITEMS:
+                self._mem.popitem(last=False)
+
+    @classmethod
+    def from_env(cls) -> TtsCache:
+        if os.environ.get("TTS_CACHE_BUCKET", "") != "1" or not os.environ.get("S3_BUCKET", "").strip():
+            return cls()
+        from service import kb_store
+        from service.spend import RefreshingIamAuth
+
+        http = httpx.Client(timeout=10)
+        endpoint = os.environ.get("S3_ENDPOINT", kb_store.DEFAULT_ENDPOINT)
+        return cls(kb_store.Bucket(os.environ["S3_BUCKET"].strip(), RefreshingIamAuth(http), http, endpoint))
 
 
 def timed(fn: Any, *args: Any) -> tuple[Any, int]:

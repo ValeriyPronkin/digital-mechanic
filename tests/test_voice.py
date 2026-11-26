@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import wave
 from typing import Any
 
@@ -173,7 +174,7 @@ class FakeSpeech:
     def recognize(self, pcm: bytes) -> str:
         return self.heard
 
-    def synthesize(self, text: str) -> bytes:
+    def synthesize(self, text: str, api: str = "v1") -> bytes:
         self.spoken.append(text)
         return b"ID3fake-mp3"
 
@@ -244,9 +245,9 @@ def test_voice_prices_from_table(monkeypatch: pytest.MonkeyPatch) -> None:
     assert stt_cost_rub(3) == pytest.approx(stt) and stt_cost_rub(16) == pytest.approx(2 * stt)
     tts = ex_vat(price_table()["other"]["tts_v1"]["value"], True)  # голос синтезирует через API v1
     assert tts == pytest.approx(TTS_RUB_PER_1M_UPPER / 1.22)
-    assert tts_cost_rub(1000) == pytest.approx(tts / 1000)
+    assert tts_cost_rub(1000, "v1") == pytest.approx(tts / 1000)
     monkeypatch.setenv("TTS_PRICE_RUB_PER_1M_CHARS", "200")
-    assert tts_cost_rub(1000) == pytest.approx(0.2)
+    assert tts_cost_rub(1000, "v1") == pytest.approx(0.2)
 
 
 def test_default_voice_is_zahar(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -261,3 +262,106 @@ def test_speech_prefers_value_over_procedure() -> None:
     answer = "Замер — на холодном двигателе, при закрытых клапанах [R1]. Зазор впускных клапанов 0,25–0,30 мм [R1]."
     sp = speech_for(answer, SOURCES)
     assert "0,25–0,30 мм" in sp.body
+
+
+# ---------- стоимость синтеза: v1 / v3, кэш одинаковых фраз ----------
+
+
+def test_v3_billed_per_request_block_and_cheaper_api_chosen(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Официальная страница цен SpeechKit: v1 — за символы; v3 — за запрос до 250 символов, длиннее — каждые 250."""
+    from service.store import ex_vat, price_table
+    from service.voice import choose_tts_api, tts_cost_rub
+
+    monkeypatch.delenv("TTS_API", raising=False)
+    monkeypatch.delenv("TTS_PRICE_RUB_PER_1M_CHARS", raising=False)
+    unit = ex_vat(price_table()["other"]["tts_v3"]["value"], True)
+    assert tts_cost_rub(10, "v3") == pytest.approx(unit) and tts_cost_rub(250, "v3") == pytest.approx(unit)
+    assert tts_cost_rub(251, "v3") == pytest.approx(2 * unit)
+    assert choose_tts_api(45) == "v1"  # «В руководстве этого нет — нужна дефектовка.» — v1 дешевле
+    assert choose_tts_api(200) == "v3"  # обычная короткая версия со значением и страницей
+    assert tts_cost_rub(200) == pytest.approx(min(tts_cost_rub(200, "v1"), tts_cost_rub(200, "v3")))
+    monkeypatch.setenv("TTS_API", "v1")
+    assert choose_tts_api(200) == "v1"
+
+
+def test_v3_request_and_chunked_mp3(monkeypatch: pytest.MonkeyPatch) -> None:
+    import base64 as b64
+
+    seen: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        lines = [json.dumps({"result": {"audioChunk": {"data": b64.b64encode(p).decode()}}}) for p in (b"ID3a", b"bc")]
+        return httpx.Response(200, text="\n".join(lines))
+
+    monkeypatch.setenv("TTS_VOICE", "zahar")
+    sk = SpeechKit("k", httpx.Client(transport=httpx.MockTransport(handler)))
+    assert sk.synthesize("Зазор 0,25 мм.", "v3") == b"ID3abc"
+    body = json.loads(seen[0].content)
+    assert seen[0].url.path == "/tts/v3/utteranceSynthesis" and seen[0].headers["Authorization"] == "Api-Key k"
+    assert body["hints"][0] == {"voice": "zahar"}
+    assert body["outputAudioSpec"]["containerAudio"]["containerAudioType"] == "MP3"
+    assert "миллиметра" in body["text"] and "unsafeMode" not in body
+    sk.synthesize("Зазор 0,25 мм. " * 30, "v3")
+    assert json.loads(seen[1].content)["unsafeMode"] is True  # длиннее 250 — без него v3 отвечает 400
+
+
+def test_tts_cache_memory_and_bucket() -> None:
+    from service.voice import TtsCache
+
+    class Bucket:
+        def __init__(self) -> None:
+            self.objects: dict[str, bytes] = {}
+
+        def get(self, key: str) -> bytes:
+            if key not in self.objects:
+                raise RuntimeError("404")
+            return self.objects[key]
+
+        def put(self, key: str, data: bytes, content_type: str = "") -> None:
+            self.objects[key] = data
+
+    bucket = Bucket()
+    first = TtsCache(bucket)
+    assert first.get("В руководстве этого нет — нужна дефектовка.") is None
+    first.put("В руководстве этого нет — нужна дефектовка.", b"ID3x")
+    assert first.get("В руководстве этого нет — нужна дефектовка.") == b"ID3x"
+    for _ in range(50):  # запись в бакет — в фоне
+        if bucket.objects:
+            break
+        import time
+
+        time.sleep(0.01)
+    (key,) = bucket.objects
+    assert key.startswith("cache/tts/") and key.endswith(".mp3")
+    other_instance = TtsCache(bucket)  # другой экземпляр стенда: из памяти нет, из бакета есть
+    assert other_instance.get("В руководстве этого нет — нужна дефектовка.") == b"ID3x"
+
+
+def test_speak_repeat_phrase_from_cache_costs_nothing(
+    api: tuple[TestClient, FakeSpeech, Store], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from service.voice import TtsCache
+
+    client, fake, store = api
+    cache = TtsCache()
+    monkeypatch.setattr(main, "tts_cache", lambda: cache)
+    monkeypatch.delenv("TTS_API", raising=False)
+    text = "В руководстве этого нет — нужна дефектовка."
+    body = {"text": text, "sig": conv_state.sign_text(text)}
+    first = client.post("/api/voice/speak", json=body)
+    second = client.post("/api/voice/speak", json=body)
+    assert first.headers["X-TTS"] == "v1" and second.headers["X-TTS"] == "cache"
+    assert fake.spoken == [text], "второй раз синтез не вызывался"
+    rows = store._rows("SELECT kind, cost_rub FROM voice_calls ORDER BY id")
+    assert [r["kind"] for r in rows] == ["tts", "tts_cache"] and rows[0]["cost_rub"] > 0 and rows[1]["cost_rub"] == 0
+
+
+def test_cost_report_voices_short_phrase_not_whole_answer() -> None:
+    """Отчёт #16 считал синтез по всему ответу (+1,19 ₽); приложение озвучивает только короткую фразу."""
+    from cost_report import voice_rub
+
+    answer = "Зазор впускных клапанов 0,25–0,30 мм [R1]. " + "Подробные шаги по руководству. " * 40
+    src = [{"ref": "R1", "manual": "РЭ ЯМЗ-236", "pdf_page": 31, "quote": GAP}]
+    rub, what = voice_rub(answer, src)
+    assert "короткой фразы" in what and rub < 0.5
