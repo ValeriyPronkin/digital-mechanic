@@ -1,3 +1,11 @@
+# Интерфейс v2 (issue #52, web/ — автор Никита Пронкин): сборка Vite → статические файлы, раздаются по /v2.
+FROM node:24-bookworm-slim AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ ./
+RUN npm run build
+
 FROM python:3.12-slim
 
 RUN pip install --no-cache-dir uv==0.12.24 \
@@ -7,6 +15,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 COPY data ./data
+COPY --from=web /web/dist ./web/dist
 RUN uv sync --frozen --no-dev && chown -R app:app /app
 
 USER app

@@ -1,0 +1,9 @@
+.git
+.venv
+.index
+.state
+manuals
+kb
+web/node_modules
+web/dist
+**/__pycache__
