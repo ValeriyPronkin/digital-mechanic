@@ -13,6 +13,7 @@ import {
   type Verification,
 } from './api'
 import { copy } from './copy'
+import { getLevel } from './lib/level'
 
 export interface AssistantTurn {
   role: 'assistant'
@@ -147,7 +148,7 @@ export function useThread(vehicleId: string, attempt = 0) {
       abort.current = new AbortController()
       try {
         await streamChat(
-          { vehicle_id: vehicleId, message, session_id: options.sessionId, new_thread: options.newThread },
+          { vehicle_id: vehicleId, message, session_id: options.sessionId, new_thread: options.newThread, level: getLevel() },
           onEvent,
           abort.current.signal,
         )
