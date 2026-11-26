@@ -46,6 +46,8 @@ def test_fleet_and_vehicle(v2: tuple[TestClient, Any, Store]) -> None:
     d = c.get(f"/api/v2/vehicles/{vid}").json()
     assert d["vehicle_id"] == vid and d["sessions"] and d["manuals"] and d["trend"]
     assert {"status", "anomaly_score", "fits_engine"} <= set(d["sessions"][0])
+    dates = [x["checked_at"] for x in d["sessions"]]
+    assert dates == sorted(dates)  # интерфейс v2 считает последней проверкой последний элемент списка
     assert c.get("/api/v2/vehicles/NOPE").status_code == 404
 
 
@@ -66,6 +68,10 @@ def test_c1_through_v2(v2: tuple[TestClient, Any, Store]) -> None:
     assert src["handle"] == "S1" and src["pdf_page"] == 42
     ver = next(e for e in ev if e["type"] == "verification")
     assert ver["verified"] == ["S1"] and ver["counts"]["verified"] == 1
+    pp = next(e for e in ev if e["type"] == "passport")  # паспорт запроса (#31) — для «?» в v2
+    assert pp["question"]["level"] == "steps" and pp["total"]["model_rub"] >= 0
+    sp = next(e for e in ev if e["type"] == "speech")  # короткая озвучка (#14) — по подписи сервера
+    assert "0,1 МПа" in sp["text"] and sp["url"] == "/api/voice/speak" and len(sp["sig"]) == 64
 
     restored = c.get(f"/api/v2/threads/current?vehicle_id={vid}").json()
     assert restored["session_id"] == sid and len(restored["transcript"]) == 2

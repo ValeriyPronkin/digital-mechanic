@@ -30,7 +30,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from service import conv_state
+from service import conv_state, passport
 from service.agent import Agent, AgentReply, Conversation
 from service.clients import ServiceError, TicketRequest
 from service.fleet import Fleet, Vehicle
@@ -38,6 +38,7 @@ from service.fleet_status import STATUS_LABEL, trend, vehicle_status
 from service.manuals.catalog import DOCS_BY_ID, documents_for_engine
 from service.store import Store
 from service.verdict_policy import URGENCY_ACTION, VerdictCard, urgency_for
+from service.voice import speech_for
 
 log = logging.getLogger(__name__)
 
@@ -126,7 +127,7 @@ def vehicle_brief(fleet: Fleet, v: Vehicle) -> dict[str, Any]:
 
 
 def vehicle_detail(fleet: Fleet, v: Vehicle) -> dict[str, Any]:
-    sessions = sorted(v.sessions, key=lambda s: s.checked_at, reverse=True)
+    sessions = sorted(v.sessions, key=lambda s: s.checked_at)  # от старых к новым: интерфейс берёт последнюю
     manuals = [
         {"id": d.doc_id, "short": short_name(d.doc_id, d.designation), "title": d.designation, "pages": d.pages}
         for d in documents_for_engine(v.engine_model)
@@ -409,6 +410,7 @@ class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     session_id: str | None = None
     new_thread: bool = False
+    level: Literal["expert", "steps"] = "steps"  # уровень механика (#17): формат и длина ответа
 
 
 class TicketDecision(BaseModel):
@@ -510,7 +512,7 @@ def build_router(
                 conv = conv_state.load(thread["state"], get_fleet()) if thread["state"] else None
                 if conv is None:
                     conv = ag.start(v.vehicle_id, session_id)
-                reply = ag.ask(conv, req.message)
+                reply = ag.ask(conv, req.message, req.level)
             except ServiceError as exc:
                 yield _sse({"type": "error", "message": exc.message})
                 yield _sse({"type": "done", "reason": "error"})
@@ -531,6 +533,22 @@ def build_router(
             usage = usage_events(reply)
             for u in usage:
                 yield _sse(u)
+            # Наши функции, которых пока нет в компонентах v2: интерфейс незнакомые события пропускает (#52 п. 3).
+            yield _sse(
+                {
+                    "type": "passport",
+                    **passport.build(reply.trace, question=req.message, notes=reply.notes, level=req.level),
+                }
+            )
+            spoken = speech_for(reply.text, conv.sources)
+            yield _sse(
+                {
+                    "type": "speech",
+                    "text": spoken.text,
+                    "sig": conv_state.sign_text(spoken.text),
+                    "url": "/api/voice/speak",
+                }
+            )
             known = {s["handle"] for s in thread["sources"]}
             thread["sources"] += [s for s in sources if s["handle"] not in known]
             blocks = [e["block"] for e in tools if e.get("type") == "tool_result" and e.get("block")]
