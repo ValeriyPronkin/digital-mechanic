@@ -9,3 +9,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+
+# PDF руководств заказчика и индексы — не в git
+manuals/
+.index/
