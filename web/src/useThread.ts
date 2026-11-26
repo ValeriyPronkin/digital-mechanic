@@ -14,7 +14,7 @@ import {
   type Verification,
 } from './api'
 import { copy } from './copy'
-import { getLevel } from './lib/level'
+import { getLevel, type Level } from './lib/level'
 
 export interface AssistantTurn {
   role: 'assistant'
@@ -126,7 +126,7 @@ export function useThread(vehicleId: string, attempt = 0) {
   }, [vehicleId, attempt])
 
   const send = useCallback(
-    async (message: string, options: { sessionId?: string | null; newThread?: boolean } = {}) => {
+    async (message: string, options: { sessionId?: string | null; newThread?: boolean; level?: Level } = {}) => {
       const live: AssistantTurn = {
         role: 'assistant',
         text: '',
@@ -159,7 +159,7 @@ export function useThread(vehicleId: string, attempt = 0) {
             message,
             session_id: options.sessionId,
             new_thread: options.newThread,
-            level: getLevel(),
+            level: options.level ?? getLevel(),
           },
           onEvent,
           abort.current.signal,
