@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
-from service import IMPORT_STARTED, INSTANCE_ID, __version__, conv_state, kb_store, stand_log
+from service import IMPORT_STARTED, INSTANCE_ID, __version__, conv_state, kb_store, passport, stand_log
 from service.agent import Agent, Level
 from service.clients import MLClient, ServiceError, ToirClient
 from service.fault_matrix import card_explanation
@@ -261,10 +261,12 @@ def diagnose(req: DiagnoseIn) -> VerdictCard:
     """Результат проверки из Mock ML → карточка вердикта по правилам (без модели)."""
     if fleet().vehicle(req.vehicle_id) is None:
         raise HTTPException(404, f"Машина {req.vehicle_id} не найдена в парке.")
+    t0 = time.monotonic()
     try:
         diag = ml_client().diagnose(req.vehicle_id, req.session_id)
     except ServiceError as exc:
         raise HTTPException(exc.http_status, exc.message) from exc
+    ml_ms = int((time.monotonic() - t0) * 1000)
     if diag.vehicle_id != req.vehicle_id or diag.session_id != req.session_id:
         raise HTTPException(502, "Сервис диагностики вернул результат для другой проверки.")
     vehicle = fleet().vehicle(req.vehicle_id)
@@ -272,6 +274,7 @@ def diagnose(req: DiagnoseIn) -> VerdictCard:
     if card.status == "anomaly" and card.compatible and card.fault_code and vehicle:
         card.manual = card_explanation(card.fault_code, vehicle.engine_model)
     store().remember_view(req.vehicle_id, req.session_id, card.status, card.fault_code)
+    card.passport = passport.for_card(card, ml_ms)
     return card
 
 
@@ -280,6 +283,7 @@ class ChatIn(BaseModel):
     session_id: str = Field(min_length=1)
     message: str = Field(min_length=1, max_length=2000)
     level: Level = "steps"  # уровень механика (#17): «Опытный» / «Пошагово»
+    stt_id: int | None = None  # вопрос голосом: запись журнала распознавания (#31 — паспорт запроса)
     state: str | None = Field(default=None, max_length=400_000)  # подписанное состояние разговора
 
 
@@ -298,12 +302,26 @@ def chat(req: ChatIn, request: Request) -> dict[str, Any]:
         raise HTTPException(exc.http_status, exc.message) from exc
     log_steps(reply.trace)
     spoken = speech_for(reply.text, conv.sources)
+    stt = store().voice_call(req.stt_id) if req.stt_id else None
+    stt = stt if stt and stt.get("kind") == "stt" else None
+    pp = passport.build(
+        reply.trace,
+        question=req.message,
+        notes=reply.notes,
+        by_voice=stt is not None,
+        stt=stt,
+        speech_text=spoken.text,
+        level=req.level,
+    )
+    slog = journal()
+    passport.write(pp, time.time(), put=slog.put if slog is not None else None)  # журнал стенда (#27)
     return {
         "conversation_id": conv.id,
         "state": conv_state.dump(conv),
         **reply.__dict__,
         # Короткая версия для ответа вслух (#14): собрана кодом, цифры сверены с фрагментом; синтез — по подписи.
         "speech": {"text": spoken.text, "sig": conv_state.sign_text(spoken.text)},
+        "passport": pp,  # «?» у ответа (#31): шаги, контекст, токены, ₽
     }
 
 
@@ -318,12 +336,12 @@ async def voice_recognize(request: Request) -> dict[str, Any]:
     except ServiceError as exc:
         raise HTTPException(exc.http_status, exc.message) from exc
     cost = stt_cost_rub(seconds)
-    store().log_voice("stt", round(seconds, 2), cost, ms)
+    stt_id = store().log_voice("stt", round(seconds, 2), cost, ms)
     if (slog := journal()) is not None:
         slog.event("step", step="stt", ms=ms)
     if not text:
         raise HTTPException(422, NOT_HEARD)
-    return {"text": text, "seconds": round(seconds, 1), "cost_rub": round(cost, 3)}
+    return {"text": text, "seconds": round(seconds, 1), "cost_rub": round(cost, 3), "stt_id": stt_id}
 
 
 class SpeakIn(BaseModel):

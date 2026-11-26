@@ -97,8 +97,18 @@
     @keyframes pulse { 50% { opacity:.75; } }
     .msg.me button.fix { margin-left:.5rem; font:inherit; font-size:.85rem; border:0; background:none; color:var(--accent);
                          text-decoration:underline; padding:.2rem; min-height:32px; }
-    details.trace { margin-top:1rem; font-size:.88rem; color:var(--muted); }
-    details.trace table { width:100%; border-collapse:collapse; } details.trace td { padding:.2rem .3rem; border-top:1px solid var(--line); }
+    details.passport { margin-top:.8rem; font-size:.88rem; color:var(--fg); }
+    details.passport summary { color:var(--muted); min-height:36px; display:flex; align-items:center; gap:.4rem; cursor:pointer; }
+    details.passport .q { display:inline-flex; width:28px; height:28px; border-radius:50%; align-items:center; justify-content:center;
+                           background:#eef2f7; color:var(--accent); font-weight:800; border:1px solid var(--line); }
+    details.passport h5 { margin:.8rem 0 .3rem; font-size:.92rem; }
+    table.pp { width:100%; border-collapse:collapse; display:block; overflow-x:auto; }
+    table.pp th, table.pp td { padding:.25rem .35rem; border-top:1px solid var(--line); text-align:left; vertical-align:top; }
+    table.pp th { color:var(--muted); font-weight:600; } table.pp tr.unused td { color:var(--muted); }
+    .pp-rules { margin:.2rem 0; padding-left:1.2rem; }
+    table.pp { font-size:.85rem; } table.pp th { white-space:nowrap; }
+    .pp-save { margin-top:.6rem; font:inherit; font-weight:600; min-height:44px; border-radius:10px; border:2px solid var(--accent);
+               background:#fff; color:var(--accent); padding:.3rem .9rem; }
   </style>
 </head>
 <body>
@@ -252,6 +262,7 @@ function screenCard(card) {
         el("q", {}, card.design_fact.quote), " — ", pageLink(card.design_fact)) : null),
     explain,
     quote,
+    card.passport ? passportBlock(card.passport, "Как получена карточка") : null,
     el("p", {class:"sub"}, current.vehicle_id + " · " + current.engine_model + " · проверка " + selected +
       (s ? " от " + fmtDate(s.checked_at) : "")),
     chatBlock(card));
@@ -345,6 +356,68 @@ function chatBlock(card) {
       input, el("button", {type:"submit"}, "Спросить")));
 }
 
+// ---------- паспорт запроса (#31): «?» у ответа и карточки — шаги, контекст, токены, ₽; без JSON на экране ----------
+const rub = x => !x ? "0" : x < 0.01 ? x.toFixed(4) : x.toFixed(2);
+function ptable(head, rows, rowClass) {
+  return el("table", {class:"pp"}, el("tr", {}, ...head.map(h => el("th", {}, h))),
+    ...rows.map((r, i) => el("tr", rowClass ? {class: rowClass(i)} : {}, ...r.map(c => el("td", {}, c)))));
+}
+function shortParams(p) {
+  return Object.entries(p || {}).map(([k, v]) => k + ": " + (Array.isArray(v) ? v.join(" | ") : typeof v === "object" ? JSON.stringify(v) : String(v)))
+    .join("; ").slice(0, 160) || "—";
+}
+function passportBlock(pp, title) {
+  const t = pp.total, sec = [];
+  const h = (txt) => el("h5", {}, txt);
+  if (pp.question) {
+    const q = pp.question, rows = [["Вопрос", q.text || "—"]];
+    if (q.by_voice) rows.push(["Голос", "распознано за " + (q.stt_seconds || 0).toFixed(1) + " с записи"]);
+    if (q.lang && q.lang !== "ru") rows.push(["Язык", q.lang + "; для поиска: " + (q.question_ru || "—")]);
+    if (q.level) rows.push(["Уровень", q.level === "expert" ? "Опытный" : "Пошагово"]);
+    sec.push(h("1. Вопрос"), ptable(["", ""], rows));
+  }
+  sec.push(h("2. Инструменты"), pp.tools.length
+    ? ptable(["Что (кто вызвал)", "Параметры", "Итог"], pp.tools.map(x =>
+        [x.name + " (" + x.by + ")", shortParams(x.params), (x.ok ? "✓ " : "отказ" + (x.refused ? ": " + x.refused : "") + " ") + x.ms + " мс"]))
+    : el("p", {class:"sub"}, "Инструменты не вызывались."));
+  if (pp.searches.length) {
+    sec.push(h("3. Руководство: что ушло в модель"));
+    for (const s of pp.searches) {
+      sec.push(el("p", {class:"sub"}, s.by === "кэш" ? "Фрагменты сохранённого ответа (из кэша), поиска не было"
+        : "Поиск (" + s.by + "): «" + s.queries.join("», «") + "» · двигатель-фильтр " + (s.engine || "—") + " · найдено " + s.found));
+      sec.push(ptable(["Документ, стр.", "≈ток.", "В ответе"], s.fragments.map(f =>
+        [f.manual + ", стр. " + f.pdf_page + (f.section ? " · " + f.section : ""), f.tokens, f.used ? "✓ да" : "— нет"]),
+        i => s.fragments[i].used ? "" : "unused"));
+    }
+  }
+  if (pp.card_pages && pp.card_pages.length)
+    sec.push(h("3. Руководство: страницы из матрицы"), ptable(["Документ", "Стр.", "Что"], pp.card_pages.map(x => [x.manual, x.pdf_page, x.what || "—"])));
+  sec.push(h("4. Модель"), pp.llm.length
+    ? ptable(["Вызов (" + (pp.llm[0].provider || "") + ")", "Токены: вход (из кэша) / выход", "Время, ₽"], pp.llm.map(x =>
+        [x.name, x.tokens_in + (x.tokens_cached ? " (" + x.tokens_cached + ")" : "") + " / " + x.tokens_out,
+         (x.ms / 1000).toFixed(1) + " с · " + rub(x.cost_rub) + " ₽"]))
+    : el("p", {class:"sub"}, "Модель не вызывалась — 0 токенов."));
+  const v = pp.voice;
+  if (v.stt_seconds || v.tts_chars) sec.push(h("5. Речь"), ptable(["", "Объём", "₽"], [
+    ["Распознавание", v.stt_seconds.toFixed(1) + " с", rub(v.stt_rub)],
+    ["Синтез (оценка, при прослушивании)", v.tts_chars + " симв.", rub(v.tts_rub_estimate)]]));
+  sec.push(h("6. Правила кода"), el("ul", {class:"pp-rules"}, ...pp.rules.map(x => el("li", {}, x))));
+  sec.push(h("7. Итог"), ptable(["", ""], [
+    ["Модель", rub(t.model_rub) + " ₽ · " + t.tokens_in + " / " + t.tokens_out + " токенов" + (t.tokens_cached ? " (из кэша " + t.tokens_cached + ")" : "")],
+    ["Поиск по руководству", "≈" + rub(t.search_rub) + " ₽ (эмбеддинг запроса)"],
+    ["Речь", rub(t.voice_rub) + " ₽"],
+    ["Всего за запрос", rub(t.total_rub) + " ₽ · " + (t.ms / 1000).toFixed(1) + " с"],
+    ["Лишний контекст", t.fragments_tokens ? Math.round(t.unused_share * 100) + "% — " + t.unused_tokens + " из " + t.fragments_tokens + " ток. не пошли в ответ" : "—"]]));
+  const save = el("button", {class:"pp-save", onclick: () => {
+    const a = el("a", {href: URL.createObjectURL(new Blob([JSON.stringify(pp, null, 1)], {type:"application/json"})),
+                       download: "passport-" + (pp.request_id || "card") + ".json"});
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }}, "Скачать JSON");
+  return el("details", {class:"passport"},
+    el("summary", {"aria-label": "Паспорт запроса"}, el("span", {class:"q"}, "?"), " " + title + " · " + rub(t.total_rub) + " ₽ · " + (t.ms / 1000).toFixed(1) + " с"),
+    ...sec, save);
+}
+
 // ---------- ответ модели: безопасная разметка (только DOM и textContent, HTML из ответа не исполняется) ----------
 // Поддержано: строка-заголовок «**…**» / «# …», списки «1. …» и «- …», **жирный** внутри строки, ссылки [R…].
 function inline(text, byRef, refsOut) {
@@ -415,15 +488,7 @@ function renderAnswer(r) {
   for (const n of r.notes) body.append(el("div", {class:"note"}, "⚠ " + n));
   if (r.sources.length) body.append(el("div", {class:"src"}, ...r.sources.map(s =>
     el("a", {href: s.url, target:"_blank", rel:"noopener"}, s.manual + ", стр. PDF " + s.pdf_page))));
-  const t = r.trace;
-  const rub = x => x < 0.01 ? x.toFixed(4) : x.toFixed(2);
-  const cached = t.tokens_cached ? ", из кэша " + t.tokens_cached : "";
-  body.append(el("details", {class:"trace"}, el("summary", {}, "Трасса: " + t.tokens_in + "+" + t.tokens_out + " токенов" + cached + ", " + rub(t.cost_rub) + " ₽"),
-    el("table", {}, ...t.steps.map(s => el("tr", {},
-      el("td", {}, s.step), el("td", {}, s.kind === "llm" ? "модель " + s.name : "→ " + s.name + (s.ok ? "" : " (отказ)")),
-      el("td", {}, s.kind === "llm" ? s.tokens_in + "+" + s.tokens_out + (s.tokens_cached ? " (кэш " + s.tokens_cached + ")" : "") : ""),
-      el("td", {}, s.kind === "llm" ? rub(s.cost_rub) + " ₽" : "0 ₽"),
-      el("td", {}, s.ms + " мс"))))));
+  if (r.passport) body.append(passportBlock(r.passport, "Как получен ответ"));
   $("chatlog").append(body);
   if (r.draft) $("chatlog").append(draftCard(r.draft));
   // связь с неисправностью из карточки — строит код по матрице (#28); кнопка задаёт вопрос об этой проверке
@@ -459,7 +524,7 @@ function draftCard(d) {
 const REDO = {steps: "Объясни подробнее, по шагам.", expert: "Короче: только значение, инструмент и страница."};
 const VOICE_REDO = [[/^(подробнее|по шагам|объясни подробнее)/i, "steps"], [/^(короче|покороче|коротко)/i, "expert"]];
 
-async function ask(q, byVoice = false, lv = level()) {
+async function ask(q, byVoice = false, lv = level(), sttId = null) {
   const mine = el("div", {class:"msg me"}, byVoice ? "🎤 " + q : q);
   if (byVoice) mine.append(el("button", {class:"fix", onclick: () => { $("question").value = q; $("question").focus(); }}, "Исправить"));
   $("chatlog").append(mine);
@@ -468,7 +533,7 @@ async function ask(q, byVoice = false, lv = level()) {
   wait.scrollIntoView({block:"nearest"});
   try {
     const r = await api("/api/chat", {method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({vehicle_id: current.vehicle_id, session_id: selected, message: q, level: lv, state: convState})},
+      body: JSON.stringify({vehicle_id: current.vehicle_id, session_id: selected, message: q, level: lv, stt_id: sttId, state: convState})},
       {tries: 2, onRetry: retryNote(wait)});
     conversationId = r.conversation_id; convState = r.state;
     wait.remove();
@@ -556,15 +621,15 @@ function toWav16k(chunks, rate) {
 async function finishRecording() {
   const chunks = vs.chunks, rate = vs.rate;
   stopRecording(); voiceState("stt");
-  let text;
+  let text, sttId = null;
   try {
     const r = await api("/api/voice/recognize", {method:"POST", headers:{"Content-Type":"audio/wav"}, body: toWav16k(chunks, rate)},
       {tries: 3, timeoutMs: 25000, onRetry: () => { $("voice").textContent = "Связь плохая — повторяю…"; }});
-    text = r.text;
+    text = r.text; sttId = r.stt_id;
   } catch (e) { return voiceError(e.message || "Не расслышал, повторите."); }
   voiceState("think");
   const redo = VOICE_REDO.find(([re]) => re.test(text.trim()));
-  const r = redo ? await ask(REDO[redo[1]], true, redo[1]) : await ask(text, true);
+  const r = redo ? await ask(REDO[redo[1]], true, redo[1], sttId) : await ask(text, true, level(), sttId);
   if (r && r.speech) await speak(r.speech); else voiceState("idle");
 }
 async function speak(sp) {

@@ -64,6 +64,7 @@ class VerdictCard(BaseModel):
     manual: dict[str, Any] | None = None  # пояснение из матрицы по руководству (#16), без модели
     urgency: Urgency | None = None  # срочность по правилу urgency_for (как в заявке)
     urgency_reason: str | None = None
+    passport: dict[str, Any] | None = None  # «?» у карточки (#31): что сделал код, 0 токенов
     design_fact: dict[str, Any] | None = None  # несовместимый код: факт о конструкции с цитатой (issue #40 п. 3)
 
 
