@@ -1,4 +1,4 @@
-.PHONY: logs spend-probe eval-open setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch
+.PHONY: logs spend-probe eval-open setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-md cost-xlsx index kb-publish kb-fetch
 
 PORT ?= 8000
 
@@ -30,6 +30,10 @@ index: install
 LABEL ?= $(shell date +%Y%m%d-%H%M)
 cost: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/cost_report.py --label $(LABEL)
+
+## Пересобрать reports/cost.md из сохранённых замеров (без прогона модели)
+cost-md: install
+	uv run python scripts/cost_report.py --render-only
 
 ## Выложить индекс новой версией в бакет S3_BUCKET (статический ключ из .env; index/LATEST — последним). PDF — KB_ARGS=--manuals
 kb-publish: install

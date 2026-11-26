@@ -31,7 +31,15 @@ from fastapi.testclient import TestClient  # noqa: E402
 from mock_ml.app import app as mock_ml_app  # noqa: E402
 from mock_toir.app import app as mock_toir_app  # noqa: E402
 
-from cost_layers import ASSUMPTIONS, LOCAL_VOICE, monthly_fixed, voice_option  # noqa: E402
+from cost_layers import (  # noqa: E402
+    ASSUMPTIONS,
+    FREE_OPS,
+    LOCAL_VOICE,
+    PILOT_PER_DAY,
+    monthly_fixed,
+    pilot,
+    voice_option,
+)
 from service.agent import Agent, AgentReply  # noqa: E402
 from service.clients import MLClient, ToirClient  # noqa: E402
 from service.fleet import fleet  # noqa: E402
@@ -307,6 +315,47 @@ def write(label: str, results: list[Result], repeat: int, provider: Any = None) 
     render_md()
 
 
+def pilot_section(last: dict[str, Any]) -> list[str]:
+    """Пилот: площадка без бесплатного уровня, парк ASSUMPTIONS['vehicles'], N запросов в день."""
+    c1 = last["scenarios"].get("С1", {}).get("rub")
+    rows = [pilot(last, n, c1) for n in PILOT_PER_DAY]
+    v = int(ASSUMPTIONS["vehicles"])
+    out = [
+        "",
+        f"## Пилот: площадка на {v} машин без бесплатного уровня, ₽/мес без НДС",
+        "",
+        "Тарифы — официальные (`data/prices.json`): Serverless Containers — обработка запросов (vCPU·ч, ГБ·ч) и "
+        "вызовы; Object Storage — хранение индекса и PDF. Запрос к агенту = вопрос механика; контейнер 1 vCPU, 1 ГБ, "
+        "без тёплых экземпляров (как на стенде: платим только за время обработки). Модель — отдельно, по замеру С1.",
+        "",
+        "| Запросов в день | Запросов в месяц | Контейнер | Хранилище | **Площадка** | **На машину** "
+        "| Модель (С1) | Всего на машину |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        llm = "—" if r["llm_rub"] is None else r["llm_rub"]
+        tot = "—" if r["total_per_vehicle_rub"] is None else r["total_per_vehicle_rub"]
+        out.append(
+            f"| {r['per_day']} | {r['questions']} | {r['container_rub']} | {r['storage_rub']} | "
+            f"**{r['platform_rub']}** | **{r['platform_per_vehicle_rub']}** | {llm} | {tot} |"
+        )
+    hi = rows[-1]
+    out += [
+        "",
+        f"- Операции с бакетом (общий счётчик расходов и журнал стенда): при {hi['per_day']} запросах в день ≈ "
+        f"{hi['ops']['put']} записей и {hi['ops']['get']} чтений в месяц; бесплатно {FREE_OPS['put']} записей и "
+        f"{FREE_OPS['get']} чтений. Сверх бесплатного — {hi['ops_over_free']['put']} записей: цена записей на "
+        "странице тарифов не опубликована (прайс-лист отдаётся скриптом), в сумму не включена — на порядок меньше "
+        "контейнера.",
+        "- Цена хранения — из примера расчёта на официальной странице тарифов Object Storage (строки прайса "
+        "в тексте страницы нет).",
+        "- Тёплый экземпляр (без холодного старта) — цена простоя подготовленных экземпляров на странице тарифов не "
+        "опубликована; при необходимости — по калькулятору Yandex Cloud.",
+        "- Исходящий трафик: первые 100 ГБ в месяц бесплатно — пилоту хватает (ответ — единицы КБ).",
+    ]
+    return out
+
+
 def render_md() -> None:
     runs = sorted((json.loads(p.read_text(encoding="utf-8")) for p in OUT_DIR.glob("*.json")), key=lambda d: d["at"])
     if not runs:
@@ -357,6 +406,7 @@ def render_md() -> None:
         f"{fixed['storage_rub_no_free_tier']} ₽/мес без бесплатного объёма;",
         "   - простой подготовленных экземпляров контейнера на странице тарифов без цены — не учтён.",
     ]
+    lines += pilot_section(last)
     # сравнение моделей: последний замер каждого провайдера
     latest: dict[str, dict[str, Any]] = {}
     for r in runs:
@@ -421,7 +471,12 @@ def main() -> int:
     ap.add_argument("--label", default=f"{datetime.now():%Y%m%d-%H%M}")
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument("--only", help="сценарии через запятую, например С1,Г1")
+    ap.add_argument("--render-only", action="store_true", help="только пересобрать reports/cost.md из замеров")
     args = ap.parse_args()
+    if args.render_only:
+        render_md()
+        print("reports/cost.md")
+        return 0
     provider, searcher = provider_from_env(), default_searcher()
     chosen = [s for s in SCENARIOS if not args.only or s.key in args.only.split(",")]
     results = []

@@ -84,3 +84,45 @@ def voice_option(run: dict[str, Any]) -> float | None:
     """Голос к одному вопросу (Г1), ₽ без НДС; None — в замере нет голосового сценария."""
     sc = run["scenarios"].get("Г1")
     return sc.get("rub_voice") if sc else None
+
+
+# ---------- пилот: площадка без бесплатного уровня (указание штурмана 26.11) ----------
+PILOT_PER_DAY = (20, 100, 300)  # запросов к агенту в день на весь парк
+PILOT_DAYS = 30
+# Операции с бакетом на один запрос: общий счётчик расходов (#11) — чтение + условная запись на каждый вызов модели
+# (≈3 вызова на вопрос); журнал стенда (#27) — не чаще одной записи в минуту, сверху — одна на запрос.
+OPS_PER_QUESTION = {"put": 3 + 1, "get": 3}
+FREE_OPS = {"put": 10_000, "get": 100_000}  # бесплатно в месяц (страница тарифов Object Storage)
+
+
+def pilot(run: dict[str, Any], per_day: int, llm_rub_per_question: float | None = None) -> dict[str, Any]:
+    """Площадка на месяц для парка ASSUMPTIONS['vehicles'] при per_day запросах в день, ₽ без НДС, без бесплатного
+    уровня. Модель — отдельной строкой (по замеру С1), голос — опция."""
+    a = ASSUMPTIONS
+    questions = per_day * PILOT_DAYS
+    hours = questions * question_seconds(run) / 3600
+    calls = questions * a["http_calls_per_question"]
+    container = (
+        hours * a["vcpu"] * other("container_vcpu_hour")
+        + hours * a["ram_gb"] * other("container_ram_gb_hour")
+        + calls / 1e6 * other("container_invocations_million")
+    )
+    gb = storage_gb()
+    storage = gb * other("object_storage_gb_month")
+    ops = {k: questions * v for k, v in OPS_PER_QUESTION.items()}
+    platform = container + storage
+    llm = questions * llm_rub_per_question if llm_rub_per_question is not None else None
+    vehicles = int(a["vehicles"])
+    return {
+        "per_day": per_day,
+        "questions": questions,
+        "hours": round(hours, 2),
+        "container_rub": round(container, 2),
+        "storage_rub": round(storage, 2),
+        "platform_rub": round(platform, 2),
+        "platform_per_vehicle_rub": round(platform / vehicles, 2),
+        "llm_rub": None if llm is None else round(llm, 2),
+        "total_per_vehicle_rub": None if llm is None else round((platform + llm) / vehicles, 2),
+        "ops": ops,
+        "ops_over_free": {k: max(0, ops[k] - FREE_OPS[k]) for k in ops},
+    }

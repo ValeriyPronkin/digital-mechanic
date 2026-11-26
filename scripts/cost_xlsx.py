@@ -22,7 +22,7 @@ from typing import Any
 
 import openpyxl
 
-from cost_layers import LOCAL_VOICE, monthly_fixed, other, voice_option
+from cost_layers import LOCAL_VOICE, PILOT_PER_DAY, monthly_fixed, other, pilot, voice_option
 from service.store import llm_price_native, price_table
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -143,7 +143,13 @@ def comment(run: dict[str, Any], price_note: str) -> list[str]:
         f"Постоянные в месяц на парк, не в запрос: контейнер {fixed['container_rub']} ₽ в бесплатном уровне "
         f"({fixed['container_rub_no_free_tier']} ₽ без него) при {fixed['questions']} вопросах; хранилище индекса и "
         f"PDF {fixed['storage_gb']} ГБ — {fixed['storage_rub']} ₽ ({fixed['storage_rub_no_free_tier']} ₽ без "
-        "бесплатного объёма).",
+        "бесплатного объёма). Пилот без бесплатного уровня, парк 50 машин: "
+        + "; ".join(
+            f"{p['per_day']} запросов в день — площадка {p['platform_rub']} ₽/мес, {p['platform_per_vehicle_rub']} ₽ "
+            "на машину"
+            for p in (pilot(run, n) for n in PILOT_PER_DAY)
+        )
+        + " (подробно — reports/cost.md).",
     ]
 
 
