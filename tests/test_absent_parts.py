@@ -21,6 +21,8 @@ PAGES = {
     ("yamz-236-re", 6): "Тип двигателя Четырехтактный, с воспламенением от сжатия",
     ("yamz-236-re", 7): "Распределительный вал Общий для обоих рядов цилиндров, с шестеренчатым приводом",
     ("yamz-236-re", 8): "Топливный насос высокого давления",
+    ("yamz-236-re", 46): "более высокое давление может привести к разрушению впускного тракта до турбокомпрессора",
+    ("yamz-236-re", 86): "или перекрыть трассу подвода воздуха к турбокомпрессору.",
     ("yamz-236-re", 109): "Все двигатели производства ОАО «Автодизель» без турбонаддува с маркой «ЯМЗ» соответствуют "
     "требованиям экологических нормативов Евро - 0.",
     ("yamz-236-rk", 276): "Аварийная защита стенда срабатывает при давлении масла ниже 100 кПа.",
@@ -61,7 +63,9 @@ def test_rockers_on_zmz409_answered_by_code_without_model(ml: MLClient, toir: To
 
 def test_turbo_on_atmospheric_yamz236(ml: MLClient, toir: ToirClient) -> None:
     reply, llm = _ask(ml, toir, YAMZ236, "Где смотреть осевой люфт вала турбины?")
-    assert "нет турбокомпрессора" in reply.text and {s["pdf_page"] for s in reply.sources} == {6, 109}
+    # F09 × ЯМЗ-236М2 в матрице unknown: «в руководствах нет», а не «у двигателя нет» (решение штурмана 26.11)
+    assert reply.text.startswith("**В руководствах ЯМЗ-236М2 нет турбокомпрессора")
+    assert {s["pdf_page"] for s in reply.sources} == {6, 46, 86}
     assert "люфт" not in reply.text.lower() and not llm.seen
 
 
@@ -71,7 +75,7 @@ def test_turbo_mention_on_spec_pages_blocks_code_answer(ml: MLClient, toir: Toir
         reply, llm = _ask(ml, toir, YAMZ236, "Где смотреть осевой люфт вала турбины?", "В руководстве не нашёл.")
     finally:
         PAGES[("yamz-236-re", 8)] = "Топливный насос высокого давления"
-    assert "нет турбокомпрессора" not in reply.text and llm.seen
+    assert "турбокомпрессора и порядка" not in reply.text and llm.seen
 
 
 def test_existing_part_goes_to_model(ml: MLClient, toir: ToirClient) -> None:
