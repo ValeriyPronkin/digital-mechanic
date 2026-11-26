@@ -683,6 +683,8 @@ class Agent:
         final, cited, more = self._contradiction_text(conv, final, cited)
         notes += more
         final = _mark_bench(final, conv.sources)
+        if conv.card is not None and conv.card.trend and _CARD_ASK.search(question) and conv.card.trend not in final:
+            final = f"{final.rstrip()}\n\n📈 {conv.card.trend}"  # тенденция по истории ТС — кодом (#40 п. 4)
         if cache_key and conv.draft is None and final:
             self.store.save_answer(
                 cache_key,
@@ -1026,7 +1028,7 @@ class Agent:
     def _ensure_diag(self, conv: Conversation) -> tuple[Diagnosis, VerdictCard]:
         if conv.diag is None or conv.card is None:
             conv.diag = self.ml.diagnose(conv.vehicle.vehicle_id, conv.session_id)
-            conv.card = build_card(conv.diag, self.fleet.fault_titles, conv.vehicle.engine_model)
+            conv.card = build_card(conv.diag, self.fleet.fault_titles, conv.vehicle.engine_model, conv.vehicle.sessions)
         return conv.diag, conv.card
 
     def _get_diagnosis(self, conv: Conversation, args: dict[str, Any]) -> dict[str, Any]:
