@@ -125,11 +125,15 @@ class EmbeddingClient:
         self.workers = workers
         self._lock = threading.Lock()
         self._cache: dict[str, list[float]] = {}
+        self._tokens: dict[str, int] = {}  # токенов в тексте по ответу API (numTokens) — для себестоимости
+        self.query_tokens = 0  # сколько токенов прошло через embed_query (с кэшем и без): участок «эмбеддинг запроса»
         if cache_path.exists():
             for line in cache_path.read_text(encoding="utf-8").splitlines():
                 if line.strip():
                     rec = json.loads(line)
                     self._cache[rec["k"]] = rec["v"]
+                    if "n" in rec:
+                        self._tokens[rec["k"]] = int(rec["n"])
 
     def _uri(self, model: str) -> str:
         return f"emb://{self.cfg.folder_id}/{model}/latest"
@@ -145,11 +149,13 @@ class EmbeddingClient:
             client, EMB_URL, {"modelUri": self._uri(model), "text": text[:EMB_MAX_CHARS]}, self.cfg.headers
         )
         vec = [float(x) for x in data["embedding"]]
+        n = int(data.get("numTokens") or 0)
         with self._lock:
             self._cache[key] = vec
+            self._tokens[key] = n
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
             with self.cache_path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps({"k": key, "v": vec}) + "\n")
+                f.write(json.dumps({"k": key, "v": vec, "n": n}) + "\n")
         return vec
 
     def embed(
@@ -167,4 +173,7 @@ class EmbeddingClient:
 
     def embed_query(self, text: str) -> list[float]:
         with httpx.Client(timeout=15) as client:
-            return self._one(client, QUERY_MODEL, text)
+            vec = self._one(client, QUERY_MODEL, text)
+        key = _sha(QUERY_MODEL, text)
+        self.query_tokens += self._tokens.get(key) or max(1, len(text) // 3)  # старый кэш без numTokens — оценка
+        return vec
