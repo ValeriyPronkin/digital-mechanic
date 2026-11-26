@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from service.clients import Diagnosis
 from service.compat import check as compat_check
+from service.manuals.catalog import DOCS_BY_ID
 
 EARLY_RECHECK_SCORE = 0.30
 
@@ -64,6 +65,21 @@ class VerdictCard(BaseModel):
     urgency: Urgency | None = None  # срочность по правилу urgency_for (как в заявке)
     urgency_reason: str | None = None
     passport: dict[str, Any] | None = None  # «?» у карточки (#31): что сделал код, 0 токенов
+    design_fact: dict[str, Any] | None = None  # несовместимый код: факт о конструкции с цитатой (issue #40 п. 3)
+
+
+def _design_fact(compat: Any) -> dict[str, Any] | None:
+    """Факт о конструкции из ячейки матрицы «узла нет»: что именно отсутствует и цитата-основание со страницей."""
+    if not compat.doc:
+        return None
+    doc = DOCS_BY_ID.get(compat.doc)
+    return {
+        "text": compat.why[:1].upper() + compat.why[1:] + ".",
+        "quote": compat.quote,
+        "manual": doc.designation if doc else compat.doc,
+        "pdf_page": compat.page,
+        "url": f"/manuals/{compat.doc}#page={compat.page}",
+    }
 
 
 def _pct(value: float | None) -> int | None:
@@ -132,6 +148,7 @@ def build_card(diag: Diagnosis, fault_titles: dict[str, str], engine: str | None
                 confidence_pct=_pct(diag.confidence),
                 ml_quote=diag.description,
                 ml_quote_label="Сообщение сервиса диагностики",
+                design_fact=_design_fact(compat),
             )
     urgency, reason = urgency_for(diag) if known else (None, None)
     return VerdictCard(
