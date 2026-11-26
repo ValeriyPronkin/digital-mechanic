@@ -1,0 +1,139 @@
+@import 'tailwindcss';
+
+/* Tokens: docs/design.md. Dark is the only theme in the sprint. */
+@theme {
+  --color-bg: #0b0c0e;
+  --color-surface: #141518;
+  --color-surface-2: #1c1e22;
+  --color-line: #2a2d33;
+  --color-text: #f4f4f5;
+  --color-dim: #a1a1aa;
+  --color-accent: #22d3ee;
+  --color-series: #0ea5c4; /* the one chart series; passes the palette checks on the dark surface */
+  --color-ok: #22c55e;
+  --color-warn: #f59e0b;
+  --color-stop: #ef4444;
+  /* Lighter than the first #71717a, which measured 3,45–4,05:1 as text: this one is at least 4,5:1
+     on the page, on a card and on an input (issue #72). */
+  --color-mute: #8b8b94;
+  /* The root font is 15 px, so the default 0.25rem step made a 48 px control 45 px tall. */
+  --spacing: 4px;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  -webkit-text-size-adjust: 100%;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  overscroll-behavior-y: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+button,
+[role='button'] {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Sheets: a native <dialog>, from the bottom on a phone, from the right on a wide screen. */
+dialog.sheet {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: var(--color-surface);
+  width: 100%;
+  max-width: 100%;
+  max-height: 92dvh;
+  top: auto;
+  bottom: 0;
+  left: 0;
+  border-radius: 12px 12px 0 0;
+  border-top: 1px solid var(--color-line);
+}
+/* The sheet itself takes focus when it opens (so no control inside shows a ring); it needs no ring. */
+dialog.sheet:focus-visible {
+  outline: none;
+}
+dialog.sheet::backdrop {
+  background: rgb(0 0 0 / 0.6);
+}
+dialog.sheet[open] {
+  display: flex;
+  flex-direction: column;
+  animation: sheet-up 150ms ease-out;
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+}
+@media (min-width: 900px) {
+  dialog.sheet {
+    top: 0;
+    bottom: 0;
+    left: auto;
+    right: 0;
+    width: min(640px, 50vw);
+    max-height: 100dvh;
+    height: 100dvh;
+    border-radius: 0;
+    border-top: 0;
+    border-left: 1px solid var(--color-line);
+  }
+  dialog.sheet[open] {
+    animation: sheet-in 150ms ease-out;
+  }
+  @keyframes sheet-in {
+    from {
+      transform: translateX(16px);
+      opacity: 0;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* The last question and everything after it: at least one view tall, less the 16 px above the question
+   and the 16 px below the thread. The view is the scroll area of the vehicle screen, a size container,
+   so 100cqh is its exact height. A browser without container query units (Safari 15.4–15.6) keeps the
+   first rule: the screen height less the bar above (57 px), the footer as it stands with the quick
+   questions (129 px) and the same 32 px. That is the exact height on a phone without a safe-area inset
+   and a little more with one, never less: the question still reaches the top and nothing moves when the
+   answer ends. A guard, not two declarations in one rule: a minifier may merge those. */
+.last-exchange {
+  min-height: calc(100dvh - 218px);
+}
+@supports (min-height: 100cqh) {
+  .last-exchange {
+    min-height: calc(100cqh - 32px);
+  }
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

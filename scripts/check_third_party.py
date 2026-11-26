@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 import tomllib
@@ -48,6 +49,38 @@ def listed(third_party: str) -> dict[str, str]:
     return rows
 
 
+JS_SECTION_RE = re.compile(r"^## JavaScript-зависимости.*?\n(.*?)(?=^## |\Z)", re.M | re.S)
+
+
+def js_declared(package_json: str) -> set[str]:
+    data = json.loads(package_json)
+    return {*data.get("dependencies", {}), *data.get("devDependencies", {})}
+
+
+def js_listed(third_party: str) -> dict[str, str]:
+    """npm-пакет → лицензия из таблицы раздела «JavaScript-зависимости»."""
+    match = JS_SECTION_RE.search(third_party)
+    rows: dict[str, str] = {}
+    for line in (match.group(1) if match else "").splitlines():
+        cells = [c.strip().strip("`") for c in line.strip().strip("|").split("|")]
+        if len(cells) < 3 or not cells[0] or set(cells[0]) <= {"-", ":"} or cells[0] == "Пакет":
+            continue
+        rows[cells[0]] = cells[2]
+    return rows
+
+
+def check_js(root: Path, third_party: str) -> list[str]:
+    pkg = root / "web" / "package.json"
+    if not pkg.exists():
+        return []
+    deps, rows = js_declared(pkg.read_text(encoding="utf-8")), js_listed(third_party)
+    errors = [f"нет в THIRD_PARTY.md (web): {name}" for name in sorted(deps - rows.keys())]
+    extra = sorted(rows.keys() - deps)
+    errors += [f"лишняя строка в THIRD_PARTY.md (нет в web/package.json): {name}" for name in extra]
+    errors += [f"не указана лицензия (web): {name}" for name, lic in sorted(rows.items()) if name in deps and not lic]
+    return errors
+
+
 def check(root: Path) -> list[str]:
     deps = declared((root / "pyproject.toml").read_text(encoding="utf-8"))
     tp_path = root / "THIRD_PARTY.md"
@@ -55,6 +88,7 @@ def check(root: Path) -> list[str]:
     errors = [f"нет в THIRD_PARTY.md: {name}" for name in sorted(deps - rows.keys())]
     errors += [f"лишняя строка в THIRD_PARTY.md (нет в pyproject): {name}" for name in sorted(rows.keys() - deps)]
     errors += [f"не указана лицензия: {name}" for name, lic in sorted(rows.items()) if name in deps and not lic]
+    errors += check_js(root, tp_path.read_text(encoding="utf-8") if tp_path.exists() else "")
     return errors
 
 

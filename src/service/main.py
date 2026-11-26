@@ -115,6 +115,30 @@ def log_steps(trace: dict[str, Any]) -> None:
 
 
 INDEX_HTML = Path(__file__).parent / "static" / "index.html"
+# Интерфейс v2 (issue #52): сборка React/Vite из web/ (автор — Никита Пронкин), раздаётся по /v2.
+WEB_DIST = Path(os.environ.get("WEB_DIST", str(Path(__file__).resolve().parents[2] / "web" / "dist")))
+
+
+def _v2_file(path: str) -> Path | None:
+    """Файл сборки v2 или index.html для маршрутов приложения; None — сборки нет. Выход за каталог запрещён."""
+    if not (WEB_DIST / "index.html").is_file():
+        return None
+    root = WEB_DIST.resolve()
+    target = (WEB_DIST / path).resolve() if path else root / "index.html"
+    if root not in target.parents and target != root / "index.html":
+        return root / "index.html"
+    return target if target.is_file() else root / "index.html"
+
+
+@app.get("/v2", include_in_schema=False)
+@app.get("/v2/{path:path}", include_in_schema=False)
+def v2(path: str = "") -> FileResponse:
+    f = _v2_file(path)
+    if f is None:
+        raise HTTPException(404, "Интерфейс v2 не собран: make web (или образ Docker).")
+    # Файлы с хэшем в имени (assets/) кэшируются надолго, index.html — нет: новая сборка видна сразу.
+    cache = "public, max-age=31536000, immutable" if "/assets/" in f.as_posix() else "no-cache"
+    return FileResponse(f, headers={"Cache-Control": cache})
 
 
 @lru_cache(maxsize=1)

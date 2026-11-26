@@ -23,6 +23,28 @@
 | openpyxl | >=3.1.5 | MIT | dev: заполнение шаблона организаторов (`make cost-xlsx`) |
 | hatchling | >=1.25 | MIT | сборка пакета |
 
+## JavaScript-зависимости (web/)
+
+Интерфейс v2 (`web/`, `/v2`, issue #52) — код второго прототипа команды, автор **Никита Пронкин**
+(`pronkinnikita/digital-mechanic`, каталог `web/`, коммит `11f0f72`), создан в ходе спринта. Раздел CI сверяет
+с `web/package.json` (`scripts/check_third_party.py`); лицензия — из метаданных пакета, точные версии — в
+`web/package-lock.json`.
+
+| Пакет | Версия | Лицензия | Зачем |
+|---|---|---|---|
+| react | 19.3.1 | MIT | интерфейс v2 |
+| react-dom | 19.3.1 | MIT | интерфейс v2 |
+| tailwindcss | 4.3.5 | MIT | стили интерфейса v2 |
+| @tailwindcss/vite | 4.3.5 | MIT | подключение tailwind к сборке |
+| vite | 8.3.6 | MIT | dev: сборка интерфейса v2 |
+| @vitejs/plugin-react | 6.1.2 | MIT | dev: сборка React |
+| typescript | 7.0.2 | Apache-2.0 | dev: проверка типов интерфейса |
+| @types/node | 24.19.2 | MIT | dev: типы |
+| @types/react | 19.3.0 | MIT | dev: типы |
+| @types/react-dom | 19.3.0 | MIT | dev: типы |
+| oxlint | 1.95.0 | MIT | dev: линтер интерфейса |
+| prettier | 3.10.1 | MIT | dev: форматтер интерфейса |
+
 ## Прочие компоненты
 
 | Компонент | Лицензия / условия | Зачем |

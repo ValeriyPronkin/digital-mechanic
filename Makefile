@@ -1,4 +1,4 @@
-.PHONY: engineer-pack logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
+.PHONY: web web-test engineer-pack logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
 
 PORT ?= 8000
 
@@ -71,6 +71,13 @@ spend-probe: install
 ## Журнал стенда за период (issue #27): logs/<дата>/*.jsonl из бакета → сводка (.state/stand-logs-*.md). Только чтение
 logs: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/stand_logs.py $(if $(SINCE),--since $(SINCE),) $(if $(UNTIL),--until $(UNTIL),)
+
+## Интерфейс v2 (issue #52): сборка web/ → web/dist (раздаётся по /v2); тесты фронта
+web:
+	cd web && npm ci --no-audit --no-fund && npm run build
+
+web-test:
+	cd web && npm ci --no-audit --no-fund && npm test
 
 ## Всё, что проверяет CI, кроме смоука в Docker. Зелёный = код возврата 0.
 check: lint types test stubs third-party secrets
