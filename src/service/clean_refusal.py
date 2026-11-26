@@ -23,9 +23,20 @@ _LIST = re.compile(r"^(\s*(?:\d+[.)]|[-*•])\s+)")
 NOTE = "Это отказ: значения других деталей с единицами убрал, чтобы их не приняли за ответ."
 
 
+_SERVICE_LINE = re.compile(r"^\s*(?:\**)(?:Понадобится|Безопасность|Инструмент|Источник)\w*\**\s*:", re.I)
+
+
 def is_refusal(text: str) -> bool:
-    first = text.strip().split("\n\n", 1)[0]
-    return bool(REFUSAL.search(first))
+    """Прямой ответ — «нет в руководстве»: первый абзац без служебных строк «Понадобится: / Безопасность: …»
+    (в них «в руководстве не указано» — про меры безопасности, а не отказ)."""
+    paras = [p for p in text.strip().split("\n\n") if p.strip()]
+    for p in paras:
+        lines = [ln for ln in p.split("\n") if ln.strip() and not _SERVICE_LINE.match(ln)]
+        if lines:
+            if _LIST.match(lines[0]):
+                return False  # сразу шаги — прямого ответа-отказа нет
+            return bool(REFUSAL.search(" ".join(lines)))
+    return False
 
 
 def clean(text: str) -> tuple[str, bool]:

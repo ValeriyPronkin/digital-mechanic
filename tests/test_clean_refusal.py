@@ -24,6 +24,18 @@ def test_positive_answer_untouched() -> None:
     assert clean(answer) == (answer, False)
 
 
+def test_service_lines_are_not_refusal() -> None:
+    """eval Q16: «Безопасность: в руководстве не указано» в первом абзаце — не отказ."""
+    text = "Понадобится: ключ.\nБезопасность: в руководстве не указано.\n\n1. Довернуть на 95° [R1]."
+    assert not is_refusal(text) and clean(text) == (text, False)
+
+
+def test_steps_first_is_not_refusal() -> None:
+    """eval Q36: после служебных строк сразу шаги — отказа нет, даже если в шаге «в руководстве нет …»."""
+    text = "Безопасность: в руководстве не указано.\n\n1. Момент 70,6…78,4 Н·м [R1]; в руководстве нет других."
+    assert not is_refusal(text)
+
+
 def test_refusal_detected_only_in_direct_answer() -> None:
     assert is_refusal("В найденных фрагментах значения нет.\n\n1. Шаг.")
     assert not is_refusal("Зазор 0,25 мм [R1].\n\nЕсли в руководстве нет вашей модификации — к специалисту.")
