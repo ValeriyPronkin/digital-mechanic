@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from service import absent_parts, contradictions, glossary, row_check
+from service import absent_parts, contradictions, glossary, other_engine, row_check
 from service.clients import (
     Diagnosis,
     MLClient,
@@ -630,6 +630,9 @@ class Agent:
         # Уровень — приставкой к вопросу, а не системным сообщением: GigaChat принимает system только первым.
         conv.messages.append({"role": "user", "content": f"[{LEVEL_PROMPT[level]}]\n\n{mask_pii(question)}"})
         self._note_contradiction(conv, question)
+        other = self._other_engine_reply(conv, question, request_id)
+        if other is not None:  # вопрос про другой двигатель — ответ кода без цифр (независимый прогон, п. 2)
+            return other
         absent = self._absent_reply(conv, question, request_id)
         if absent is not None:  # узла у двигателя нет — ответ кода, без модели (ТЗ F4)
             return absent
@@ -1076,6 +1079,31 @@ class Agent:
         if matrix is not None:
             out["manual_matrix"] = matrix
         return out
+
+    # ---- вопрос про другой двигатель (независимый прогон 26.11, п. 2) ----
+    def _other_engine_reply(self, conv: Conversation, question: str, request_id: str) -> AgentReply | None:
+        name = other_engine.other(question, conv.vehicle.engine_model)
+        if name is None:
+            return None
+        text = other_engine.answer(name, conv.vehicle.vehicle_id, conv.vehicle.engine_model)
+        conv.messages.append({"role": "assistant", "content": text})
+        trace = {
+            "request_id": request_id,
+            "provider": self.provider.name,
+            "steps": [{"step": 0, "kind": "code", "name": "другой двигатель", "ok": True, "ms": 0}],
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "tokens_cached": 0,
+            "cost_rub": 0.0,
+        }
+        return AgentReply(
+            text=text,
+            grounded=False,
+            notes=[f"В вопросе {name}, а у машины {conv.vehicle.engine_model}: отвечаю только по её руководствам."],
+            sources=[],
+            draft=None,
+            trace=trace,
+        )
 
     # ---- узел, которого у двигателя нет (ТЗ F4, приёмка «нет в руководстве») ----
     def _absent_reply(self, conv: Conversation, question: str, request_id: str) -> AgentReply | None:
