@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from service import absent_parts, contradictions, glossary, other_engine, row_check
+from service import absent_parts, clean_refusal, contradictions, glossary, other_engine, row_check
 from service.clients import (
     Diagnosis,
     MLClient,
@@ -694,6 +694,9 @@ class Agent:
         final, cited, more = self._contradiction_text(conv, final, cited)
         notes += more
         final = _mark_bench(final, conv.sources)
+        final, refusal_cleaned = clean_refusal.clean(final)  # отказ — без чисел с единицами (независимый прогон, п. 5)
+        if refusal_cleaned:
+            notes.append(clean_refusal.NOTE)
         if conv.card is not None and conv.card.trend and _CARD_ASK.search(question) and conv.card.trend not in final:
             final = f"{final.rstrip()}\n\n📈 {conv.card.trend}"  # тенденция по истории ТС — кодом (#40 п. 4)
         if cache_key and conv.draft is None and final:
