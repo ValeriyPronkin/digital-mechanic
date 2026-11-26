@@ -37,7 +37,7 @@ from service.clients import (
 from service.fault_matrix import MATRIX_PATH, cell_for
 from service.fleet import Fleet, Vehicle
 from service.fleet_status import summary as fleet_summary
-from service.llm import LLMError, LLMProvider, LLMReply, Message, ToolCall, ToolSpec
+from service.llm import LLMError, LLMProvider, LLMReply, Message, ToolCall, ToolSpec, plan_temperature
 from service.manual_search import ManualSearcher, manual_pdf
 from service.manuals.catalog import DOCS_BY_ID
 from service.manuals.lexical import tokenize
@@ -1285,7 +1285,7 @@ class Agent:
         try:
             self.check_budget()
             t0 = time.monotonic()
-            reply = self.provider.chat(msgs, [])
+            reply = self.provider.chat(msgs, [], temperature=plan_temperature())  # по умолчанию — как ответ
             ms = int((time.monotonic() - t0) * 1000)
         except (LLMError, BudgetExceededError):
             return plan

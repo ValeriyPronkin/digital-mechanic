@@ -1,5 +1,4 @@
-PHONY_ENGINEER := engineer-pack
-.PHONY: $(PHONY_ENGINEER) logs spend-probe eval-open setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch
+.PHONY: engineer-pack logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
 
 PORT ?= 8000
 
@@ -45,6 +44,13 @@ kb-publish: install
 kb-fetch: install
 	uv run $(if $(wildcard .env),--env-file .env,) python -m service.kb_store fetch --out $(or $(KB_OUT),.state/kb-check)
 
+## Картинки страниц для «стр. N»: отрисовать в .state/pages (по одному PDF) — pages-render; загрузить в pages/ — pages-publish
+pages-render: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/pages_publish.py $(if $(DOC),--doc $(DOC),)
+
+pages-publish: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/pages_publish.py --upload $(if $(DOC),--doc $(DOC),)
+
 ## Шаблон организаторов по замеру: reports/cost-template-<замер>.xlsx (шаблон — COST_TEMPLATE, в git не входит)
 cost-xlsx: install
 	uv run python scripts/cost_xlsx.py $(if $(XLSX_LABEL),--label $(XLSX_LABEL),)
@@ -52,6 +58,11 @@ cost-xlsx: install
 ## Открытая половина вопросов приёмщика на настоящей модели (issue #28): reports/eval-open.md (вопросы — вне git)
 eval-open: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/eval_open.py --label $(or $(LABEL),$(shell date +%Y%m%d-%H%M))
+
+## Стабильность (штурман 26.11): RUNS прогонов eval-open с префиксом PREFIX и сводка по ним
+eval-stability: install
+	for i in $(shell seq 1 $(or $(RUNS),3)); do uv run $(if $(wildcard .env),--env-file .env,) python scripts/eval_open.py --label $(PREFIX)-$$i || exit 1; done
+	uv run python scripts/eval_stability.py $(PREFIX)
 
 ## Проверка условной записи на настоящем бакете (issue #11): объект spend/probe-*, после — удаляется. Запускает человек
 spend-probe: install

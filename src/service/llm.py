@@ -60,7 +60,13 @@ class LLMProvider(Protocol):
     name: str
     model: str
 
-    def chat(self, messages: list[Message], tools: list[ToolSpec], max_tokens: int | None = None) -> LLMReply: ...
+    def chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec],
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> LLMReply: ...
 
 
 def _args(raw: Any) -> dict[str, Any]:
@@ -90,6 +96,24 @@ def _post(http: httpx.Client, url: str, **kw: Any) -> dict[str, Any]:
         data: dict[str, Any] = resp.json()
         return data
     raise LLMError("Модель недоступна.")  # pragma: no cover
+
+
+def default_temperature() -> float:
+    """Температура ответа (LLM_TEMPERATURE), по умолчанию 0,2 — как было."""
+    try:
+        return float(os.environ.get("LLM_TEMPERATURE", "0.2"))
+    except ValueError:
+        return 0.2
+
+
+def plan_temperature() -> float | None:
+    """Температура плана поиска (LLM_PLAN_TEMPERATURE); не задана — как у ответа. Замер 26.11: t=0 у DeepSeek
+    план не стабилизирует (reports/search-stability.md), поэтому по умолчанию поведение прежнее."""
+    raw = os.environ.get("LLM_PLAN_TEMPERATURE", "").strip()
+    try:
+        return float(raw) if raw else None
+    except ValueError:
+        return None
 
 
 def default_max_tokens() -> int:
@@ -133,11 +157,17 @@ class DeepSeekProvider:
                 out.append({"role": m["role"], "content": m["content"]})
         return out
 
-    def chat(self, messages: list[Message], tools: list[ToolSpec], max_tokens: int | None = None) -> LLMReply:
+    def chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec],
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> LLMReply:
         body = {
             "model": self.model,
             "messages": self.to_wire(messages),
-            "temperature": 0.2,
+            "temperature": default_temperature() if temperature is None else temperature,
             "max_tokens": max_tokens or default_max_tokens(),
         }
         if tools:  # пустой список инструментов API не принимает — без инструментов ключа нет
@@ -220,11 +250,17 @@ class GigaChatProvider:
         rest = [m for m in out if m["role"] != "system"]
         return ([{"role": "system", "content": "\n\n".join(system)}] if system else []) + rest
 
-    def chat(self, messages: list[Message], tools: list[ToolSpec], max_tokens: int | None = None) -> LLMReply:
+    def chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec],
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> LLMReply:
         body = {
             "model": self.model,
             "messages": self.to_wire(messages),
-            "temperature": 0.2,
+            "temperature": max(0.01, default_temperature() if temperature is None else temperature),
             "max_tokens": max_tokens or default_max_tokens(),
         }
         if tools:
