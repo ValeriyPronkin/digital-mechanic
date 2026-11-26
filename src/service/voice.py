@@ -166,22 +166,28 @@ def short_manual(manual: str) -> str:
 
 
 def speech_for(answer: str, sources: dict[str, Source]) -> Speech:
-    """Короткая версия для озвучки из проверенного ответа. Каждая цифра в `body` — во фрагменте своей ссылки."""
+    """Короткая версия для озвучки из проверенного ответа. Каждая цифра в `body` — во фрагменте своей ссылки.
+
+    Сначала — предложение со ссылкой и цифрой (значение с единицами), затем — со ссылкой без цифр."""
+    with_numbers: list[Speech] = []
+    plain_refs: list[Speech] = []
     fallback: str | None = None
     for raw in _SENT.split(answer):
         refs = tuple(r for r in _REF.findall(raw) if r in sources)
         text = _clean(_REF_GROUP.sub("", raw))
-        if len(text) < 8:
+        if len(text) < 8 or len(text) > SPEECH_MAX_CHARS:
             continue
         nums = numbers(text)
         if refs:
             allowed: set[str] = set().union(*(numbers(sources[r].text) for r in refs))
-            if nums <= allowed and len(text) <= SPEECH_MAX_CHARS:
+            if nums <= allowed:
                 src = sources[refs[0]]
                 tail = f"Источник: {short_manual(src.manual)}, страница {src.pdf_page}."
-                return Speech(f"{text.rstrip('.')}. {tail}", text, refs)
-        elif fallback is None and not nums and len(text) <= SPEECH_MAX_CHARS:
+                (with_numbers if nums else plain_refs).append(Speech(f"{text.rstrip('.')}. {tail}", text, refs))
+        elif fallback is None and not nums:
             fallback = text
+    if with_numbers or plain_refs:
+        return (with_numbers or plain_refs)[0]
     if _NOT_FOUND.search(answer) or not fallback:
         return Speech(NOT_IN_MANUAL, NOT_IN_MANUAL, ())
     return Speech(fallback, fallback, ())

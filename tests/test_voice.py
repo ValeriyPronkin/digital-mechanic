@@ -251,3 +251,10 @@ def test_default_voice_is_zahar(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TTS_VOICE", raising=False)
     assert SpeechKit("k").voice == "zahar"
     assert TestClient(main.app).get("/health").json()["tts_voice"] == "zahar"
+
+
+def test_speech_prefers_value_over_procedure() -> None:
+    """Стенд 26.11: вслух ушла фраза о порядке замера без значения — значение важнее."""
+    answer = "Замер — на холодном двигателе, при закрытых клапанах [R1]. Зазор впускных клапанов 0,25–0,30 мм [R1]."
+    sp = speech_for(answer, SOURCES)
+    assert "0,25–0,30 мм" in sp.body

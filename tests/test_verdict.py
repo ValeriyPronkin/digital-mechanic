@@ -8,7 +8,14 @@ import pytest
 
 from service.clients import Diagnosis, MLClient
 from service.fleet import fleet
-from service.verdict_policy import BANNER_EARLY_RECHECK, BANNER_NOISY, VerdictCard, build_card
+from service.verdict_policy import (
+    BANNER_EARLY_RECHECK,
+    BANNER_NOISY,
+    URGENCY_ACTION,
+    VerdictCard,
+    build_card,
+    urgency_for,
+)
 
 PAIRS = [(v.vehicle_id, s.session_id) for v in fleet().vehicles for s in v.sessions]
 
@@ -115,3 +122,15 @@ def test_incompatible_code_blocks_ticket(ml: MLClient) -> None:
     assert ("ЗМЗ-40905.10", "F09") in pairs  # турбина на атмосферном
     assert ("ЯМЗ-236М2", "F14") in pairs  # цепь ГРМ там, где шестерни
     assert all(code not in {"F01", "F02", "F03", "F04", "F05"} for _, code in pairs)
+
+
+def test_anomaly_card_speaks_by_urgency_with_reason(ml: MLClient) -> None:
+    """Замечание с телефона 26.11: карточка отклонения говорила одно и то же для всех кодов."""
+    known = [(d, c) for d, c in all_cards(ml) if c.status == "anomaly" and c.ticket_possible]
+    assert known
+    for diag, card in known:
+        urgency, reason = urgency_for(diag)
+        assert (card.urgency, card.urgency_reason) == (urgency, reason)  # то же правило, что у заявки
+        assert card.action == URGENCY_ACTION[urgency] and reason
+    assert {c.urgency for _, c in known} >= {"high", "medium"}
+    assert len({c.action for _, c in known}) > 1
