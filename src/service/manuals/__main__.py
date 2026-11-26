@@ -1,8 +1,8 @@
 """CLI индекса руководств.
 
-  python -m service.manuals build              — собрать индекс (PDF из MANUALS_DIR → INDEX_DIR)
-  python -m service.manuals search "вопрос" --engine ЯМЗ-236М2   — топ-5: документ, страница, раздел, цитата
-  python -m service.manuals passport           — паспорт PDF из собранного индекса
+python -m service.manuals build              — собрать индекс (PDF из MANUALS_DIR → INDEX_DIR)
+python -m service.manuals search "вопрос" --engine ЯМЗ-236М2   — топ-5: документ, страница, раздел, цитата
+python -m service.manuals passport           — паспорт PDF из собранного индекса
 """
 
 from __future__ import annotations

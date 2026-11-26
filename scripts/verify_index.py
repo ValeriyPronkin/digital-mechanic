@@ -13,20 +13,23 @@
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import re
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pdfplumber
+import pypdfium2 as pdfium
 
 from service.manuals.catalog import DOCS_BY_ID, documents_for_engine
-from service.manuals.index import manuals_dir
+from service.manuals.index import index_dir, manuals_dir
 from service.manuals.lexical import tokenize
 from service.manuals.search import ManualIndex
+from service.manuals.text import clean_page_text, printed_page_number
 
 ENGINES = ("ЯМЗ-236М2", "ЯМЗ-536", "ЗМЗ-5234.10", "ЗМЗ-40904.10")
 QUERIES = (
@@ -53,6 +56,21 @@ def _overlap(a: set[str], b: set[str]) -> float:
     return len(a & b) / max(1, len(a))
 
 
+def _bag(text: str) -> Counter[str]:
+    return Counter(re.findall(r"\w+", text.lower()))
+
+
+def _bag_sim(a: Counter[str], b: Counter[str]) -> float:
+    """Сходство мультимножеств слов и чисел: не зависит от порядка чтения, но различает номера шагов."""
+    return sum((a & b).values()) / max(1, sum((a | b).values()))
+
+
+def _readable(text: str) -> bool:
+    """pdfplumber рвёт повёрнутые страницы на буквы: «О б о з н а ч е н и е» — такой эталон не годится."""
+    words = re.findall(r"\w+", text)
+    return bool(words) and sum(len(w) for w in words) / len(words) >= 3
+
+
 def verify_pages(index: ManualIndex, lines: list[str]) -> bool:
     by_page: dict[tuple[str, int], list[str]] = defaultdict(list)
     for f in index.fragments:
@@ -60,30 +78,54 @@ def verify_pages(index: ManualIndex, lines: list[str]) -> bool:
             by_page[(f.doc_id, f.page)].append(f.text)
     keys = sorted(by_page)
     sample = random.Random(SEED).sample(keys, SAMPLE)  # noqa: S311  # выборка для сверки, не криптография
+    passport = {d["doc_id"]: d for d in json.loads((index_dir() / "passport.json").read_text("utf-8"))["documents"]}
     ok_all = True
     lines += [
         "## 1. Выборка 20 страниц: номер и текст",
         "",
-        "Текст индекса для страницы N сравнивается со словами pdfplumber на страницах N−1, N, N+1.",
+        "- **Номер:** печатный номер на странице PDF N равен N + смещение из паспорта; где номер не напечатан —",
+        "  текст страницы N совпадает с эталоном лучше, чем N−1 и N+1.",
+        "- **Текст:** доля слов индекса, найденных в тексте той же страницы другим извлекателем (pdfplumber);",
+        "  если pdfplumber страницу не читает (повёрнутая таблица) — в сыром тексте pdfium. Порог 0,8.",
         "",
-        "| Документ | Стр. PDF | Совпадение слов: N−1 / **N** / N+1 | Итог |",
-        "|---|---|---|---|",
+        "| Документ | Стр. PDF | Печатный | Номер | Слова: N−1 / **N** / N+1 | Эталон | Итог |",
+        "|---|---|---|---|---|---|---|",
     ]
     src = manuals_dir()
     opened: dict[str, Any] = {}
     for doc_id, page in sorted(sample):
-        pdf = opened.setdefault(doc_id, pdfplumber.open(str(src / DOCS_BY_ID[doc_id].file)))
+        doc = DOCS_BY_ID[doc_id]
+        pdf = opened.setdefault(doc_id, pdfplumber.open(str(src / doc.file)))
         ours = _words("\n".join(by_page[(doc_id, page)]))
-        scores = []
-        for p in (page - 1, page, page + 1):
-            if 1 <= p <= len(pdf.pages):
-                scores.append(_overlap(ours, _words(pdf.pages[p - 1].extract_text() or "")))
-            else:
-                scores.append(0.0)
-        ok = scores[1] >= 0.8 and scores[1] > max(scores[0], scores[2])
+        ref_texts = [
+            (pdf.pages[p - 1].extract_text() or "") if 1 <= p <= len(pdf.pages) else ""
+            for p in (page - 1, page, page + 1)
+        ]
+        scores = [_overlap(ours, _words(t)) for t in ref_texts]
+        raw_doc = pdfium.PdfDocument(str(src / doc.file))
+        raw = raw_doc[page - 1].get_textpage().get_text_range()
+        raw_doc.close()
+        reference = "pdfplumber"
+        if not _readable(ref_texts[1]):
+            scores = [float("nan"), _overlap(ours, _words(clean_page_text(raw))), float("nan")]
+            reference = "pdfium (pdfplumber не читает)"
+        offset = passport[doc_id]["printed_minus_pdf"]
+        printed = printed_page_number(raw) if offset is not None else None
+        if printed is not None and offset is not None:
+            number_ok = printed == page + offset
+        else:
+            # номер не напечатан: слова и числа страницы N ближе к эталону N, чем к N−1 и N+1
+            ours_bag = _bag(clean_page_text(raw))
+            ratios = [_bag_sim(ours_bag, _bag(clean_page_text(t))) for t in ref_texts]
+            number_ok = ratios[1] >= 0.5 and ratios[1] > max(ratios[0], ratios[2])
+        text_ok = scores[1] >= 0.8
+        ok = number_ok and text_ok
         ok_all &= ok
-        cells = f"{scores[0]:.2f} / **{scores[1]:.2f}** / {scores[2]:.2f}"
-        lines.append(f"| {doc_id} | {page} | {cells} | {'✅' if ok else '❌'} |")
+        cells = " / ".join("—" if x != x else (f"**{x:.2f}**" if i == 1 else f"{x:.2f}") for i, x in enumerate(scores))
+        lines.append(
+            f"| {doc_id} | {page} | {printed if printed is not None else '—'} | {'✅' if number_ok else '❌'} "
+            f"| {cells} | {reference} | {'✅' if ok else '❌'} |"
+        )
     for pdf in opened.values():
         pdf.close()
     lines.append("")

@@ -128,7 +128,7 @@ class ManualIndex:
             if sem_future is not None and self.vectors is not None:
                 try:
                     qv = _normalize(np.asarray([sem_future.result()], dtype=np.float32))[0]
-                except Exception:  # noqa: BLE001  # сеть упала — работаем по словам, а не падаем
+                except Exception:  # сеть упала — работаем по словам, а не падаем
                     qv = None
                 if qv is not None:
                     idx = np.asarray(cand, dtype=np.int64)

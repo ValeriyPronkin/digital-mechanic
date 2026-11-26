@@ -52,7 +52,7 @@ def _sha(*parts: str) -> str:
 
 
 def _post_with_retry(
-    client: httpx.Client, url: str, payload: dict[str, Any], headers: dict[str, str], attempts: int = 6
+    client: httpx.Client, url: str, payload: dict[str, Any], headers: dict[str, str], attempts: int = 8
 ) -> dict[str, Any]:
     delay = 1.0
     for attempt in range(attempts):
@@ -70,6 +70,23 @@ def _post_with_retry(
         time.sleep(delay)
         delay = min(delay * 2, 20)
     raise RuntimeError("unreachable")
+
+
+class RateLimiter:
+    """Не чаще rate запросов в секунду на все потоки (квота эмбеддингов Yandex — 10 в секунду)."""
+
+    def __init__(self, rate: float) -> None:
+        self.interval = 1.0 / rate
+        self._lock = threading.Lock()
+        self._next = 0.0
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            slot = max(now, self._next)
+            self._next = slot + self.interval
+        if slot > now:
+            time.sleep(slot - now)
 
 
 class OcrClient:
@@ -101,8 +118,9 @@ class OcrClient:
 class EmbeddingClient:
     """Эмбеддинги Yandex: документы и запросы — разные модели. Кэш: JSONL «sha → вектор», дописывается."""
 
-    def __init__(self, cfg: YandexConfig, cache_path: Path, workers: int = 8) -> None:
+    def __init__(self, cfg: YandexConfig, cache_path: Path, workers: int = 8, rate: float = 8.0) -> None:
         self.cfg = cfg
+        self.limiter = RateLimiter(rate)
         self.cache_path = cache_path
         self.workers = workers
         self._lock = threading.Lock()
@@ -122,6 +140,7 @@ class EmbeddingClient:
             hit = self._cache.get(key)
         if hit is not None:
             return hit
+        self.limiter.wait()
         data = _post_with_retry(
             client, EMB_URL, {"modelUri": self._uri(model), "text": text[:EMB_MAX_CHARS]}, self.cfg.headers
         )

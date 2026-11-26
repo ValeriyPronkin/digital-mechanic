@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -122,7 +123,7 @@ def fault_rows(page: Any, symptom: str = "") -> list[TableRow]:
     ]
     ys = _clusters([top, *h_edges, page.height], gap=3)
     rows: list[TableRow] = []
-    for y0, y1 in zip(ys, ys[1:], strict=False):
+    for y0, y1 in pairwise(ys):
         if y1 - y0 < 4:
             continue
         # Внутренние границы — только те, чья вертикальная линия проходит через эту строку:
@@ -133,7 +134,7 @@ def fault_rows(page: Any, symptom: str = "") -> list[TableRow]:
             if any(abs(e["x0"] - x) <= 4 and e["top"] < y1 - 2 and e["bottom"] > y0 + 2 for e in v_edges)
         ]
         bounds = [left, *inner, right]
-        cells = [_text_in(page, a, y0, b, y1) for a, b in zip(bounds, bounds[1:], strict=False) if b - a > 8]
+        cells = [_text_in(page, a, y0, b, y1) for a, b in pairwise(bounds) if b - a > 8]
         if not any(cells):
             continue
         if _FAULT_HEADER.search(" ".join(cells)):
@@ -180,7 +181,7 @@ def read_tables(path: Path, pages: list[int] | None = None) -> list[PageTables]:
                         rows = [r for r in rows if any(r)]
                         if len(rows) >= 2 and max(len(r) for r in rows) >= 2:
                             rec.tables.append(rows)
-            except Exception:  # noqa: BLE001, S112  # битая разметка одной страницы не валит сборку
+            except Exception:  # noqa: S112  # битая разметка одной страницы не валит сборку
                 continue
             finally:
                 page.close()
