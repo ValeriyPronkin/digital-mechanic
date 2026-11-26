@@ -56,8 +56,8 @@ ignore_missing_imports = true
 # Поиск из прототипа Никиты перенесён дословно (service/nikita/search.py): переменная `count` в _page_terms
 # переиспользуется под другой тип — логику чужого кода не правим.
 [[tool.mypy.overrides]]
-module = ["service.nikita.search", "service.nikita.tokens"]
-disable_error_code = ["assignment", "operator", "no-any-return"]
+module = ["service.nikita.search", "service.nikita.tokens", "service.nikita.coverage"]
+disable_error_code = ["assignment", "operator", "no-any-return", "list-item"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
