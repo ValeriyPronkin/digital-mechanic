@@ -348,7 +348,7 @@ def test_fleet_summary(ml: MLClient, toir: ToirClient) -> None:
     ag, llm = make_agent([call("fleet_summary"), say("ок")], ml, toir)
     ag.ask(ag.start(*ANOMALY), "как парк?")
     result = json.loads(llm.seen[-1][-1]["content"])
-    assert result["vehicles"] == 50 and sum(result["last_check_status"].values()) == 50
+    assert result["total"] == 50 and sum(result["counts"].values()) == 50
 
 
 def test_list_markers_survive_number_check(ml: MLClient, toir: ToirClient) -> None:

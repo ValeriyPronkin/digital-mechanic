@@ -19,6 +19,7 @@ from service.agent import Agent
 from service.clients import MLClient, ServiceError, ToirClient
 from service.fault_matrix import card_explanation
 from service.fleet import fleet
+from service.fleet_api import build_router as build_fleet_router
 from service.llm import provider_from_env
 from service.manual_search import default_searcher, manual_pdf
 from service.rate_limit import RateLimiter, client_key
@@ -96,6 +97,9 @@ def _rate_limit(request: Request) -> None:
             f"Слишком много вопросов подряд. Подождите {int(wait) + 1} с и спросите снова.",
             headers={"Retry-After": str(int(wait) + 1)},
         )
+
+
+app.include_router(build_fleet_router(lambda: store()))  # /fleet — главный механик (#21)
 
 
 @app.get("/health")

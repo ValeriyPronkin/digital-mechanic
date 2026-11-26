@@ -24,10 +24,23 @@ def test_env_overrides_price(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cost_rub("deepseek", 1_000_000, 10, tokens_cached=500_000) == pytest.approx(500.0)
 
 
-def test_every_price_has_source() -> None:
+def test_every_price_is_official_and_dated() -> None:
+    """#19: только официальные страницы; курс — ЦБ на 26.11.2026; суммы — без НДС."""
     t = price_table()
-    for row in [*t["llm"].values(), *t["other"].values(), t["usd_rub"]]:
-        assert row.get("source") and row.get("confidence")
+    for row in [*t["llm"].values(), *t["other"].values(), t["usd_rub"], t["vat_rate"]]:
+        src = str(row.get("source", ""))
+        assert src.startswith("https://"), row
+        assert not any(bad in src for bad in ("costgoat", "aipricing", "pawetta")), src  # вторичные — нельзя
+    assert t["usd_rub"]["date"] == "2026-11-26" and "cbr.ru" in t["usd_rub"]["source"]
+
+
+def test_rub_prices_are_without_vat() -> None:
+    from service.store import ex_vat
+
+    assert ex_vat(122.0, vat_included=True) == pytest.approx(100.0)
+    assert ex_vat(1.0, vat_included=False) == 1.0
+    giga = prices("gigachat")  # 650 ₽ с НДС за 1 млн → без НДС
+    assert giga.tokens_in == pytest.approx(650 / 1.22)
 
 
 def test_log_keeps_cached_tokens() -> None:
@@ -136,3 +149,18 @@ def test_ticket_request_does_not_prefetch_search(ml: MLClient, toir: ToirClient)
     ag, _ = make_agent([say("ок")], ml, toir)
     reply = ag.ask(ag.start(*ANOMALY), "Оформи заявку")
     assert "search_manual (код)" not in [s["name"] for s in reply.trace["steps"]]
+
+
+def test_prefetch_is_one_call_per_turn_for_gigachat(ml: MLClient, toir: ToirClient) -> None:
+    """GigaChat принимает одну функцию за ход: каждый предварительный вызов — отдельный ход с ответом."""
+    from service.llm import GigaChatProvider
+
+    ag, llm = make_agent([say("ок")], ml, toir)
+    ag.ask(ag.start(*ANOMALY), "Что с двигателем?")
+    wire = GigaChatProvider.to_wire(llm.seen[0])
+    calls = [m for m in wire if m.get("function_call")]
+    results = [m for m in wire if m["role"] == "function"]
+    assert len(calls) == len(results) == 2
+    for i, m in enumerate(wire):
+        if m.get("function_call"):
+            assert wire[i + 1]["role"] == "function" and wire[i + 1]["name"] == m["function_call"]["name"]
