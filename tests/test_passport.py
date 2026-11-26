@@ -124,9 +124,11 @@ def test_api_passport_for_voice_question_and_card(
     rec = client.post("/api/voice/recognize", content=_wav(3.0)).json()
     assert rec["stt_id"] > 0
     r = client.post(
-        "/api/chat", json={"vehicle_id": vid, "session_id": sid, "message": rec["text"], "stt_id": rec["stt_id"]}
+        "/api/chat",
+        json={"vehicle_id": vid, "session_id": sid, "message": rec["text"], "stt_id": rec["stt_id"], "level": "expert"},
     ).json()
     pp = r["passport"]
+    assert pp["question"]["level"] == "expert"  # уровень механика из #30
     assert pp["question"]["by_voice"] and pp["question"]["stt_seconds"] == pytest.approx(3.0)
     assert pp["voice"]["stt_rub"] > 0 and pp["voice"]["tts_chars"] == len(r["speech"]["text"])
     assert pp["total"]["voice_rub"] == pytest.approx(pp["voice"]["stt_rub"] + pp["voice"]["tts_rub_estimate"], abs=1e-4)

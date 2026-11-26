@@ -52,7 +52,7 @@ def test_log_keeps_cached_tokens() -> None:
 
 def test_trace_has_rub_per_step_and_cached_total(ml: MLClient, toir: ToirClient) -> None:
     class CachingLLM(ScriptedLLM):
-        def chat(self, messages, tools):  # type: ignore[no-untyped-def]
+        def chat(self, messages, tools, max_tokens=None):  # type: ignore[no-untyped-def]
             reply = super().chat(messages, tools)
             reply.tokens_cached = 600
             return reply
@@ -164,3 +164,15 @@ def test_prefetch_is_one_call_per_turn_for_gigachat(ml: MLClient, toir: ToirClie
     for i, m in enumerate(wire):
         if m.get("function_call"):
             assert wire[i + 1]["role"] == "function" and wire[i + 1]["name"] == m["function_call"]["name"]
+
+
+def test_monthly_fixed_is_per_fleet_not_per_request() -> None:
+    from cost_layers import ASSUMPTIONS, monthly_fixed
+
+    run = {"scenarios": {"С1": {"llm_ms": 3000}, "С3": {"llm_ms": 1000}}}
+    m = monthly_fixed(run)
+    a = ASSUMPTIONS
+    assert m["questions"] == a["vehicles"] * a["checks_per_vehicle_month"] * a["questions_per_check"]
+    assert m["hours"] == pytest.approx(m["questions"] * (2.0 + a["overhead_s"]) / 3600, rel=1e-3)
+    assert m["container_rub"] == 0  # 400 вопросов — в бесплатном уровне Serverless Containers
+    assert m["container_rub_no_free_tier"] > 0 and m["storage_rub_no_free_tier"] > 0
