@@ -33,7 +33,8 @@ def test_language_by_code(text: str, need: bool) -> None:
     assert glossary.needs_translation(text) is need
 
 
-def test_russian_question_has_no_plan_call(ml: MLClient, toir: ToirClient) -> None:
+def test_russian_question_has_no_plan_call(ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SEARCH_MODE", "deterministic")
     ag, llm = make_agent([say("ответ")], ml, toir, plan_search=True)
     ag.ask(ag.start("B418HK98", "S-0007"), "Какой зазор клапанов?")
     assert len(llm.seen) == 1  # только ответ: плана от модели нет
@@ -46,7 +47,8 @@ def test_bm25_weights_halve_glossary_terms() -> None:
     assert half == pytest.approx(full / 2)
 
 
-def test_repeated_header_lines_not_indexed() -> None:
+def test_repeated_header_lines_not_indexed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SEARCH_MODE", "deterministic")
     words = ["клапан", "поршень", "шатун", "вкладыш", "насос", "фильтр", "ремень", "цепь", "свеча", "карбюратор",
              "стартер", "генератор", "термостат", "радиатор", "маховик", "сцепление", "прокладка", "форсунка",
              "датчик", "коромысло"]  # fmt: skip
@@ -71,3 +73,14 @@ def test_semantic_setting(monkeypatch: pytest.MonkeyPatch) -> None:
     assert semantic_enabled() is False
     monkeypatch.setenv("SEARCH_SEMANTIC", "1")
     assert semantic_enabled() is True
+
+
+def test_default_mode_is_main_behaviour(ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """По умолчанию — как в main: план от модели на русский вопрос, шапки в BM25, без глоссария."""
+    monkeypatch.delenv("SEARCH_MODE", raising=False)
+    ag, llm = make_agent([say('{"lang":"ru","question_ru":"q","queries":["q"]}'), say("ответ")], ml, toir,
+                         plan_search=True)  # fmt: skip
+    ag.ask(ag.start("B418HK98", "S-0007"), "Какой зазор клапанов?")
+    assert len(llm.seen) == 2  # план + ответ
+    idx = ManualIndex([frag("zmz-5234-rk", p, f"Шапка руководства ЗМЗ\nстр {p}") for p in range(1, 21)])
+    assert not idx.deterministic and not idx.headers

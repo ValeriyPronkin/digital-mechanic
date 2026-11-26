@@ -64,7 +64,8 @@ class IndexSearcher:
         return self._pages.get((manual_id, int(pdf_page)))
 
     def search(self, query: str, engine: str, k: int = 5) -> list[ManualHit]:
-        hits = self.index.search(query, engine, k=k, expand=glossary.expand(query))
+        expand = glossary.expand(query) if getattr(self.index, "deterministic", False) else None
+        hits = self.index.search(query, engine, k=k, expand=expand)
         return [
             ManualHit(
                 manual_id=h.fragment.doc_id,

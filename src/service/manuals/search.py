@@ -28,6 +28,12 @@ HEADER_SHARE = 0.2  # строка на ≥ 20 % страниц документ
 HEADER_MIN_PAGES = 10
 
 
+def deterministic_mode() -> bool:
+    """SEARCH_MODE=deterministic — поиск без плана от модели: глоссарий, шапки не в BM25, пересортировка по отрезку.
+    По умолчанию — как было (план от модели): замер 26.11 — стабильнее и дешевле, но страница находится хуже."""
+    return os.environ.get("SEARCH_MODE", "").strip().lower() == "deterministic"
+
+
 def semantic_enabled() -> bool:
     """SEARCH_SEMANTIC=0 — только по словам (без облака и без сетевого вызова на каждый поиск)."""
     return os.environ.get("SEARCH_SEMANTIC", "1").strip() not in ("0", "false", "no", "off")
@@ -138,7 +144,8 @@ class ManualIndex:
         self.fragments = fragments
         self.vectors = vectors
         self.embed_query = embed_query
-        self.headers = header_lines(fragments)
+        self.deterministic = deterministic_mode()
+        self.headers = header_lines(fragments) if self.deterministic else {}
 
         def tokens(f: Fragment) -> list[str]:
             hdr = self.headers.get(f.doc_id)
@@ -207,12 +214,12 @@ class ManualIndex:
                     sem_rank = [int(idx[t]) for t in top]
 
         fused = rrf([r for r in (lex_rank, sem_rank) if r])
-        order = sorted(fused, key=lambda i: (-fused[i], i))
-        # первые RERANK_TOP — по лучшему отрезку 1–3 строки (покрытие слов вопроса), при равенстве — по слиянию
-        q_set = set(q_tokens)
-        head = sorted(order[:RERANK_TOP], key=lambda i: (-round(coverage(self.fragments[i].text, q_set), 2),
-                                                         -fused[i], i))  # fmt: skip
-        order = head + order[RERANK_TOP:]
+        order = sorted(fused, key=lambda i: -fused[i])
+        if self.deterministic:  # первые RERANK_TOP — по лучшему отрезку 1–3 строки, при равенстве — по слиянию
+            q_set = set(q_tokens)
+            head = sorted(order[:RERANK_TOP], key=lambda i: (-round(coverage(self.fragments[i].text, q_set), 2),
+                                                             -fused[i], i))  # fmt: skip
+            order = head + order[RERANK_TOP:]
         hits: list[Hit] = []
         seen_pages: set[tuple[str, int]] = set()
         for i in order:
