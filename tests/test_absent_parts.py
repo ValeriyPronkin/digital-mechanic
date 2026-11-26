@@ -51,7 +51,7 @@ YAMZ236 = ("O263CH47", "S-0028")
 
 
 def test_rockers_on_zmz409_answered_by_code_without_model(ml: MLClient, toir: ToirClient) -> None:
-    reply, llm = _ask(ml, toir, ZMZ409, "Какой момент затяжки гаек стоек оси коромысел?", "120–150 Н·м")
+    reply, llm = _ask(ml, toir, ZMZ409, "С каким усилием тянуть стойки коромысел?", "120–150 Н·м")
     assert reply.text.startswith("**У ЗМЗ-40904.10 нет коромысел")
     assert "исключает необходимость регулировки зазоров" in reply.text and "стр. 43" in reply.text
     assert NOT_APPLICABLE in reply.text and "120" not in reply.text  # чужих цифр нет
@@ -60,7 +60,7 @@ def test_rockers_on_zmz409_answered_by_code_without_model(ml: MLClient, toir: To
 
 
 def test_turbo_on_atmospheric_yamz236(ml: MLClient, toir: ToirClient) -> None:
-    reply, llm = _ask(ml, toir, YAMZ236, "Как проверить люфт ротора турбокомпрессора?")
+    reply, llm = _ask(ml, toir, YAMZ236, "Где смотреть осевой люфт вала турбины?")
     assert "нет турбокомпрессора" in reply.text and {s["pdf_page"] for s in reply.sources} == {6, 109}
     assert "люфт" not in reply.text.lower() and not llm.seen
 
@@ -68,14 +68,14 @@ def test_turbo_on_atmospheric_yamz236(ml: MLClient, toir: ToirClient) -> None:
 def test_turbo_mention_on_spec_pages_blocks_code_answer(ml: MLClient, toir: ToirClient) -> None:
     PAGES[("yamz-236-re", 8)] = "Турбокомпрессор ТКР-7"  # характеристика упоминает узел — не утверждаем «нет»
     try:
-        reply, llm = _ask(ml, toir, YAMZ236, "Как проверить люфт ротора турбокомпрессора?", "В руководстве не нашёл.")
+        reply, llm = _ask(ml, toir, YAMZ236, "Где смотреть осевой люфт вала турбины?", "В руководстве не нашёл.")
     finally:
         PAGES[("yamz-236-re", 8)] = "Топливный насос высокого давления"
     assert "нет турбокомпрессора" not in reply.text and llm.seen
 
 
 def test_existing_part_goes_to_model(ml: MLClient, toir: ToirClient) -> None:
-    reply, llm = _ask(ml, toir, YAMZ236, "Какой момент затяжки гаек стоек оси коромысел?", "В руководстве не нашёл.")
+    reply, llm = _ask(ml, toir, YAMZ236, "С каким усилием тянуть стойки коромысел?", "В руководстве не нашёл.")
     assert llm.seen and "нет коромысел" not in reply.text  # у ЯМЗ-236 коромысла есть
 
 
