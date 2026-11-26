@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     id INTEGER PRIMARY KEY, request_id TEXT, step INTEGER, tool TEXT, args TEXT, ok INTEGER, ms INTEGER, ts REAL);
 CREATE TABLE IF NOT EXISTS card_views (
     id INTEGER PRIMARY KEY, vehicle_id TEXT, session_id TEXT, status TEXT, fault_code TEXT, ts REAL);
+CREATE TABLE IF NOT EXISTS answer_cache (
+    key TEXT PRIMARY KEY, value TEXT, hits INTEGER DEFAULT 0, ts REAL);
 CREATE TABLE IF NOT EXISTS tickets (
     id INTEGER PRIMARY KEY, ticket_id TEXT, vehicle_id TEXT, session_id TEXT, anomaly_type TEXT,
     urgency TEXT, body TEXT, ts REAL);
@@ -128,6 +130,21 @@ class Store:
     def spent_rub(self) -> float:
         rows = self._rows("SELECT COALESCE(SUM(cost_rub), 0) AS s FROM llm_calls")
         return float(rows[0]["s"])
+
+    # ---- кэш ответов (issue #16) ----
+    def cached_answer(self, key: str) -> dict[str, Any] | None:
+        rows = self._rows("SELECT value FROM answer_cache WHERE key=?", (key,))
+        if not rows:
+            return None
+        self._exec("UPDATE answer_cache SET hits = hits + 1 WHERE key=?", (key,))
+        value: dict[str, Any] = json.loads(rows[0]["value"])
+        return value
+
+    def save_answer(self, key: str, value: dict[str, Any]) -> None:
+        self._exec(
+            "INSERT OR REPLACE INTO answer_cache (key, value, hits, ts) VALUES (?,?,0,?)",
+            (key, json.dumps(value, ensure_ascii=False), time.time()),
+        )
 
     # ---- память по ТС ----
     def remember_view(self, vehicle_id: str, session_id: str, status: str, fault_code: str | None) -> None:

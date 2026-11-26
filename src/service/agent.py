@@ -14,11 +14,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import time
 import uuid
 from collections import Counter
 from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Literal
 
 from service.clients import (
@@ -30,7 +33,7 @@ from service.clients import (
     TicketResponse,
     ToirClient,
 )
-from service.fault_matrix import cell_for
+from service.fault_matrix import MATRIX_PATH, cell_for
 from service.fleet import Fleet, Vehicle
 from service.llm import LLMError, LLMProvider, Message, ToolCall, ToolSpec
 from service.manual_search import ManualSearcher
@@ -236,6 +239,19 @@ def _date_forms(iso: str) -> str:
 _REF_BARE = re.compile(r"\b[RР]\d+\b")  # ссылка без скобок: «R3 — руководство…»
 
 
+@lru_cache(maxsize=1)
+def _file_stamp(path: str, mtime: float) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:12]
+
+
+def knowledge_version() -> str:
+    """Версия знаний для кэша ответов: пересобрали индекс или матрицу — старые ответы не используются."""
+    stamps = []
+    for path in (Path(os.environ.get("INDEX_DIR", ".index")) / "passport.json", MATRIX_PATH):
+        stamps.append(_file_stamp(str(path), path.stat().st_mtime) if path.exists() else "-")
+    return "/".join(stamps)
+
+
 def numbers(text: str) -> set[str]:
     return {_norm_num(n) for n in _NUM.findall(_REF_BARE.sub(" ", _REF.sub(" ", text)))}
 
@@ -337,6 +353,11 @@ class Agent:
         request_id = uuid.uuid4().hex
         steps: list[dict[str, Any]] = []
         conv.messages.append({"role": "user", "content": mask_pii(question)})
+        cache_key = self._answer_cache_key(conv, question)
+        if cache_key:
+            hit = self.store.cached_answer(cache_key)
+            if hit is not None:
+                return self._reply_from_cache(conv, hit, request_id)
         if self.prefetch:
             self._prefetch(conv, question, request_id, steps)
         text = ""
@@ -397,6 +418,20 @@ class Agent:
             conv.messages.append({"role": "assistant", "content": text})
 
         final, grounded, notes, cited = self.guard(conv, text)
+        if cache_key and conv.draft is None and final:
+            self.store.save_answer(
+                cache_key,
+                {
+                    "text": final,
+                    "grounded": grounded,
+                    "notes": notes,
+                    "sources": [
+                        {"ref": c.ref, "manual_id": c.manual_id, "manual": c.manual, "pdf_page": c.pdf_page,
+                         "section": c.section, "text": c.text}
+                        for c in cited
+                    ],
+                },
+            )  # fmt: skip
         calls = self.store.llm_calls(request_id)
         trace = {
             "request_id": request_id,
@@ -413,6 +448,66 @@ class Agent:
             notes=notes,
             sources=[s.public() for s in cited],
             draft=conv.draft.public() if conv.draft else None,
+            trace=trace,
+        )
+
+    # ---- кэш ответов (issue #16) ----
+    def _answer_cache_key(self, conv: Conversation, question: str) -> str | None:
+        """Ключ: вопрос (без ПДн, регистра и знаков) + двигатель + результат проверки + версии индекса,
+        матрицы и промпта. Только первый вопрос разговора и не про заявку: дальше ответ зависит от истории."""
+        if sum(1 for m in conv.messages if m.get("role") == "user") != 1 or _TICKET_ASK.search(question):
+            return None
+        try:
+            _, card = self._ensure_diag(conv)
+        except ServiceError:
+            return None
+        norm = " ".join(re.sub(r"[^\w\s]", " ", mask_pii(question).lower().replace("ё", "е")).split())
+        if not norm:
+            return None
+        diag = conv.diag
+        parts = [
+            norm,
+            conv.vehicle.engine_model,
+            card.status,
+            card.fault_code or "",
+            diag.signal_quality if diag else "",
+            str(card.compatible),
+            str(card.ticket_possible),
+            knowledge_version(),
+            hashlib.sha256((SYSTEM_PROMPT + self.provider.name + self.provider.model).encode()).hexdigest()[:12],
+        ]
+        return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
+
+    def _reply_from_cache(self, conv: Conversation, hit: dict[str, Any], request_id: str) -> AgentReply:
+        cited = []
+        for s in hit["sources"]:
+            src = Source(
+                ref=s["ref"],
+                manual_id=s["manual_id"],
+                manual=s["manual"],
+                pdf_page=s["pdf_page"],
+                section=s["section"],
+                text=s["text"],
+            )
+            conv.sources[src.ref] = src
+            cited.append(src)
+        conv.messages.append({"role": "assistant", "content": hit["text"]})
+        trace = {
+            "request_id": request_id,
+            "provider": self.provider.name,
+            "steps": [{"step": 0, "kind": "cache", "name": "кэш ответов", "ok": True, "ms": 0}],
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "tokens_cached": 0,
+            "cost_rub": 0.0,
+            "cache": True,
+        }
+        return AgentReply(
+            text=hit["text"],
+            grounded=hit["grounded"],
+            notes=hit["notes"],
+            sources=[s.public() for s in cited],
+            draft=None,
             trace=trace,
         )
 
