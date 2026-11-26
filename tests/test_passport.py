@@ -68,13 +68,14 @@ def test_write_to_bucket_only_by_flag(monkeypatch: pytest.MonkeyPatch, ml: MLCli
     _, _, reply = _ask(ml, toir, "Не менее 0,1 МПа [R1].")
     pp = passport.build(reply.trace, question="Какое давление масла?")
     written: list[tuple[str, bytes]] = []
-    monkeypatch.setattr(passport, "_bucket_put", lambda: lambda k, b: written.append((k, b)))
+    put = lambda k, b: written.append((k, b))  # noqa: E731
     monkeypatch.delenv("PASSPORT_LOG", raising=False)
-    assert passport.write(pp, 1_764_000_000) is False and written == []
+    assert passport.write(pp, 1_764_000_000, put) is False and written == []
 
     monkeypatch.setenv("PASSPORT_LOG", "bucket")
+    assert passport.write(pp, 1_764_000_000, None) is False  # журнала стенда нет (локально)
     monkeypatch.setattr(passport.threading, "Thread", _InlineThread)
-    assert passport.write(pp, 1_764_000_000) is True
+    assert passport.write(pp, 1_764_000_000, put) is True
     ((key, body),) = written
     assert key == f"logs/2025-11-24/passport/{pp['request_id']}.json"
     assert json.loads(body)["question"]["text"] is None

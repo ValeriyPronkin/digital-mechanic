@@ -1,4 +1,4 @@
-.PHONY: spend-probe eval-open setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch
+.PHONY: logs spend-probe eval-open setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch
 
 PORT ?= 8000
 
@@ -50,6 +50,10 @@ eval-open: install
 ## Проверка условной записи на настоящем бакете (issue #11): объект spend/probe-*, после — удаляется. Запускает человек
 spend-probe: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/spend_probe.py
+
+## Журнал стенда за период (issue #27): logs/<дата>/*.jsonl из бакета → сводка (.state/stand-logs-*.md). Только чтение
+logs: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/stand_logs.py $(if $(SINCE),--since $(SINCE),) $(if $(UNTIL),--until $(UNTIL),)
 
 ## Всё, что проверяет CI, кроме смоука в Docker. Зелёный = код возврата 0.
 check: lint types test stubs third-party secrets

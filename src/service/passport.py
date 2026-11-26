@@ -5,7 +5,8 @@
 кода, итог по участкам. Системного промпта здесь нет. Сумма по модели — та же, что в журнале расходов (`llm_calls`).
 
 Копия без персональных данных (без текста вопроса и ответа, без запросов поиска и номера машины) пишется в бакет
-`logs/<дата>/passport/<request_id>.json` через журнал стенда (#27, PR #35) — за флагом `PASSPORT_LOG=bucket`.
+`logs/<дата>/passport/<request_id>.json` через `put` журнала стенда (#27, `service.stand_log`) — за флагом
+`PASSPORT_LOG=bucket`.
 """
 
 from __future__ import annotations
@@ -14,8 +15,8 @@ import json
 import logging
 import os
 import threading
+from collections.abc import Callable
 from datetime import datetime
-from functools import lru_cache
 from typing import Any
 
 from service.agent import MSK, approx_tokens
@@ -236,27 +237,14 @@ def redact(passport: dict[str, Any]) -> dict[str, Any]:
     return p
 
 
-@lru_cache(maxsize=1)
-def _bucket_put() -> Any:
-    """Запись в бакет через журнал стенда (#27, PR #35) по IAM-токену. Нет модуля или бакета — None."""
-    try:
-        from service import stand_log  # type: ignore[attr-defined]  # появится со слиянием PR #35
-    except ImportError:
-        return None
-    slog = stand_log.from_env()
-    return getattr(slog, "put", None) if slog is not None else None
-
-
 def key_for(request_id: str, ts: float) -> str:
     return f"logs/{datetime.fromtimestamp(ts, MSK):%Y-%m-%d}/passport/{request_id}.json"
 
 
-def write(passport: dict[str, Any], ts: float) -> bool:
-    """`PASSPORT_LOG=bucket` — копию без ПДн в бакет, в фоне; иначе ничего. Сбой записи сервис не задевает."""
-    if os.environ.get("PASSPORT_LOG", "off") != "bucket" or not passport.get("request_id"):
-        return False
-    put = _bucket_put()
-    if put is None:
+def write(passport: dict[str, Any], ts: float, put: Callable[[str, bytes], None] | None) -> bool:
+    """`PASSPORT_LOG=bucket` — копию без ПДн в бакет через `put` журнала стенда (#27), в фоне; иначе ничего.
+    Сбой записи сервис не задевает."""
+    if os.environ.get("PASSPORT_LOG", "off") != "bucket" or not passport.get("request_id") or put is None:
         return False
     body = json.dumps(redact(passport), ensure_ascii=False).encode("utf-8")
     key = key_for(str(passport["request_id"]), ts)

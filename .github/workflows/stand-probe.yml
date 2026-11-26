@@ -1,0 +1,66 @@
+name: Stand probe
+
+# Проба стенда (issue #27): каждые 15 мин до 03.12.2026 — /health и короткий /api/diagnose.
+# Код и время — в сводку запуска; не 200 или нет индекса руководств — красный запуск.
+# Журнал Cloud Logging Yandex отключает с 01.12.2026, поэтому — своя проба плюс журнал стенда в бакете (make logs).
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stand-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Проба /health и /api/diagnose
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      # Адрес стенда — переменная репозитория STAND_URL; не задана — текущий адрес из запусков Stand.
+      STAND_URL: ${{ vars.STAND_URL || 'https://bbab8qkqhuhg3ere9dam.containers.yandexcloud.net/' }}
+      UNTIL: "2026-12-03T23:59:59+03:00"
+    steps:
+      - name: Стенд ещё работает?
+        id: window
+        run: |
+          if [ "$(date -u +%s)" -gt "$(date -u -d "$UNTIL" +%s)" ]; then
+            echo "Стенд работает до 03.12.2026 — проба больше не нужна." >> "$GITHUB_STEP_SUMMARY"
+            echo "active=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "active=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: /health и /api/diagnose
+        if: steps.window.outputs.active == 'true'
+        run: |
+          set -u
+          URL="${STAND_URL%/}"
+          fail=0
+          {
+            echo "### Проба стенда $(TZ=Europe/Moscow date '+%d.%m %H:%M') МСК"
+            echo ""
+            echo "| Запрос | Код | Время, с | Итог |"
+            echo "|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          read -r code t < <(curl -sS -m 60 -o health.json -w "%{http_code} %{time_total}" "$URL/health" || echo "000 0")
+          kb=$(jq -r '.manuals_index.fragments // 0' health.json 2>/dev/null || echo 0)
+          ok="✅"; { [ "$code" = "200" ] && [ "${kb:-0}" -gt 0 ]; } || { ok="❌"; fail=1; }
+          echo "| GET /health (фрагментов индекса: ${kb:-0}) | $code | $t | $ok |" >> "$GITHUB_STEP_SUMMARY"
+
+          read -r code t < <(curl -sS -m 90 -o diag.json -w "%{http_code} %{time_total}" -X POST "$URL/api/diagnose" \
+            -H 'Content-Type: application/json' -d '{"vehicle_id":"P456AT178","session_id":"S-0001"}' || echo "000 0")
+          status=$(jq -r '.status // "-"' diag.json 2>/dev/null || echo "-")
+          ok="✅"; [ "$code" = "200" ] && [ "$status" != "-" ] || { ok="❌"; fail=1; }
+          echo "| POST /api/diagnose (статус: $status) | $code | $t | $ok |" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$fail" != "0" ]; then
+            echo "::error::Стенд не отвечает как надо — см. сводку запуска"
+            exit 1
+          fi
