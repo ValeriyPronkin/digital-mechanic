@@ -35,7 +35,9 @@ class Vehicle(BaseModel):
 
     @property
     def display_name(self) -> str:
-        return f"{self.make} {self.model}" if self.model else self.make
+        if not self.model:
+            return self.make
+        return self.model if self.model.startswith(self.make) else f"{self.make} {self.model}"
 
 
 class Fleet(BaseModel):

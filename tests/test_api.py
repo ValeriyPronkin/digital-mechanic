@@ -42,3 +42,9 @@ def test_diagnose_card() -> None:
 def test_diagnose_unknown_session() -> None:
     r = client.post("/api/diagnose", json={"vehicle_id": "M333YK47", "session_id": "S-0001"})
     assert r.status_code == 404 and "не найдена" in r.json()["detail"]
+
+
+def test_display_name_no_duplicate_make() -> None:
+    names = {v["vehicle_id"]: v["name"] for v in client.get("/api/vehicles").json()}
+    assert names["P456AT178"] == "МАЗ-5337"
+    assert all(n for n in names.values())

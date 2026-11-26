@@ -1,4 +1,4 @@
-.PHONY: setup install run check lint types test stubs third-party secrets hooks smoke fmt
+.PHONY: setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt
 
 PORT ?= 8000
 
@@ -15,6 +15,12 @@ hooks:
 ## Одна команда для запуска: зависимости и сервис на http://localhost:$(PORT)
 run: install
 	uv run $(if $(wildcard .env),--env-file .env,) uvicorn service.main:app --host 0.0.0.0 --port $(PORT)
+
+## Заглушки заказчика без Docker: Mock ML на :8001, Mock ТОиР на :8002 (Ctrl+C — остановить обе)
+mocks: install
+	uv run uvicorn --app-dir vendor/neurodvs_mock mock_ml.app:app --port 8001 & \
+	uv run uvicorn --app-dir vendor/neurodvs_mock mock_toir.app:app --port 8002; \
+	kill $$! 2>/dev/null; wait
 
 ## Всё, что проверяет CI, кроме смоука в Docker. Зелёный = код возврата 0.
 check: lint types test stubs third-party secrets
