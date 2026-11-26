@@ -44,7 +44,13 @@ class ScriptedLLM:
         self.seen: list[list[Message]] = []
         self.max_tokens: list[int | None] = []
 
-    def chat(self, messages: list[Message], tools: list[ToolSpec], max_tokens: int | None = None) -> LLMReply:
+    def chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec],
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> LLMReply:
         self.seen.append([dict(m) for m in messages])
         self.max_tokens.append(max_tokens)
         step = self.steps.pop(0)
