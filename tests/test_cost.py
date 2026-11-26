@@ -53,3 +53,36 @@ def test_trace_has_rub_per_step_and_cached_total(ml: MLClient, toir: ToirClient)
     assert reply.trace["tokens_cached"] == 1200
     total = sum(s["cost_rub"] for s in llm_steps)
     assert reply.trace["cost_rub"] == pytest.approx(total, abs=3e-4)  # шаги округлены до 4 знаков
+
+
+def test_deepseek_sends_max_tokens_and_reports_cache_and_truncation(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    import httpx
+
+    from service.llm import DeepSeekProvider
+
+    monkeypatch.setenv("LLM_MAX_TOKENS", "321")
+    sent: dict[str, object] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        sent.update(json.loads(req.content))
+        body = {
+            "model": "m",
+            "choices": [{"message": {"role": "assistant", "content": "длинный ответ"}, "finish_reason": "length"}],
+            "usage": {"prompt_tokens": 1000, "completion_tokens": 321, "prompt_cache_hit_tokens": 900},
+        }
+        return httpx.Response(200, json=body)
+
+    p = DeepSeekProvider("k", http=httpx.Client(base_url="https://x", transport=httpx.MockTransport(handler)))
+    r = p.chat([{"role": "user", "content": "?"}], [])
+    assert sent["max_tokens"] == 321
+    assert r.tokens_cached == 900 and r.truncated
+
+
+def test_truncated_answer_is_marked(ml: MLClient, toir: ToirClient) -> None:
+    long = say("Наблюдения: давление масла ниже нормы")
+    long.truncated = True
+    ag, _ = make_agent([long], ml, toir)
+    reply = ag.ask(ag.start(*ANOMALY), "Что с двигателем?")
+    assert "сокращён по длине" in reply.text

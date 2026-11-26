@@ -41,6 +41,7 @@ class LLMReply:
     tokens_in: int = 0
     tokens_out: int = 0
     tokens_cached: int = 0  # из tokens_in — попали в кэш провайдера (дешевле)
+    truncated: bool = False  # ответ упёрся в max_tokens
     model: str = ""
     functions_state_id: str | None = None  # GigaChat: вернуть в следующем ходе
 
@@ -85,6 +86,11 @@ def _post(http: httpx.Client, url: str, **kw: Any) -> dict[str, Any]:
         data: dict[str, Any] = resp.json()
         return data
     raise LLMError("Модель недоступна.")  # pragma: no cover
+
+
+def max_tokens() -> int:
+    """Страховочный потолок длины ответа (issue #16): выход модели — главная статья расходов."""
+    return int(os.environ.get("LLM_MAX_TOKENS", "800"))
 
 
 class DeepSeekProvider:
@@ -135,9 +141,11 @@ class DeepSeekProvider:
                 for t in tools
             ],
             "temperature": 0.2,
+            "max_tokens": max_tokens(),
         }
         data = _post(self.http, "/chat/completions", json=body, headers=self._auth)
         msg = data["choices"][0]["message"]
+        finish = data["choices"][0].get("finish_reason")
         usage = data.get("usage") or {}
         return LLMReply(
             content=msg.get("content") or "",
@@ -148,6 +156,7 @@ class DeepSeekProvider:
             tokens_in=int(usage.get("prompt_tokens", 0)),
             tokens_out=int(usage.get("completion_tokens", 0)),
             tokens_cached=int(usage.get("prompt_cache_hit_tokens", 0)),
+            truncated=finish == "length",
             model=str(data.get("model", self.model)),
         )
 
@@ -210,6 +219,7 @@ class GigaChatProvider:
             "functions": [{"name": t.name, "description": t.description, "parameters": t.parameters} for t in tools],
             "function_call": "auto",
             "temperature": 0.2,
+            "max_tokens": max_tokens(),
         }
         headers = {"Authorization": f"Bearer {self._access_token()}"}
         data = _post(self.http, f"{self.API_URL}/chat/completions", json=body, headers=headers)
@@ -225,6 +235,7 @@ class GigaChatProvider:
             tokens_in=int(usage.get("prompt_tokens", 0)),
             tokens_out=int(usage.get("completion_tokens", 0)),
             tokens_cached=int(usage.get("precached_prompt_tokens", 0)),
+            truncated=data["choices"][0].get("finish_reason") == "length",
             model=str(data.get("model", self.model)),
             functions_state_id=msg.get("functions_state_id"),
         )
