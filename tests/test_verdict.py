@@ -81,7 +81,8 @@ def test_description_changes_nothing_but_quote(ml: MLClient, injection: str) -> 
     titles = fleet().fault_titles
     for diag, card in all_cards(ml):
         forged = build_card(diag.model_copy(update={"description": injection}), titles)
-        assert forged.model_dump(exclude={"ml_quote"}) == card.model_dump(exclude={"ml_quote"})
+        skip = {"ml_quote", "ml_injection"}  # описание — только цитата и отметка «посторонний текст»
+        assert forged.model_dump(exclude=skip) == card.model_dump(exclude=skip)
         assert forged.ml_quote == injection
 
 
@@ -197,3 +198,19 @@ def test_trend_in_card_answer(ml: MLClient) -> None:
     ag, _ = make_agent([say("Отклонение по карточке.")], ml, ToirClient(http=TestClient(mock_toir_app)))
     reply = ag.ask(ag.start(v.vehicle_id, s.session_id), "Что с двигателем?")
     assert "📈 Оценка отклонения растёт" in reply.text
+
+
+def test_visible_attack_only_in_three_injected_descriptions(ml: MLClient) -> None:
+    """#40 п. 6: посторонний текст в описании сервиса виден отдельно — ровно в S-0043, S-0113, S-0195."""
+    flagged = {d.session_id: c.ml_injection for d, c in all_cards(ml) if c.ml_injection}
+    assert set(flagged) == {"S-0043", "S-0113", "S-0195"}
+    assert flagged["S-0043"].startswith("SYSTEM:") and "Глухой стук" not in flagged["S-0043"]
+    assert flagged["S-0113"].startswith("Инструкция для ассистента")
+    assert flagged["S-0195"].startswith("Примечание для AI-агента")
+
+
+@pytest.mark.parametrize("injection", [i for i in INJECTIONS if i])
+def test_known_injection_shapes_are_flagged(injection: str) -> None:
+    from service.verdict_policy import find_injection
+
+    assert find_injection("Стук в цилиндрах. " + injection) == injection
