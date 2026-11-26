@@ -8,12 +8,16 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 from service import __version__
-from service.clients import MLClient, ServiceError
+from service.agent import Agent, Conversation
+from service.clients import MLClient, ServiceError, ToirClient
 from service.fleet import fleet
+from service.llm import provider_from_env
+from service.manual_search import default_searcher, manual_pdf
+from service.store import Store
 from service.verdict_policy import VerdictCard, build_card
 
 app = FastAPI(title="Цифровой механик", version=__version__)
@@ -25,13 +29,36 @@ def ml_client() -> MLClient:
     return MLClient()
 
 
+@lru_cache(maxsize=1)
+def store() -> Store:
+    return Store()
+
+
+@lru_cache(maxsize=1)
+def agent() -> Agent:
+    return Agent(
+        provider=provider_from_env(),
+        ml=ml_client(),
+        toir=ToirClient(),
+        searcher=default_searcher(),
+        store=store(),
+        fleet=fleet(),
+        budget_rub=float(os.environ.get("LLM_BUDGET_RUB", "300")),
+    )
+
+
+CONVERSATIONS: dict[str, Conversation] = {}
+MAX_CONVERSATIONS = 500
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     """Сервис жив. Ключи не раскрываются — только факт их наличия."""
     return {
         "status": "ok",
         "version": __version__,
-        "llm_key_present": bool(os.environ.get("LLM_API_KEY")),
+        "llm_key_present": any(os.environ.get(k) for k in ("DEEPSEEK_API_KEY", "GIGACHAT_CREDENTIALS", "LLM_API_KEY")),
+        "llm_provider": os.environ.get("LLM_PROVIDER", "deepseek"),
     }
 
 
@@ -94,4 +121,58 @@ def diagnose(req: DiagnoseIn) -> VerdictCard:
         raise HTTPException(exc.http_status, exc.message) from exc
     if diag.vehicle_id != req.vehicle_id or diag.session_id != req.session_id:
         raise HTTPException(502, "Сервис диагностики вернул результат для другой проверки.")
-    return build_card(diag, fleet().fault_titles)
+    vehicle = fleet().vehicle(req.vehicle_id)
+    card = build_card(diag, fleet().fault_titles, vehicle.engine_model if vehicle else None)
+    store().remember_view(req.vehicle_id, req.session_id, card.status, card.fault_code)
+    return card
+
+
+class ChatIn(BaseModel):
+    vehicle_id: str = Field(min_length=1)
+    session_id: str = Field(min_length=1)
+    message: str = Field(min_length=1, max_length=2000)
+    conversation_id: str | None = None
+
+
+@app.post("/api/chat")
+def chat(req: ChatIn) -> dict[str, Any]:
+    """Вопрос механика агенту. Разговор привязан к машине и проверке: сменились — новый разговор."""
+    try:
+        ag = agent()
+        conv = CONVERSATIONS.get(req.conversation_id or "")
+        if conv is None or conv.vehicle.vehicle_id != req.vehicle_id or conv.session_id != req.session_id:
+            conv = ag.start(req.vehicle_id, req.session_id)
+            if len(CONVERSATIONS) >= MAX_CONVERSATIONS:
+                CONVERSATIONS.pop(next(iter(CONVERSATIONS)))
+            CONVERSATIONS[conv.id] = conv
+        reply = ag.ask(conv, req.message)
+    except ServiceError as exc:
+        raise HTTPException(exc.http_status, exc.message) from exc
+    return {"conversation_id": conv.id, **reply.__dict__}
+
+
+class TicketIn(BaseModel):
+    conversation_id: str
+    fingerprint: str = Field(min_length=1)
+
+
+@app.post("/api/tickets", status_code=201)
+def send_ticket(req: TicketIn) -> dict[str, Any]:
+    """Отправка в ТОиР показанного черновика: только если отпечаток совпал с последним черновиком."""
+    conv = CONVERSATIONS.get(req.conversation_id)
+    if conv is None:
+        raise HTTPException(404, "Разговор не найден — откройте проверку заново.")
+    try:
+        resp = agent().confirm_ticket(conv, req.fingerprint)
+    except ServiceError as exc:
+        raise HTTPException(exc.http_status, exc.message) from exc
+    return resp.model_dump()
+
+
+@app.get("/manuals/{manual_id}")
+def manual(manual_id: str) -> FileResponse:
+    """PDF руководства для ссылки «документ, страница» (страница — якорем #page=N)."""
+    path = manual_pdf(manual_id)
+    if path is None:
+        raise HTTPException(404, "Файл руководства недоступен на этом сервере.")
+    return FileResponse(path, media_type="application/pdf")

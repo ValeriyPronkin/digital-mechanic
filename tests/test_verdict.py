@@ -96,3 +96,22 @@ def test_bad_signal_without_check_failed_gives_no_conclusions(ml: MLClient) -> N
     diag = ml.diagnose("M333YK47", "S-0005").model_copy(update={"signal_quality": "bad"})
     card = build_card(diag, fleet().fault_titles)
     assert card.color == "grey" and not card.ticket_possible and card.fault_code is None
+
+
+def test_incompatible_code_blocks_ticket(ml: MLClient) -> None:
+    """Правило 5: узла у двигателя нет — объяснить, предложить повторную проверку, заявку не отправлять."""
+    f = fleet()
+    incompatible = []
+    for v in f.vehicles:
+        for s in v.sessions:
+            card = build_card(ml.diagnose(v.vehicle_id, s.session_id), f.fault_titles, v.engine_model)
+            if not card.compatible:
+                incompatible.append((v.engine_model, card.fault_code))
+                assert not card.ticket_possible and card.status == "anomaly"
+                assert "повторите проверку" in card.action
+    pairs = set(incompatible)
+    assert ("ЗМЗ-5234.10", "F08") in pairs  # дизельная топливоподача на бензиновом
+    assert ("ЯМЗ-536", "F12") in pairs and ("ЯМЗ-536", "F13") in pairs  # зажигание и бензин на дизеле
+    assert ("ЗМЗ-40905.10", "F09") in pairs  # турбина на атмосферном
+    assert ("ЯМЗ-236М2", "F14") in pairs  # цепь ГРМ там, где шестерни
+    assert all(code not in {"F01", "F02", "F03", "F04", "F05"} for _, code in pairs)

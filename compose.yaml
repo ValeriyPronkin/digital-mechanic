@@ -5,7 +5,11 @@ services:
       - "${PORT:-8000}:8000"
     environment:
       # Ключи берутся из .env (docker compose читает его сам); в образ не попадают.
-      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-deepseek}
+      LLM_MODEL: ${LLM_MODEL:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS:-}
+      LLM_BUDGET_RUB: ${LLM_BUDGET_RUB:-300}
       # Внутри compose сервис ходит в заглушки по именам сервисов, а не по адресам из .env.
       MOCK_ML_URL: http://mock-ml:8001
       MOCK_TOIR_URL: http://mock-toir:8002
