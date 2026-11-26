@@ -430,6 +430,7 @@ def build_router(
     get_fleet: Callable[[], Fleet],
     rate_limit: Callable[[Request], None],
     threads: ThreadStore,
+    get_speech: Callable[[], Any] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v2")
 
@@ -620,6 +621,25 @@ def build_router(
         data["state"] = conv_state.dump(conv)
         threads.put(b, decision.vehicle_id, data)
         return Response(status_code=204)
+
+    @router.post("/transcribe")
+    async def transcribe(request: Request) -> dict[str, Any]:
+        """Голос: WAV 16 кГц моно (интерфейс v2 пишет его через WebAudio) → текст для поля ввода."""
+        from service.voice import NOT_HEARD, pcm_from_wav, stt_cost_rub, timed
+
+        rate_limit(request)
+        if get_speech is None:
+            raise HTTPException(503, "Голос сейчас недоступен — задайте вопрос текстом.")
+        body = await request.body()
+        try:
+            pcm, seconds = pcm_from_wav(body)
+            text, ms = timed(get_speech().recognize, pcm)
+        except ServiceError as exc:
+            raise HTTPException(exc.http_status, exc.message) from exc
+        get_store().log_voice("stt", round(seconds, 2), stt_cost_rub(seconds), ms)
+        if not text:
+            raise HTTPException(422, NOT_HEARD)
+        return {"text": text}
 
     @router.get("/vehicles/{vehicle_id}/tickets")
     def tickets(vehicle_id: str) -> list[dict[str, Any]]:

@@ -116,3 +116,20 @@ def test_thread_store_survives_instance_switch() -> None:
     a, b = api_v2.ThreadStore(Bucket()), api_v2.ThreadStore(Bucket())
     a.put("browser1234567890", "M333YK47", {"thread_id": "t", "session_id": "S-0005"})
     assert b.get("browser1234567890", "M333YK47") == {"thread_id": "t", "session_id": "S-0005"}
+
+
+def test_transcribe_wav(ml: MLClient, toir: ToirClient) -> None:
+    from test_voice import FakeSpeech, wav
+
+    ag, _ = make_agent([], ml, toir)
+    store = ag.store
+    app = main.FastAPI()
+    app.include_router(
+        api_v2.build_router(lambda: ag, lambda: store, main.fleet, lambda r: None, api_v2.ThreadStore(), FakeSpeech)
+    )
+    c = TestClient(app)
+    r = c.post("/api/v2/transcribe", content=wav(2.0), headers={"Content-Type": "audio/wav"})
+    assert r.status_code == 200 and r.json() == {"text": "какой тепловой зазор клапанов"}
+    assert store.voice_spent_rub() > 0
+    bad = c.post("/api/v2/transcribe", content=b"webm-bytes", headers={"Content-Type": "audio/webm"})
+    assert bad.status_code == 422  # не WAV — понятная ошибка, а не сбой

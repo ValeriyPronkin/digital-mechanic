@@ -470,5 +470,7 @@ def manual(manual_id: str) -> FileResponse:
 
 # Интерфейс v2 (issue #52): его API — /api/v2 поверх нашей логики (слой совместимости `api_v2`).
 app.include_router(
-    api_v2.build_router(lambda: agent(), lambda: store(), lambda: fleet(), _rate_limit, api_v2.ThreadStore.from_env())
+    api_v2.build_router(
+        lambda: agent(), lambda: store(), lambda: fleet(), _rate_limit, api_v2.ThreadStore.from_env(), lambda: speech()
+    )
 )
