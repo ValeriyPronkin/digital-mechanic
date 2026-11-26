@@ -301,6 +301,14 @@ def wrap_ml_text(text: str) -> str:
 _NUM = re.compile(r"\d+(?:[.,]\d+)?")
 _LIST_MARK = re.compile(r"^\s*(?:\d+[.)]|[-*•])\s+", re.M)
 _REF = re.compile(r"\[(R\d+)\]")
+
+
+def next_ref(conv: Conversation) -> str:
+    """Следующий свободный R…: после максимального, а не «число источников + 1» (номера бывают с пропусками)."""
+    used = [int(r[1:]) for r in conv.sources if r[1:].isdigit()]
+    return f"R{max(used, default=0) + 1}"
+
+
 _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n")
 
 
@@ -801,19 +809,33 @@ class Agent:
     def _reply_from_cache(
         self, conv: Conversation, hit: dict[str, Any], request_id: str, question: str = ""
     ) -> AgentReply:
+        # Номера R… кэшированного ответа — из другого разговора: здесь под ними могут быть другие страницы.
+        # Страница, уже известная разговору, берёт его номер; новая — следующий свободный; [R…] в тексте — по ним.
         cited = []
+        renumber: dict[str, str] = {}
         for s in hit["sources"]:
-            src = Source(
-                ref=s["ref"],
-                manual_id=s["manual_id"],
-                manual=s["manual"],
-                pdf_page=s["pdf_page"],
-                section=s["section"],
-                text=s["text"],
+            known = next(
+                (x for x in conv.sources.values() if x.manual_id == s["manual_id"] and x.pdf_page == s["pdf_page"]),
+                None,
             )
-            conv.sources[src.ref] = src
+            if known is not None:
+                if s["text"] and s["text"] not in known.text:
+                    known.text = f"{known.text}\n{s['text']}"[:3000]
+                src = known
+            else:
+                src = Source(
+                    ref=next_ref(conv),
+                    manual_id=s["manual_id"],
+                    manual=s["manual"],
+                    pdf_page=s["pdf_page"],
+                    section=s["section"],
+                    text=s["text"],
+                )
+                conv.sources[src.ref] = src
+            renumber[s["ref"]] = src.ref
             cited.append(src)
-        text, followup = self._card_link(conv, question, cited, hit["text"])
+        cached_text = _REF.sub(lambda m: f"[{renumber.get(m.group(1), m.group(1))}]", hit["text"])
+        text, followup = self._card_link(conv, question, cited, cached_text)
         conv.messages.append({"role": "assistant", "content": text})
         trace = {
             "request_id": request_id,
@@ -1246,7 +1268,7 @@ class Agent:
             return existing
         doc = DOCS_BY_ID[manual_id]
         src = Source(
-            ref=f"R{len(conv.sources) + 1}",
+            ref=next_ref(conv),
             manual_id=manual_id,
             manual=doc.designation,
             pdf_page=pdf_page,
@@ -1331,7 +1353,7 @@ class Agent:
             )
             if existing is None:
                 existing = Source(
-                    ref=f"R{len(conv.sources) + 1}",
+                    ref=next_ref(conv),
                     manual_id=h.manual_id,
                     manual=h.manual,
                     pdf_page=h.pdf_page,

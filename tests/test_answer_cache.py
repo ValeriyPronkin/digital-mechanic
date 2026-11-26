@@ -57,3 +57,45 @@ def test_cached_sources_are_usable_in_followup(ml: MLClient, toir: ToirClient) -
     hit = ag.ask(conv, Q)
     assert hit.trace["cache"] and "R1" in conv.sources
     assert isinstance(ag, Agent) and isinstance(ag.provider, ScriptedLLM)
+
+
+def test_cached_answer_does_not_overwrite_sources_of_this_conversation(ml: MLClient, toir: ToirClient) -> None:
+    """Номера R… из кэша — чужие: страница этого разговора под тем же номером не затирается (чип не врёт)."""
+    from service.agent import Source, next_ref
+
+    ag, _ = make_agent([], ml, toir)
+    conv = ag.start(*ANOMALY)
+    conv.sources = {
+        "R1": Source("R1", "yamz-236-re", "РЭ", 57, "ТО", "Первое техническое обслуживание (ТО-1)"),
+        "R3": Source("R3", "yamz-236-re", "РЭ", 31, "Клапаны", "Тепловой зазор 0,25-0,30 мм"),
+    }
+    hit = {
+        "text": "Регулировать на холодном двигателе [R1]; зазор 0,25-0,30 мм [R2].",
+        "grounded": True,
+        "notes": [],
+        "sources": [
+            {
+                "ref": "R1",
+                "manual_id": "yamz-236-rk",
+                "manual": "РК",
+                "pdf_page": 276,
+                "section": "6.5",
+                "text": "Проверку",
+            },
+            {
+                "ref": "R2",
+                "manual_id": "yamz-236-re",
+                "manual": "РЭ",
+                "pdf_page": 31,
+                "section": "Клапаны",
+                "text": "0,25",
+            },
+        ],
+    }
+    reply = ag._reply_from_cache(conv, hit, "req")
+    assert (conv.sources["R1"].manual_id, conv.sources["R1"].pdf_page) == ("yamz-236-re", 57)  # не затёрт
+    by_page = {(s.manual_id, s.pdf_page): s.ref for s in conv.sources.values()}
+    new = by_page[("yamz-236-rk", 276)]
+    assert new == "R4"  # следующий после максимального, а не «число источников + 1» (= R3, занят)
+    assert f"[{new}]" in reply.text and "[R3]" in reply.text  # стр. 31 уже была в разговоре — её номер
+    assert next_ref(conv) == "R5"
