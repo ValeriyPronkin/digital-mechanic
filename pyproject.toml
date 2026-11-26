@@ -17,6 +17,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "boto3>=1.44.12",
     "mypy>=1.11",
     "pytest>=8.3",
     "ruff>=0.6",
@@ -48,7 +49,7 @@ strict = true
 files = ["src", "scripts"]
 
 [[tool.mypy.overrides]]
-module = ["pdfplumber", "pdfplumber.*", "pypdfium2", "pypdfium2.*", "pymorphy3", "pymorphy3.*"]
+module = ["pdfplumber", "pdfplumber.*", "pypdfium2", "pypdfium2.*", "pymorphy3", "pymorphy3.*", "boto3", "boto3.*", "botocore", "botocore.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
