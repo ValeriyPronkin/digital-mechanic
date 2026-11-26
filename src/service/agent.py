@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from service import absent_parts, contradictions
+from service import absent_parts, contradictions, glossary
 from service.clients import (
     Diagnosis,
     MLClient,
@@ -998,9 +998,10 @@ class Agent:
         # Сбой записи — без поиска: выводов о двигателе нет, фрагменты подталкивали бы к догадкам.
         skip = card.status == "check_failed"  # несовместимый код — вопрос по руководству всё равно ищем (#28, Q19)
         if PREFETCH_K > 0 and not _TICKET_ASK.search(question) and not skip:
+            # план от модели — только для перевода (язык — кодом); русский вопрос ищется сам + глоссарий
             plan = (
                 self._search_plan(conv, question, request_id, steps)
-                if self.plan_search
+                if self.plan_search and glossary.needs_translation(question)
                 else {"lang": "ru", "question_ru": mask_pii(question), "queries": [mask_pii(question)]}
             )
             query = {"query": plan["question_ru"], "more_queries": plan["queries"], "k": PREFETCH_K}

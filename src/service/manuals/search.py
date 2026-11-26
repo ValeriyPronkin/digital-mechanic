@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -21,6 +22,52 @@ from .lexical import BM25, tokenize
 
 RRF_K = 60
 POOL = 50  # сколько лучших из каждого поиска идут в слияние
+RERANK_TOP = 30  # первые после слияния пересортировываются по лучшему отрезку 1–3 строки
+EXPAND_WEIGHT = 0.5  # вес терминов глоссария в BM25
+HEADER_SHARE = 0.2  # строка на ≥ 20 % страниц документа — шапка/колонтитул, в BM25 не идёт
+HEADER_MIN_PAGES = 10
+
+
+def semantic_enabled() -> bool:
+    """SEARCH_SEMANTIC=0 — только по словам (без облака и без сетевого вызова на каждый поиск)."""
+    return os.environ.get("SEARCH_SEMANTIC", "1").strip() not in ("0", "false", "no", "off")
+
+
+def _line_key(line: str) -> str:
+    return " ".join(re.sub(r"\d+", "#", line.lower().replace("|", " ")).split())
+
+
+def header_lines(fragments: list[Fragment]) -> dict[str, set[str]]:
+    """Строки, повторённые на ≥ HEADER_SHARE страниц документа (шапки, колонтитулы): doc_id → ключи строк."""
+    pages: dict[str, set[int]] = {}
+    seen: dict[str, dict[str, set[int]]] = {}
+    for f in fragments:
+        pages.setdefault(f.doc_id, set()).add(f.page)
+        for line in f.text.split("\n"):
+            key = _line_key(line)
+            if len(key) >= 6:
+                seen.setdefault(f.doc_id, {}).setdefault(key, set()).add(f.page)
+    out: dict[str, set[str]] = {}
+    for doc, lines in seen.items():
+        n = len(pages[doc])
+        if n < HEADER_MIN_PAGES:
+            continue
+        out[doc] = {k for k, p in lines.items() if len(p) >= HEADER_SHARE * n}
+    return out
+
+
+def coverage(text: str, q: set[str]) -> float:
+    """Доля слов запроса в лучшем отрезке из 1–3 подряд идущих строк фрагмента."""
+    if not q:
+        return 0.0
+    lines = [set(tokenize(ln)) for ln in text.split("\n") if ln.strip()]
+    best = 0
+    for i in range(len(lines)):
+        acc: set[str] = set()
+        for j in range(i, min(i + 3, len(lines))):
+            acc |= lines[j]
+            best = max(best, len(q & acc))
+    return best / len(q)
 
 
 _ENGINE_IN_QUERY = re.compile(r"\b(?:ЯМЗ|ЗМЗ|ЯМ3|3МЗ|YAMZ|ZMZ)\s*[-–]?\s*[\d.]+[А-ЯA-Z]*\d*", re.I)
@@ -91,13 +138,23 @@ class ManualIndex:
         self.fragments = fragments
         self.vectors = vectors
         self.embed_query = embed_query
-        self.bm25 = BM25([f.tokens or tokenize(f"{f.section}\n{f.text}") for f in fragments])
+        self.headers = header_lines(fragments)
+
+        def tokens(f: Fragment) -> list[str]:
+            hdr = self.headers.get(f.doc_id)
+            if hdr and any(_line_key(ln) in hdr for ln in f.text.split("\n")):
+                body = "\n".join(ln for ln in f.text.split("\n") if _line_key(ln) not in hdr)
+                return tokenize(f"{f.section}\n{body}")
+            return f.tokens or tokenize(f"{f.section}\n{f.text}")
+
+        self.bm25 = BM25([tokens(f) for f in fragments])
         self._by_doc: dict[str, list[int]] = {}
         for i, f in enumerate(fragments):
             self._by_doc.setdefault(f.doc_id, []).append(i)
 
     @classmethod
-    def load(cls, path: Path | None = None, *, semantic: bool = True) -> ManualIndex:
+    def load(cls, path: Path | None = None, *, semantic: bool | None = None) -> ManualIndex:
+        semantic = semantic_enabled() if semantic is None else semantic
         path = path or index_dir()
         frags_path = path / "fragments.jsonl"
         if not frags_path.exists():
@@ -124,15 +181,18 @@ class ManualIndex:
             raise UnknownEngineError(f"двигатель «{engine}» не найден в карте руководств")
         return [i for d in docs for i in self._by_doc.get(d.doc_id, [])]
 
-    def search(self, query: str, engine: str, k: int = 5) -> list[Hit]:
+    def search(self, query: str, engine: str, k: int = 5, expand: list[str] | None = None) -> list[Hit]:
+        """expand — термины руководства из глоссария к цеховым словам вопроса: в BM25 с весом EXPAND_WEIGHT."""
         cand = self.candidates(engine)
         allowed_docs = {d.doc_id for d in documents_for_engine(engine)}
         query = strip_engine(query)
         q_tokens = tokenize(query)
+        extra = [t for t in tokenize(" ".join(expand or [])) if t not in q_tokens]
+        weights = dict.fromkeys(extra, EXPAND_WEIGHT)
 
         with ThreadPoolExecutor(2) as pool:
             sem_future = pool.submit(self.embed_query, query) if self.semantic and self.embed_query else None
-            lex = self.bm25.scores(q_tokens, cand)
+            lex = self.bm25.scores(q_tokens + extra, cand, weights)
             lex_rank = sorted(lex, key=lambda i: -lex[i])[:POOL]
             sem_rank: list[int] = []
             if sem_future is not None and self.vectors is not None:
@@ -147,7 +207,12 @@ class ManualIndex:
                     sem_rank = [int(idx[t]) for t in top]
 
         fused = rrf([r for r in (lex_rank, sem_rank) if r])
-        order = sorted(fused, key=lambda i: -fused[i])
+        order = sorted(fused, key=lambda i: (-fused[i], i))
+        # первые RERANK_TOP — по лучшему отрезку 1–3 строки (покрытие слов вопроса), при равенстве — по слиянию
+        q_set = set(q_tokens)
+        head = sorted(order[:RERANK_TOP], key=lambda i: (-round(coverage(self.fragments[i].text, q_set), 2),
+                                                         -fused[i], i))  # fmt: skip
+        order = head + order[RERANK_TOP:]
         hits: list[Hit] = []
         seen_pages: set[tuple[str, int]] = set()
         for i in order:

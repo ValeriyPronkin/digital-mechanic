@@ -17,7 +17,9 @@ import argparse
 import json
 import os
 import re
+import statistics
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -101,6 +103,7 @@ def main() -> int:
         ag = Agent(provider, MLClient(http=TestClient(mock_ml_app)), ToirClient(http=TestClient(mock_toir_app)),
                    searcher, Store(":memory:"), fleet())  # fmt: skip
         conv = ag.start(q["vehicle_id"], q["session_id"])
+        t0 = time.monotonic()
         try:
             reply = ag.ask(conv, q["question"])
         except Exception as exc:  # сбой одного вопроса — провал вопроса, не прогона
@@ -112,6 +115,7 @@ def main() -> int:
         with (ANSWERS / f"{args.label}.jsonl").open("a", encoding="utf-8") as f:
             rec = {"id": q["id"], "text": reply.text, "sources": reply.sources}
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        s["ms"] = int((time.monotonic() - t0) * 1000)
         s.update({"id": q["id"], "type": q["type"], "tags": q.get("tags", []), "rub": reply.trace["cost_rub"],
                   "calls": sum(1 for x in reply.trace["steps"] if x["kind"] == "llm")})  # fmt: skip
         results.append(s)
@@ -141,6 +145,7 @@ def write(label: str, results: list[dict[str, Any]]) -> None:
         "answerable": len(answerable),
         "foreign": sum(1 for r in results if r.get("foreign")),
         "rub_per_question": round(sum(r.get("rub", 0) for r in results) / max(n, 1), 4),
+        "median_ms": int(statistics.median([r["ms"] for r in results if r.get("ms")] or [0])),
         "results": results,
     }
     for r in summary["results"]:  # эталонные значения в репозиторий не кладём

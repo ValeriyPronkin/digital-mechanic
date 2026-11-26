@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from service import glossary
+
 log = logging.getLogger(__name__)
 
 
@@ -62,7 +64,7 @@ class IndexSearcher:
         return self._pages.get((manual_id, int(pdf_page)))
 
     def search(self, query: str, engine: str, k: int = 5) -> list[ManualHit]:
-        hits = self.index.search(query, engine, k=k)
+        hits = self.index.search(query, engine, k=k, expand=glossary.expand(query))
         return [
             ManualHit(
                 manual_id=h.fragment.doc_id,
