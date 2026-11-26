@@ -65,6 +65,8 @@ def sentences(text: str) -> list[str]:
         s = s.strip(" -–") if s else ""
         while s and _ENUM.match(s):
             s = _ENUM.sub("", s, count=1)
+        if s.count("(") > s.count(")"):  # «;» внутри скобок разрезал фразу — хвост со скобкой отбрасываем
+            s = s[: s.rfind("(")].rstrip(" ,")
         if len(s) > 3:
             out.append(s)
     return out
