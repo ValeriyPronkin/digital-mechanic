@@ -1,4 +1,4 @@
-.PHONY: setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt index index-upload
+.PHONY: setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt index
 
 PORT ?= 8000
 
@@ -25,10 +25,6 @@ mocks: install
 ## Индекс руководств одной командой: PDF из MANUALS_DIR → INDEX_DIR (по умолчанию .index/). Повторно — из кэша
 index: install
 	uv run $(if $(wildcard .env),--env-file .env,) python -m service.manuals build
-
-## PDF в manuals/, индекс в index/<версия>/ бакета S3_BUCKET, номер версии — в index/LATEST (D-9)
-index-upload: install
-	uv run $(if $(wildcard .env),--env-file .env,) python scripts/index_upload.py
 
 ## Всё, что проверяет CI, кроме смоука в Docker. Зелёный = код возврата 0.
 check: lint types test stubs third-party secrets

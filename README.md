@@ -85,10 +85,7 @@ make index                                    # PDF → .index/ (INDEX_DIR): т�
 uv run --env-file .env python -m service.manuals search "тепловой зазор клапанов" --engine ЯМЗ-236М2
 uv run --env-file .env python -m service.manuals passport          # страниц, без текста, оглавление, таблицы
 uv run --env-file .env python scripts/verify_index.py              # сверка 20 страниц и 10 запросов × 4 двигателя
-make index-upload                             # PDF → manuals/, индекс → index/<версия>/, номер версии → index/LATEST (D-9)
 ```
-
-- Бакет: `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` в `.env` — только для загрузки из локальной сессии; стенд читает бакет по IAM-токену своего сервисного аккаунта. Повторный запуск грузит только то, чего в бакете нет; версия — дата и хэш содержимого индекса.
 
 - Нужны `YANDEX_API_KEY` и `YANDEX_FOLDER_ID` (OCR и поиск по смыслу). Без них индекс собирается по словам: без OCR и эмбеддингов.
 - Повторная сборка берёт извлечённый текст, OCR и эмбеддинги из `.index/cache/` и не платит за них снова.

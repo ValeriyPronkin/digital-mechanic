@@ -20,7 +20,6 @@
 | pillow | >=13.0.0 | MIT-CMU | рендер страницы PDF в JPEG для OCR |
 | pymorphy3 | >=2.0.6 | MIT | приведение слов к начальной форме для BM25 (словари pymorphy3-dicts-ru, MIT) |
 | pypdfium2 | >=5.15.2 | BSD-3-Clause, Apache-2.0 | текст страниц PDF, рендер страниц (PyMuPDF не берём: AGPL) |
-| boto3 | >=1.44.12 | Apache-2.0 | dev: выкладка PDF и индекса в Object Storage (`make index-upload`) |
 | hatchling | >=1.25 | MIT | сборка пакета |
 
 ## Прочие компоненты
@@ -37,7 +36,6 @@
 | GitHub CLI `gh` (предустановлен на раннерах GitHub) | MIT | комментарий превью в PR |
 | Yandex Cloud CLI `yc` | условия использования Yandex Cloud | превью-деплой PR |
 | Yandex Cloud Serverless Containers, Container Registry | условия использования Yandex Cloud | хостинг превью PR |
-| Yandex Object Storage | условия использования Yandex Cloud | хранение PDF руководств и индекса для стенда (D-9) |
 | Yandex Vision OCR, Yandex AI Studio эмбеддинги (`text-search-doc`, `text-search-query`) | условия использования Yandex Cloud | OCR страниц без текстового слоя, поиск по смыслу в руководствах |
 
 ## Ранее созданные наработки
