@@ -1,10 +1,14 @@
 # Стенд для жюри: постоянный URL из main в Yandex Cloud Serverless Containers.
-# Push в main (или ручной запуск) → образ → ревизия контейнера stand-<репозиторий> → проверка /health
-# → ссылка в сводке запуска. Контейнер не удаляется: URL не меняется между деплоями.
+# Push в main (или ручной запуск) → образы → заглушки заказчика stand-<репозиторий>-ml и -toir →
+# основной контейнер stand-<репозиторий> с их адресами в MOCK_ML_URL / MOCK_TOIR_URL → проверка /health
+# и смоук сценариев С1/С3 без модели → ссылки в сводке запуска. Контейнеры не удаляются: URL не меняются.
 # Сроки хакатона: работает с 28.11 10:00 до 23:59 3.12; до 15.12 — поднять за 24 ч по запросу
 # (Actions → Stand → Run workflow).
 # Переменные приложения (ключи моделей) — секрет APP_ENV, строки KEY=VALUE; в логи не печатаются.
 # Без переменной YC_REGISTRY_ID job пропускается, CI не краснеет.
+# Индекс руководств (D-9, #6): переменная S3_BUCKET — имя частного бакета; контейнер при старте скачивает
+# index/LATEST по IAM-токену своего сервисного аккаунта (YC_SA_ID, роль storage.viewer на бакет).
+# Статический ключ в контейнер не передаётся: строки S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY из APP_ENV отбрасываются.
 name: Stand
 
 on:
@@ -19,6 +23,10 @@ on:
         description: "Тёплые экземпляры (1 — на время питча, без холодного старта; 0 — экономия)"
         required: false
         default: ""
+      c1_live:
+        description: "После деплоя прогнать С1 на настоящей модели: вопрос → заявка (≈0,4 ₽)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -32,6 +40,8 @@ env:
   YC_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
   YC_REGISTRY_ID: ${{ vars.YC_REGISTRY_ID }}
   YC_SA_ID: ${{ vars.YC_SA_ID }}
+  S3_BUCKET: ${{ vars.S3_BUCKET }}
+  YANDEX_FOLDER_ID: ${{ vars.YANDEX_FOLDER_ID }}
   # Ответ агента бывает дольше 30 с превью: даём 120 с.
   STAND_TIMEOUT: ${{ vars.STAND_TIMEOUT || '120s' }}
   STAND_MEMORY: ${{ vars.STAND_MEMORY || '1GB' }}
@@ -46,14 +56,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Имя контейнера
+      - name: Имена контейнеров
         run: |
           set -eu
-          # Имя в Yandex Cloud: строчные буквы, цифры, дефис, до 63 символов.
-          NAME="stand-$(printf '%s' "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | cut -c1-56)"
+          # Имя в Yandex Cloud: строчные буквы, цифры, дефис, до 63 символов (с суффиксом -toir).
+          NAME="stand-$(printf '%s' "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | cut -c1-52)"
           NAME="${NAME%-}"
-          echo "CONTAINER_NAME=$NAME" >> "$GITHUB_ENV"
-          echo "Контейнер: $NAME"
+          {
+            echo "CONTAINER_NAME=$NAME"
+            echo "ML_NAME=$NAME-ml"
+            echo "TOIR_NAME=$NAME-toir"
+          } >> "$GITHUB_ENV"
+          echo "Контейнеры: $NAME, $NAME-ml, $NAME-toir"
 
       - name: Ключ сервисного аккаунта во временный файл
         env:
@@ -78,74 +92,127 @@ jobs:
           "$YC" config set folder-id "$YC_FOLDER_ID"
           "$YC" version
 
-      - name: Сборка и push образа
+      - name: Сборка и push образов
         run: |
           set -eu
-          IMAGE="cr.yandex/${YC_REGISTRY_ID}/service:stand-$(printf '%s' "$GITHUB_SHA" | cut -c1-7)"
+          TAG="stand-$(printf '%s' "$GITHUB_SHA" | cut -c1-7)"
+          IMAGE="cr.yandex/${YC_REGISTRY_ID}/service:$TAG"
+          MOCK_IMAGE="cr.yandex/${YC_REGISTRY_ID}/neurodvs-mock:$TAG"
           docker login --username json_key --password-stdin cr.yandex < "$KEY_FILE"
           docker build -t "$IMAGE" .
+          docker build -t "$MOCK_IMAGE" -f docker/mock.Dockerfile .
           docker push "$IMAGE"
+          docker push "$MOCK_IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "MOCK_IMAGE=$MOCK_IMAGE" >> "$GITHUB_ENV"
 
-      - name: Деплой ревизии контейнера
+      - name: Деплой заглушек ML и ТОиР
+        run: |
+          set -eu
+          . scripts/stand_lib.sh
+          ML_URL=$(deploy_container "$ML_NAME" "$MOCK_IMAGE" 256MB 30s --environment MOCK_APP=mock_ml.app:app)
+          TOIR_URL=$(deploy_container "$TOIR_NAME" "$MOCK_IMAGE" 256MB 30s --environment MOCK_APP=mock_toir.app:app)
+          wait_health "$ML_URL"
+          wait_health "$TOIR_URL"
+          echo "ML_URL=$ML_URL" >> "$GITHUB_ENV"
+          echo "TOIR_URL=$TOIR_URL" >> "$GITHUB_ENV"
+
+      - name: Деплой основного контейнера
         env:
           APP_ENV: ${{ secrets.APP_ENV }}
         run: |
           set -eu
-          if ! yc serverless container get --name "$CONTAINER_NAME" >/dev/null 2>&1; then
-            yc serverless container create --name "$CONTAINER_NAME"
+          . scripts/stand_lib.sh
+          # Адреса заглушек и служебные переменные — от workflow; ключи моделей — из секрета APP_ENV
+          # (каждая строка KEY=VALUE — отдельный флаг --environment; запятая в значении ломает разбор yc).
+          set -- \
+            --environment "MOCK_ML_URL=${ML_URL%/}" \
+            --environment "MOCK_TOIR_URL=${TOIR_URL%/}" \
+            --environment MOCK_TIMEOUT=30 \
+            --environment STATE_DB=/tmp/agent.db \
+            --environment INDEX_DIR=/tmp/index
+          if [ -n "${S3_BUCKET:-}" ]; then
+            set -- "$@" --environment "S3_BUCKET=${S3_BUCKET}"
+          else
+            echo "::warning::vars.S3_BUCKET не задан — стенд без индекса руководств (поиск пуст, заявок нет)"
           fi
-          # Переменные приложения: каждая строка KEY=VALUE — отдельный флаг --environment (yc сливает их).
-          # Запятая в значении ломает разбор yc — такие значения не класть.
-          set --
+          # Каталог Yandex Cloud для эмбеддинга вопроса (поиск по смыслу); ключ YANDEX_API_KEY — в APP_ENV.
+          case "${APP_ENV:-}" in
+            *YANDEX_FOLDER_ID=*) ;;
+            *) [ -z "${YANDEX_FOLDER_ID:-}" ] || set -- "$@" --environment "YANDEX_FOLDER_ID=${YANDEX_FOLDER_ID}" ;;
+          esac
+          case "${APP_ENV:-}" in
+            *APP_SECRET=*) ;;
+            # Ключ подписи разговора, общий для всех экземпляров: производный от секрета, сам секрет не раскрывает.
+            *) set -- "$@" --environment "APP_SECRET=$(sha256sum "$KEY_FILE" | cut -c1-64)" ;;
+          esac
           if [ -n "${APP_ENV:-}" ]; then
             while IFS= read -r line || [ -n "$line" ]; do
               line="${line%$'\r'}"
               case "$line" in ''|'#'*) continue ;; esac
-              case "$line" in *=*) set -- "$@" --environment "$line" ;; *) echo "APP_ENV: строка без '=' пропущена" >&2 ;; esac
+              case "$line" in
+                MOCK_ML_URL=*|MOCK_TOIR_URL=*|S3_BUCKET=*|INDEX_DIR=*)
+                  echo "APP_ENV: ${line%%=*} задаёт workflow — строка пропущена" >&2 ;;
+                S3_ACCESS_KEY_ID=*|S3_SECRET_ACCESS_KEY=*)
+                  echo "APP_ENV: ${line%%=*} — статический ключ в контейнер не кладём (D-9), строка пропущена" >&2 ;;
+                *=*) set -- "$@" --environment "$line" ;;
+                *) echo "APP_ENV: строка без '=' пропущена" >&2 ;;
+              esac
             done <<< "$APP_ENV"
           fi
-          yc serverless container revision deploy \
-            --container-name "$CONTAINER_NAME" \
-            --image "$IMAGE" \
-            --service-account-id "$YC_SA_ID" \
-            --memory "$STAND_MEMORY" \
-            --cores 1 \
-            --execution-timeout "$STAND_TIMEOUT" \
-            --min-instances "$STAND_MIN_INSTANCES" \
-            "$@" >/dev/null
-          yc serverless container allow-unauthenticated-invoke --name "$CONTAINER_NAME"
-          URL=$(yc serverless container get --name "$CONTAINER_NAME" --format json | jq -r '.url')
-          if [ -z "$URL" ] || [ "$URL" = "null" ]; then
-            echo "Не получили url контейнера $CONTAINER_NAME" >&2
-            exit 1
-          fi
-          URL="${URL%/}/"
+          URL=$(deploy_container "$CONTAINER_NAME" "$IMAGE" "$STAND_MEMORY" "$STAND_TIMEOUT" "$@")
           echo "STAND_URL=$URL" >> "$GITHUB_ENV"
           echo "Стенд: $URL"
 
-      - name: Проверка /health
+      - name: Проверка /health и смоук сценариев без модели
         run: |
           set -eu
-          i=0
-          until HEALTH=$(curl -fsS --max-time 30 "${STAND_URL}health"); do
-            i=$((i + 1))
-            if [ "$i" -ge 12 ]; then
-              echo "stand: ${STAND_URL}health не ответил 200" >&2
+          . scripts/stand_lib.sh
+          wait_health "$STAND_URL"
+          N=$(curl -fsS --max-time 30 "${STAND_URL}api/vehicles" | jq length)
+          [ "$N" = 50 ] || { echo "stand: /api/vehicles вернул $N машин, ждали 50" >&2; exit 1; }
+          diag() {
+            curl -fsS --max-time 60 -X POST "${STAND_URL}api/diagnose" -H 'Content-Type: application/json' \
+              -d "{\"vehicle_id\":\"$1\",\"session_id\":\"$2\"}"
+          }
+          C3=$(diag H142OX78 S-0113 | jq -r '[.status, .ticket_possible] | join(" ")')
+          C1=$(diag M333YK47 S-0005 | jq -r '[.status, .ticket_possible] | join(" ")')
+          echo "С3: $C3 · С1: $C1"
+          [ "$C3" = "check_failed false" ] || { echo "stand: С3 — ждали check_failed без заявки" >&2; exit 1; }
+          [ "$C1" = "anomaly true" ] || { echo "stand: С1 — ждали anomaly с возможной заявкой" >&2; exit 1; }
+          KB=$(curl -fsS --max-time 30 "${STAND_URL}health" | jq -c '.manuals_index')
+          echo "Индекс руководств: $KB"
+          if [ -n "${S3_BUCKET:-}" ]; then
+            [ "$(printf '%s' "$KB" | jq -r '.present')" = true ] || {
+              echo "stand: индекс из бакета не скачан — роль storage.viewer у сервисного аккаунта? index/LATEST выложен?" >&2
               exit 1
-            fi
-            sleep 10
-          done
-          case "$HEALTH" in
-            *'"status"'*) echo "stand: /health ок" ;;
-            *) echo "stand: в ответе /health нет status" >&2; exit 1 ;;
-          esac
+            }
+          fi
           {
             echo "### 🟢 Стенд"
             echo
             echo "- Сервис: ${STAND_URL}"
             echo "- Здоровье: ${STAND_URL}health"
+            echo "- Заглушки: ML ${ML_URL} · ТОиР ${TOIR_URL}"
+            echo "- Смоук через Mock ML: С3 → \`$C3\`, С1 → \`$C1\`"
+            echo "- Индекс руководств: \`$KB\`"
             echo "- Коммит: \`$(printf '%s' "$GITHUB_SHA" | cut -c1-7)\` · контейнер \`${CONTAINER_NAME}\` · тёплых экземпляров: ${STAND_MIN_INSTANCES}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: С1 на настоящей модели
+        if: inputs.c1_live
+        run: |
+          set -eu
+          pip install --quiet "httpx==0.28.1"
+          python scripts/stand_c1.py "$STAND_URL" | tee "$RUNNER_TEMP/c1.txt"
+          {
+            echo
+            echo "<details><summary>С1 на настоящей модели — ок</summary>"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/c1.txt"
+            echo '```'
+            echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Убрать ключ

@@ -13,7 +13,11 @@ import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 FAULT_CODE = r"^F(0[1-9]|1[0-4])$"
-DEFAULT_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
+
+
+def default_timeout() -> httpx.Timeout:
+    """Чтение — MOCK_TIMEOUT с (на стенде больше: холодный старт контейнера заглушки), соединение — 5 с."""
+    return httpx.Timeout(float(os.environ.get("MOCK_TIMEOUT", "10")), connect=5.0)
 
 
 class ServiceError(Exception):
@@ -99,7 +103,7 @@ class MLClient:
 
     def __init__(self, base_url: str | None = None, http: httpx.Client | None = None) -> None:
         url = base_url or os.environ.get("MOCK_ML_URL", "http://127.0.0.1:8001")
-        self.http = http or httpx.Client(base_url=url, timeout=DEFAULT_TIMEOUT)
+        self.http = http or httpx.Client(base_url=url, timeout=default_timeout())
 
     def diagnose(self, vehicle_id: str, session_id: str) -> Diagnosis:
         resp = _post(self.http, "/diagnose", {"vehicle_id": vehicle_id, "session_id": session_id}, self.service)
@@ -122,7 +126,7 @@ class ToirClient:
 
     def __init__(self, base_url: str | None = None, http: httpx.Client | None = None) -> None:
         url = base_url or os.environ.get("MOCK_TOIR_URL", "http://127.0.0.1:8002")
-        self.http = http or httpx.Client(base_url=url, timeout=DEFAULT_TIMEOUT)
+        self.http = http or httpx.Client(base_url=url, timeout=default_timeout())
 
     def create_ticket(self, ticket: TicketRequest) -> TicketResponse:
         resp = _post(self.http, "/tickets", ticket.model_dump(), self.service)

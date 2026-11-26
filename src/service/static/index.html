@@ -79,7 +79,7 @@
 // Весь текст из данных выводится только через textContent: цитата ML — данные, не разметка и не инструкции.
 const $ = (id) => document.getElementById(id);
 const main = $("main");
-let vehicles = [], current = null, selected = null, conversationId = null, lastCard = null;
+let vehicles = [], current = null, selected = null, conversationId = null, convState = null, lastCard = null;
 
 function el(tag, attrs, ...children) {
   const n = document.createElement(tag);
@@ -159,7 +159,7 @@ async function runDiagnose() {
 }
 
 function screenCard(card) {
-  conversationId = null; lastCard = card;
+  conversationId = null; convState = null; lastCard = card;
   const s = current.sessions.find(x => x.session_id === selected);
   const meta = [];
   if (card.fault_code) meta.push("Код " + card.fault_code);
@@ -231,7 +231,8 @@ function draftCard(d) {
     send.disabled = true; send.textContent = "Отправляю…";
     try {
       const res = await api("/api/tickets", {method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({conversation_id: conversationId, fingerprint: d.fingerprint})});
+        body: JSON.stringify({state: convState, fingerprint: d.fingerprint})});
+      convState = res.state;
       box.replaceWith(el("div", {class:"ok", role:"status"}, "✓ Заявка " + res.ticket_id + " создана в ТОиР"));
     } catch (e) { send.disabled = false; send.textContent = "Отправить"; box.append(el("div", {class:"err"}, e.message)); }
   }}, "Отправить");
@@ -245,8 +246,8 @@ async function ask(q) {
   $("chatlog").append(wait);
   try {
     const r = await api("/api/chat", {method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({vehicle_id: current.vehicle_id, session_id: selected, message: q, conversation_id: conversationId})});
-    conversationId = r.conversation_id;
+      body: JSON.stringify({vehicle_id: current.vehicle_id, session_id: selected, message: q, state: convState})});
+    conversationId = r.conversation_id; convState = r.state;
     wait.remove(); renderAnswer(r);
   } catch (e) { wait.remove(); $("chatlog").append(el("div", {class:"err"}, e.message)); }
 }
