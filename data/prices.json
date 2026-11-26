@@ -1,29 +1,38 @@
 {
- "_comment": "Тарифы для расчёта себестоимости (issue #16). Каждая цена — с единицей, источником и уверенностью. Перед сдачей сверить с официальными страницами (вопрос — issue #8). LLM_PRICE_IN_RUB / LLM_PRICE_OUT_RUB / LLM_PRICE_CACHED_RUB в окружении перекрывают цены модели.",
+ "_comment": "Тарифы для себестоимости (issue #16, ответы в #19): только официальные страницы, суммы считаются без НДС (так требует шаблон организаторов). vat_included — указана ли цена на странице с НДС; тогда код делит на (1 + vat_rate). LLM_PRICE_IN_RUB / LLM_PRICE_OUT_RUB / LLM_PRICE_CACHED_RUB перекрывают цены модели (₽ без НДС за 1 млн токенов).",
  "checked": "2026-11-26",
- "usd_rub": {"value": 100.0, "source": "допущение агента для пересчёта долларовых тарифов; задать по курсу на дату сдачи", "confidence": "допущение"},
+ "vat_rate": {"value": 0.22, "source": "https://developers.sber.ru/docs/ru/gigachat/tariffs/legal-tariffs; https://cloud.ru/documents/tariffs/evolution/foundation-models (столбец «НДС (22%)»)"},
+ "usd_rub": {"value": 82.3130, "date": "2026-11-26", "source": "https://www.cbr.ru/scripts/XML_daily.asp?date_req=26/11/2026 (ЦБ РФ, USD)"},
  "llm": {
   "deepseek": {
-   "unit": "₽ за 1 млн токенов",
-   "usd": {"in": 0.30, "in_cached": 0.006, "out": 1.20},
-   "note": "deepseek-flash, пиковый тариф (вне пика — вдвое дешевле); считаем по пиковому — оценка сверху",
-   "source": "https://costgoat.com/pricing/deepseek-api, https://www.aipricing.guru/deepseek-pricing/ (вторичные; официальная страница в поиске не найдена)",
-   "confidence": "вторичный источник"
+   "model": "deepseek-flash (DeepSeek-V4.1-Flash-1017)",
+   "currency": "USD",
+   "vat_included": false,
+   "unit": "за 1 млн токенов",
+   "use": "peak",
+   "peak": {"in": 0.30, "in_cached": 0.006, "out": 1.20},
+   "off_peak": {"in": 0.15, "in_cached": 0.003, "out": 0.60},
+   "note": "пик — будни 01:00–04:00 и 06:00–10:00 UTC (04:00–07:00 и 09:00–13:00 МСК), остальное время вдвое дешевле; считаем по пику — оценка сверху",
+   "source": "https://api-docs.deepseek.com/quick_start/pricing — 26.11 страница отвечала HTTP 525, цены — из снимка той же страницы от 24.11.2026: http://web.archive.org/web/20261124084006/https://api-docs.deepseek.com/quick_start/pricing/"
   },
   "gigachat": {
-   "unit": "₽ за 1 млн токенов",
-   "rub": {"in": 1500.0, "in_cached": 1500.0, "out": 1500.0},
-   "note": "значение из S2 (store.DEFAULT_PRICES), источник не записан",
-   "source": "не указан",
-   "confidence": "не проверено"
+   "model": "GigaChat-2-Max (синхронный режим)",
+   "currency": "RUB",
+   "vat_included": true,
+   "unit": "за 1 млн токенов (на странице — 0,65 ₽ за 1000 токенов с НДС)",
+   "price": {"in": 650.0, "in_cached": 650.0, "out": 650.0},
+   "note": "вход и выход по одной цене, скидки за кэш нет; тариф для текущих клиентов ООО «СалютДевайсы», API принимает запросы до 30.11.2026 включительно, дальше — cloud.ru",
+   "source": "https://developers.sber.ru/docs/ru/gigachat/tariffs/legal-tariffs (обновлено 25.11.2026)"
   }
  },
  "other": {
-  "embedding": {"value": 0.0101, "unit": "₽ за 1000 токенов", "source": "https://aistudio.yandex.ru/ru/docs/ai-studio/pricing", "confidence": "официальная страница, по выдаче поиска; единицу сверить"},
-  "stt_sync": {"value": 0.1626, "unit": "₽ за 15 с распознавания (синхронно/потоково)", "source": "https://pawetta.com/servisy/speechkit/ (вторичный, 27.08.2026)", "confidence": "вторичный источник; источники расходятся (0,1515–0,1626)"},
-  "tts": {"value": null, "unit": "₽ за 1 млн символов", "source": "вторичные источники расходятся: 183,05 и 1 342 ₽", "confidence": "не найдено — уточнить"},
-  "container_vcpu_hour": {"value": null, "unit": "₽ за vCPU×час", "source": "https://github.com/yandex-cloud/docs/blob/master/ru/serverless-containers/pricing.md", "confidence": "не найдено — уточнить; есть бесплатный уровень 5 vCPU×ч и 10 ГБ×ч RAM в месяц"},
-  "container_ram_gb_hour": {"value": null, "unit": "₽ за ГБ×час", "source": "там же", "confidence": "не найдено — уточнить"},
-  "object_storage_gb_month": {"value": null, "unit": "₽ за ГБ в месяц", "source": "https://yandex.cloud/en/prices", "confidence": "не найдено — уточнить"}
+  "embedding": {"value": 0.0101, "unit": "₽ за 1000 токенов", "vat_included": true, "source": "https://aistudio.yandex.ru/docs/ru/ai-studio/pricing («Получение эмбеддингов текста»)"},
+  "ocr_page": {"value": 0.1321, "unit": "₽ за страницу", "vat_included": true, "source": "https://aistudio.yandex.ru/docs/ru/ai-studio/pricing («Распознавание печатного текста»)"},
+  "stt_sync": {"value": 0.1626, "unit": "₽ за 15 с (синхронное/потоковое распознавание)", "vat_included": true, "source": "https://aistudio.yandex.ru/docs/ru/speechkit/pricing"},
+  "tts_v3": {"value": 0.1626, "unit": "₽ за 250 символов (API v3, модель general; единица — каждые 250 символов)", "vat_included": true, "source": "https://aistudio.yandex.ru/docs/ru/speechkit/pricing"},
+  "container_vcpu_hour": {"value": 5.69, "unit": "₽ за vCPU×час обработки (сверх 5 vCPU×ч в месяц бесплатно)", "vat_included": true, "source": "https://yandex.cloud/ru/docs/serverless-containers/pricing (обновлена 13.11.2026)"},
+  "container_ram_gb_hour": {"value": 3.79, "unit": "₽ за ГБ×час обработки (сверх 10 ГБ×ч в месяц бесплатно)", "vat_included": true, "source": "https://yandex.cloud/ru/docs/serverless-containers/pricing"},
+  "container_invocations_million": {"value": 18.97, "unit": "₽ за 1 млн вызовов (сверх 1 млн в месяц бесплатно)", "vat_included": true, "source": "https://yandex.cloud/ru/docs/serverless-containers/pricing"},
+  "object_storage_gb_month": {"value": 2.376, "unit": "₽ за ГБ в месяц, стандартное хранилище (первый 1 ГБ бесплатно)", "vat_included": true, "source": "https://yandex.cloud/ru/docs/storage/pricing (цена из примера расчёта на странице, обновлена 13.11.2026)"}
  }
 }

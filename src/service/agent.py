@@ -657,8 +657,8 @@ class Agent:
             calls.append(ToolCall(f"pre-search-{len(conv.messages)}", "search_manual", query))
         if not calls:
             return
-        conv.messages.append({"role": "assistant", "content": "", "tool_calls": calls})
-        for call in calls:
+        for call in calls:  # по ходу на вызов: GigaChat принимает одну функцию за ход
+            conv.messages.append({"role": "assistant", "content": "", "tool_calls": [call]})
             t0 = time.monotonic()
             result, ok = self._run_tool(conv, call.name, call.arguments)
             tms = int((time.monotonic() - t0) * 1000)

@@ -107,3 +107,15 @@ def test_http_error_is_llm_error() -> None:
     )
     with pytest.raises(LLMError, match="401"):
         p.chat(HISTORY, TOOLS)
+
+
+def test_gigachat_single_system_message_first() -> None:
+    """GigaChat: «system message must be the first message» — промпт и контекст разговора — одним сообщением."""
+    msgs = [
+        {"role": "system", "content": "правила"},
+        {"role": "system", "content": "контекст"},
+        {"role": "user", "content": "вопрос"},
+    ]
+    wire = GigaChatProvider.to_wire(msgs)
+    assert [m["role"] for m in wire] == ["system", "user"]
+    assert wire[0]["content"] == "правила\n\nконтекст"

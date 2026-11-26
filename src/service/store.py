@@ -51,19 +51,27 @@ CREATE TABLE IF NOT EXISTS tickets (
 """
 
 
+def ex_vat(value: float, vat_included: bool) -> float:
+    """Цена без НДС: шаблон организаторов считает суммы без НДС."""
+    return value / (1 + float(price_table()["vat_rate"]["value"])) if vat_included else value
+
+
+def llm_price_native(provider: str) -> tuple[dict[str, float], str]:
+    """Цены модели за 1 млн токенов без НДС в валюте прайса: ({in, in_cached, out}, «USD»/«RUB»)."""
+    row = price_table()["llm"].get(provider) or {}
+    base = row.get(row.get("use", "")) or row.get("price") or {"in": 0.0, "in_cached": 0.0, "out": 0.0}
+    vat = bool(row.get("vat_included"))
+    return {k: ex_vat(float(v), vat) for k, v in base.items()}, str(row.get("currency", "RUB"))
+
+
 def prices(provider: str) -> LLMPrice:
-    t = price_table()
-    row = t["llm"].get(provider) or {}
-    if "rub" in row:
-        base = row["rub"]
-    elif "usd" in row:
-        rate = float(t["usd_rub"]["value"])
-        base = {k: float(v) * rate for k, v in row["usd"].items()}
-    else:
-        base = {"in": 0.0, "in_cached": 0.0, "out": 0.0}
-    p_in = float(os.environ.get("LLM_PRICE_IN_RUB", base["in"]))
+    """₽ без НДС за 1 млн токенов (доллары — по курсу ЦБ из data/prices.json)."""
+    native, currency = llm_price_native(provider)
+    rate = float(price_table()["usd_rub"]["value"]) if currency == "USD" else 1.0
+    base = {k: v * rate for k, v in native.items()}
+    p_in = float(os.environ.get("LLM_PRICE_IN_RUB", base.get("in", 0.0)))
     p_cached = float(os.environ.get("LLM_PRICE_CACHED_RUB", base.get("in_cached", p_in)))
-    p_out = float(os.environ.get("LLM_PRICE_OUT_RUB", base["out"]))
+    p_out = float(os.environ.get("LLM_PRICE_OUT_RUB", base.get("out", 0.0)))
     return LLMPrice(p_in, p_cached, p_out)
 
 

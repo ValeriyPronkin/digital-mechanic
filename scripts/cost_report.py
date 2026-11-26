@@ -37,7 +37,7 @@ from service.fleet import fleet  # noqa: E402
 from service.llm import provider_from_env  # noqa: E402
 from service.manual_search import default_searcher  # noqa: E402
 from service.manuals.catalog import documents_for_engine  # noqa: E402
-from service.store import Store, price_table  # noqa: E402
+from service.store import Store, ex_vat, price_table  # noqa: E402
 
 CUT_NOTE = "Часть цифр не нашёл"
 Check = Callable[[AgentReply, str], str | None]  # (ответ, двигатель) → None или что не так
@@ -50,6 +50,16 @@ def grounded_own_engine(r: AgentReply, engine: str) -> str | None:
     if any(s["manual"] not in own for s in r.sources):
         return "ссылка на чужое руководство"
     return None
+
+
+def grounded_or_insufficient(r: AgentReply, engine: str) -> str | None:
+    """С2 по ТЗ: ответ по руководству своего двигателя или честное «данных недостаточно»."""
+    if grounded_own_engine(r, engine) is None:
+        return None
+    low = r.text.lower()
+    if any(w in low for w in ("недостаточно", "не нашёл", "не нашел", "нет данных", "дефектовк")):
+        return None
+    return "ни ссылки на руководство, ни «данных недостаточно»"
 
 
 def no_cut(r: AgentReply, engine: str) -> str | None:
@@ -105,6 +115,18 @@ SCENARIOS = [
     ),
     Scenario(
         "С2",
+        "Диалог по ТЗ: «Можно ли своим ходом перегнать машину на базу?» (F02, ЯМЗ-536)",
+        "A464EP47",
+        "S-0096",
+        [
+            Turn(
+                "Можно ли своим ходом перегнать машину на базу?",
+                [no_draft, no_cut, grounded_or_insufficient],
+            )
+        ],
+    ),
+    Scenario(
+        "Нр",
         "Норма: вопрос механика (ЯМЗ-536)",
         "",
         "",
@@ -172,13 +194,15 @@ class Result:
     tokens_cached: int = 0
 
 
+def _other(name: str) -> float:
+    row = price_table()["other"][name]
+    return ex_vat(float(row["value"]), bool(row.get("vat_included")))
+
+
 def voice_rub(answer: str) -> tuple[float, str]:
-    other = price_table()["other"]
-    stt = other["stt_sync"]["value"] or 0.0  # вопрос до 15 с — один отрезок
-    tts = other["tts"]["value"]
-    if tts is None:
-        return stt, "распознавание 15 с; синтез — тариф не найден, не учтён"
-    return stt + tts * len(answer) / 1_000_000, f"распознавание 15 с + синтез {len(answer)} символов"
+    """Оценка по тарифу без НДС: вопрос до 15 с — один отрезок распознавания; синтез API v3 — за каждые 250 знаков."""
+    units = max(1, -(-len(answer) // 250))
+    return _other("stt_sync") + units * _other("tts_v3"), f"распознавание 15 с + синтез {len(answer)} знаков"
 
 
 def run(sc: Scenario, provider: Any, searcher: Any) -> Result:
@@ -228,13 +252,13 @@ def run(sc: Scenario, provider: Any, searcher: Any) -> Result:
             )  # fmt: skip
             res.rub_other += rub
     # эмбеддинг запроса: ~ длина вопроса / 3 токена на каждый search_manual — копейки, считаем по тарифу
-    emb_price = price_table()["other"]["embedding"]["value"]
-    searches = sum(1 for r in res.rows if r["name"] == "search_manual")
+    emb_price = _other("embedding")
+    searches = sum(1 for r in res.rows if r["name"].startswith("search_manual"))
     res.rub_other += searches * 20 * emb_price / 1000
     return res
 
 
-def write(label: str, results: list[Result], repeat: int) -> None:
+def write(label: str, results: list[Result], repeat: int, provider: Any = None) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     with (OUT_DIR / f"{label}.csv").open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(results[0].rows[0].keys()))
@@ -245,12 +269,15 @@ def write(label: str, results: list[Result], repeat: int) -> None:
         "label": label,
         "at": f"{datetime.now():%Y-%m-%d %H:%M}",
         "repeat": repeat,
+        "provider": getattr(provider, "name", ""),
+        "model": getattr(provider, "model", ""),
         "scenarios": {
             r.scenario: {
                 "title": r.title,
                 "rub": round((r.rub_llm + r.rub_other) / repeat, 4),
                 "rub_llm": round(r.rub_llm / repeat, 4),
                 "llm_calls": round(sum(1 for x in r.rows if x["kind"] == "модель") / repeat, 1),
+                "llm_ms": sum(x["ms"] for x in r.rows if x["kind"] == "модель") // repeat,
                 "tokens_in": r.tokens_in // repeat,
                 "tokens_cached": r.tokens_cached // repeat,
                 "tokens_out": r.tokens_out // repeat,
@@ -267,48 +294,84 @@ def render_md() -> None:
     runs = sorted((json.loads(p.read_text(encoding="utf-8")) for p in OUT_DIR.glob("*.json")), key=lambda d: d["at"])
     if not runs:
         return
-    first, last = runs[0], runs[-1]
-    prices = price_table()
+    main_runs = [r for r in runs if r.get("provider", "deepseek") == "deepseek"] or runs
+    first, last = main_runs[0], main_runs[-1]
+    t = price_table()
     lines = [
         "# Себестоимость по участкам (issue #16)",
         "",
-        "Замеры: " + ", ".join(f"`{r['label']}` ({r['at']})" for r in runs) + f". «До» — `{first['label']}`, "
-        f"«после» — `{last['label']}`. Скрипт: `make cost LABEL=…`; строки по шагам — `reports/cost/<замер>.csv`.",
+        "Все суммы — ₽ без НДС (как в шаблоне организаторов), курс ЦБ на "
+        f"{t['usd_rub']['date']}: {t['usd_rub']['value']} ₽/$. Скрипт: `make cost LABEL=…`, шаблон — `make cost-xlsx`.",
         "",
-        "Карточка проверки (норма / отклонение / сбой) строится кодом: **0 токенов**, 0 ₽ на модель.",
+        f"«До» — `{first['label']}`, «после» — `{last['label']}` (DeepSeek). "
+        "Строки по шагам — `reports/cost/<замер>.csv`.",
+        "Карточка проверки (норма / отклонение / сбой) строится кодом: **0 токенов**.",
         "",
         "| Сценарий | Вызовов модели | Токены вход (из кэша) / выход | ₽ до | ₽ после | Качество |",
         "|---|---|---|---|---|---|",
     ]
-    for key, s in last["scenarios"].items():
+    for key, sc in last["scenarios"].items():
         before = first["scenarios"].get(key, {})
-        q = "✅" if not s["problems"] else "❌ " + "; ".join(s["problems"])
+        q = "✅" if not sc["problems"] else "❌ " + "; ".join(sc["problems"])
+        toks = f"{sc['tokens_in']} ({sc['tokens_cached']}) / {sc['tokens_out']}"
         lines.append(
-            f"| {key} — {s['title']} | {s['llm_calls']} | {s['tokens_in']} ({s['tokens_cached']}) / {s['tokens_out']}"
-            f" | {before.get('rub', '—')} | {s['rub']} | {q} |"
+            f"| {key} — {sc['title']} | {sc['llm_calls']} | {toks} | {before.get('rub', '—')} | {sc['rub']} | {q} |"
         )
-    lines += ["", "## Все замеры", "", "| Замер | " + " | ".join(last["scenarios"]) + " |",
-              "|---|" + "---|" * len(last["scenarios"])]  # fmt: skip
+    # сравнение моделей: последний замер каждого провайдера
+    latest: dict[str, dict[str, Any]] = {}
     for r in runs:
-        lines.append(
-            f"| `{r['label']}` | "
-            + " | ".join(
-                f"{r['scenarios'][k]['rub']} ₽{'' if not r['scenarios'][k]['problems'] else ' ❌'}"
-                if k in r["scenarios"]
-                else "—"
-                for k in last["scenarios"]
-            )
-            + " |"
-        )
-    lines += ["", "## Тарифы", "", "| Участок | Цена | Источник | Уверенность |", "|---|---|---|---|"]
-    for name, row in prices["llm"].items():
-        val = row.get("rub") or {k: f"${v}" for k, v in row.get("usd", {}).items()}
-        lines.append(f"| модель {name} | {val} ({row['unit']}) | {row['source']} | {row['confidence']} |")
-    for name, row in prices["other"].items():
-        v = "не найдено" if row["value"] is None else f"{row['value']} {row['unit']}"
-        lines.append(f"| {name} | {v} | {row['source']} | {row['confidence']} |")
-    u = prices["usd_rub"]
-    lines += [f"| курс | {u['value']} ₽/$ | {u['source']} | {u['confidence']} |", ""]
+        latest[r.get("provider") or "deepseek"] = r
+    if len(latest) > 1:
+        keys = list(last["scenarios"])
+        lines += [
+            "",
+            "## Модели: ₽ / время ответа модели / качество (последний замер каждой)",
+            "",
+            "| Модель | " + " | ".join(keys) + " |",
+            "|---|" + "---|" * len(keys),
+        ]
+        for prov, r in latest.items():
+            cells = []
+            for k in keys:
+                sc = r["scenarios"].get(k)
+                if sc is None:
+                    cells.append("—")
+                    continue
+                mark = "✅" if not sc["problems"] else "❌"
+                cells.append(f"{sc['rub']} ₽ · {sc.get('llm_ms', 0) / 1000:.1f} с · {mark}")
+            lines.append(f"| {prov} `{r.get('model', '')}` (`{r['label']}`) | " + " | ".join(cells) + " |")
+        problems = [f"- {prov}, {k}: {'; '.join(sc['problems'])}" for prov, r in latest.items()
+                    for k, sc in r["scenarios"].items() if sc["problems"]]  # fmt: skip
+        if problems:
+            lines += ["", "Провалы проверок качества:", *problems]
+    lines += ["", "## Все замеры", "", "| Замер | Модель | " + " | ".join(last["scenarios"]) + " |",
+              "|---|---|" + "---|" * len(last["scenarios"])]  # fmt: skip
+    for r in runs:
+        cells = []
+        for k in last["scenarios"]:
+            sc = r["scenarios"].get(k)
+            cells.append("—" if sc is None else f"{sc['rub']} ₽{'' if not sc['problems'] else ' ❌'}")
+        lines.append(f"| `{r['label']}` | {r.get('provider') or 'deepseek'} | " + " | ".join(cells) + " |")
+    lines += [
+        "",
+        "Замеры до `7-after-main-merge` посчитаны по прежним ценам (вторичные источники, 100 ₽/$, с НДС у Яндекса);",
+        "сравнивать их между собой можно, с новыми — только по токенам в CSV.",
+        "",
+        "## Тарифы (официальные страницы)",
+        "",
+        "| Участок | Цена | НДС на странице | Источник |",
+        "|---|---|---|---|",
+    ]
+    for name, row in t["llm"].items():
+        base = row.get(row.get("use", "")) or row.get("price", {})
+        cur = "$" if row["currency"] == "USD" else "₽"
+        val = ", ".join(f"{k} {v}{cur}" for k, v in base.items())
+        vat = "с НДС" if row["vat_included"] else "без НДС"
+        lines.append(f"| модель {name}: {row['model']} | {val} {row['unit']} | {vat} | {row['source']} |")
+    for name, row in t["other"].items():
+        vat = "с НДС" if row.get("vat_included") else "без НДС"
+        lines.append(f"| {name} | {row['value']} {row['unit']} | {vat} | {row['source']} |")
+    lines += [f"| курс | {t['usd_rub']['value']} ₽/$ на {t['usd_rub']['date']} | — | {t['usd_rub']['source']} |", ""]
     (ROOT / "reports" / "cost.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -335,7 +398,7 @@ def main() -> int:
         results.append(merged)
         tag = "ok" if not merged.problems else "; ".join(merged.problems)
         print(f"{sc.key}: {(merged.rub_llm + merged.rub_other) / args.repeat:.4f} ₽ — {tag}")
-    write(args.label, results, args.repeat)
+    write(args.label, results, args.repeat, provider)
     print(f"reports/cost/{args.label}.csv, reports/cost.md")
     return 0 if all(not r.problems for r in results) else 1
 
