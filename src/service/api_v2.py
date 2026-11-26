@@ -297,7 +297,8 @@ def usage_events(reply: AgentReply) -> list[dict[str, Any]]:
         {
             "type": "usage",
             "model": s.get("name", ""),
-            "input_tokens": s.get("tokens_in", 0),
+            # у нас tokens_in включает взятые из кэша провайдера, у интерфейса v2 они отдельно — без двойного счёта
+            "input_tokens": max(0, int(s.get("tokens_in", 0)) - int(s.get("tokens_cached", 0))),
             "cache_write_tokens": 0,
             "cache_read_tokens": s.get("tokens_cached", 0),
             "output_tokens": s.get("tokens_out", 0),
@@ -534,12 +535,8 @@ def build_router(
             for u in usage:
                 yield _sse(u)
             # Наши функции, которых пока нет в компонентах v2: интерфейс незнакомые события пропускает (#52 п. 3).
-            yield _sse(
-                {
-                    "type": "passport",
-                    **passport.build(reply.trace, question=req.message, notes=reply.notes, level=req.level),
-                }
-            )
+            pp = passport.build(reply.trace, question=req.message, notes=reply.notes, level=req.level)
+            yield _sse({"type": "passport", **pp})
             spoken = speech_for(reply.text, conv.sources)
             yield _sse(
                 {
@@ -565,6 +562,7 @@ def build_router(
                     ],
                     "usage": usage,
                     "verification": {k: ver[k] for k in ver if k not in ("type", "text")},
+                    "passport": pp,
                 },
             ]
             thread["pending"] = {k: pending[k] for k in pending if k != "type"} if pending else None

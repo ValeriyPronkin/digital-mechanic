@@ -9,6 +9,7 @@ import {
   type TicketView,
   type ToolTrace,
   type UsageEvent,
+  type Passport,
   type Verification,
 } from './api'
 import { copy } from './copy'
@@ -20,6 +21,7 @@ export interface AssistantTurn {
   tools: ToolTrace[]
   usage: UsageEvent[]
   verification?: Verification
+  passport?: Passport // our request passport (#31): steps, context, tokens, ₽
   progress?: string // the line shown while a tool runs
   error?: string
   reason?: string
@@ -71,6 +73,10 @@ function apply(turn: AssistantTurn, e: ChatEvent): AssistantTurn {
       }
     case 'usage':
       return { ...turn, usage: [...turn.usage, e] }
+    case 'passport': {
+      const { type: _, ...passport } = e
+      return { ...turn, passport }
+    }
     case 'error':
       return { ...turn, error: e.message, progress: undefined }
     case 'done': {

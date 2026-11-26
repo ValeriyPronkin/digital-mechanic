@@ -1543,7 +1543,7 @@ def tool_step(
             "engine": result.get("engine"),
             "queries": [args.get("query"), *(args.get("more_queries") or [])],
             "found": len(found),
-            "refs": [f.get("ref") for f in found],
+            "refs": list(dict.fromkeys(f.get("ref") for f in found)),  # фрагменты одной страницы — одна ссылка
         }
     if "refused" in result:
         out["refused"] = result["refused"]
