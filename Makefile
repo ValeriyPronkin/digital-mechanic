@@ -1,4 +1,4 @@
-.PHONY: setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch
+.PHONY: eval-open setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch
 
 PORT ?= 8000
 
@@ -42,6 +42,10 @@ kb-fetch: install
 ## Шаблон организаторов по замеру: reports/cost-template-<замер>.xlsx (шаблон — COST_TEMPLATE, в git не входит)
 cost-xlsx: install
 	uv run python scripts/cost_xlsx.py $(if $(XLSX_LABEL),--label $(XLSX_LABEL),)
+
+## Открытая половина вопросов приёмщика на настоящей модели (issue #28): reports/eval-open.md (вопросы — вне git)
+eval-open: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/eval_open.py --label $(or $(LABEL),$(shell date +%Y%m%d-%H%M))
 
 ## Всё, что проверяет CI, кроме смоука в Docker. Зелёный = код возврата 0.
 check: lint types test stubs third-party secrets

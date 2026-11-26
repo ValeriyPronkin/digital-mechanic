@@ -57,7 +57,7 @@ def _agent(ml: MLClient, toir: ToirClient, steps: list[Any]) -> Any:
     from service.store import Store
     from test_agent import FixtureSearch, ScriptedLLM
 
-    return Agent(ScriptedLLM(steps), ml, toir, FixtureSearch(), Store(":memory:"), main.fleet())
+    return Agent(ScriptedLLM(steps), ml, toir, FixtureSearch(), Store(":memory:"), main.fleet(), plan_search=False)
 
 
 def test_chat_and_ticket_survive_instance_switch(

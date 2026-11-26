@@ -111,13 +111,15 @@ def test_prefetch_answers_in_one_model_call(ml: MLClient, toir: ToirClient) -> N
     assert reply.grounded
 
 
-def test_prefetch_does_not_search_for_normal_or_failed(ml: MLClient, toir: ToirClient) -> None:
+def test_prefetch_searches_for_normal_but_not_for_failed(ml: MLClient, toir: ToirClient) -> None:
+    """#28: вопрос по руководству при «норме» тоже ищется; при сбое записи — нет (выводов о двигателе нет)."""
     from test_agent import FAILED, NORMAL
 
-    for pair in (NORMAL, FAILED):
+    expected = {NORMAL: ["get_diagnosis (код)", "search_manual (код)"], FAILED: ["get_diagnosis (код)"]}
+    for pair, tools in expected.items():
         ag, _ = make_agent([say("ок")], ml, toir)
-        reply = ag.ask(ag.start(*pair), "Что с двигателем?")
-        assert [s["name"] for s in reply.trace["steps"] if s["kind"] == "tool"] == ["get_diagnosis (код)"]
+        reply = ag.ask(ag.start(*pair), "Какой зазор клапанов?")
+        assert [s["name"] for s in reply.trace["steps"] if s["kind"] == "tool"] == tools
 
 
 def test_diagnosis_prefetched_once_per_conversation(ml: MLClient, toir: ToirClient) -> None:

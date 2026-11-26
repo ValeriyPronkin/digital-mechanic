@@ -314,6 +314,8 @@ function renderAnswer(r) {
       el("td", {}, s.ms + " мс"))))));
   $("chatlog").append(body);
   if (r.draft) $("chatlog").append(draftCard(r.draft));
+  // связь с неисправностью из карточки — строит код по матрице (#28); кнопка задаёт вопрос об этой проверке
+  if (r.followup) $("chatlog").append(el("div", {class:"quick"}, el("button", {onclick: () => ask(r.followup.question)}, r.followup.label + " →")));
 }
 
 function draftCard(d) {

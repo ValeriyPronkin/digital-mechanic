@@ -1,0 +1,345 @@
+{
+ "label": "3-terms",
+ "at": "2026-11-26 17:43",
+ "passed": 16,
+ "total": 20,
+ "page_found": 15,
+ "values_in_answer": 12,
+ "answerable": 16,
+ "foreign": 0,
+ "rub_per_question": 0.1293,
+ "results": [
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "found_pages": [
+    31,
+    33,
+    269,
+    270
+   ],
+   "id": "Q02",
+   "type": "Ч",
+   "tags": [
+    "разговорный"
+   ],
+   "rub": 0.1423,
+   "calls": 2
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": false,
+   "foreign": false,
+   "found_pages": [
+    31,
+    254,
+    269,
+    270
+   ],
+   "id": "Q03",
+   "type": "П",
+   "tags": [],
+   "rub": 0.1484,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "found_pages": [
+    31,
+    33,
+    43,
+    270
+   ],
+   "id": "Q04",
+   "type": "И",
+   "tags": [],
+   "rub": 0.1294,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "found_pages": [
+    4
+   ],
+   "id": "Q06",
+   "type": "О",
+   "tags": [
+    "тз",
+    "своим_ходом"
+   ],
+   "rub": 0.1097,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": null,
+   "values": null,
+   "foreign": false,
+   "refused": true,
+   "id": "Q08",
+   "type": "Н",
+   "tags": [],
+   "rub": 0.1107,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "found_pages": [
+    272,
+    301,
+    302,
+    319
+   ],
+   "id": "Q11",
+   "type": "Ч",
+   "tags": [
+    "тз"
+   ],
+   "rub": 0.1077,
+   "calls": 2
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": false,
+   "foreign": false,
+   "found_pages": [
+    176,
+    214,
+    215
+   ],
+   "id": "Q15",
+   "type": "С",
+   "tags": [],
+   "rub": 0.145,
+   "calls": 2
+  },
+  {
+   "ok": false,
+   "page": false,
+   "values": false,
+   "foreign": false,
+   "found_pages": [
+    136,
+    192,
+    581,
+    585
+   ],
+   "id": "Q16",
+   "type": "З",
+   "tags": [],
+   "rub": 0.1337,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": null,
+   "values": null,
+   "foreign": false,
+   "refused": true,
+   "id": "Q19",
+   "type": "Н",
+   "tags": [
+    "чужой"
+   ],
+   "rub": 0.1129,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "found_pages": [
+    173,
+    302,
+    411,
+    416
+   ],
+   "id": "Q20",
+   "type": "Ч",
+   "tags": [
+    "язык:uz"
+   ],
+   "rub": 0.1324,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "found_pages": [
+    116,
+    117,
+    118,
+    137
+   ],
+   "id": "Q21",
+   "type": "Ч",
+   "tags": [
+    "тз"
+   ],
+   "rub": 0.1312,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "found_pages": [
+    20,
+    21,
+    129
+   ],
+   "id": "Q22",
+   "type": "П",
+   "tags": [],
+   "rub": 0.1546,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "found_pages": [
+    21,
+    56,
+    129,
+    133
+   ],
+   "id": "Q23",
+   "type": "С",
+   "tags": [],
+   "rub": 0.1456,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "found_pages": [
+    23,
+    56
+   ],
+   "id": "Q24",
+   "type": "О",
+   "tags": [
+    "тз",
+    "своим_ходом"
+   ],
+   "rub": 0.1136,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": null,
+   "values": null,
+   "foreign": false,
+   "refused": true,
+   "id": "Q27",
+   "type": "Н",
+   "tags": [],
+   "rub": 0.1348,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "found_pages": [
+    135,
+    136,
+    139,
+    141
+   ],
+   "id": "Q34",
+   "type": "И",
+   "tags": [
+    "разговорный"
+   ],
+   "rub": 0.1256,
+   "calls": 2
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": false,
+   "foreign": false,
+   "found_pages": [
+    181,
+    230,
+    231
+   ],
+   "id": "Q36",
+   "type": "З",
+   "tags": [],
+   "rub": 0.1357,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "found_pages": [
+    91,
+    107
+   ],
+   "id": "Q37",
+   "type": "О",
+   "tags": [],
+   "rub": 0.1344,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": null,
+   "values": null,
+   "foreign": false,
+   "refused": true,
+   "id": "Q39",
+   "type": "Н",
+   "tags": [
+    "чужой"
+   ],
+   "rub": 0.1061,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "found_pages": [
+    39,
+    164,
+    230
+   ],
+   "id": "Q40",
+   "type": "Ч",
+   "tags": [
+    "язык:tj",
+    "тз"
+   ],
+   "rub": 0.1331,
+   "calls": 2
+  }
+ ]
+}
