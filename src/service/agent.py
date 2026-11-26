@@ -37,7 +37,7 @@ from service.clients import (
 from service.fault_matrix import MATRIX_PATH, cell_for
 from service.fleet import Fleet, Vehicle
 from service.llm import LLMError, LLMProvider, Message, ToolCall, ToolSpec
-from service.manual_search import ManualSearcher
+from service.manual_search import ManualSearcher, manual_pdf
 from service.manuals.catalog import DOCS_BY_ID
 from service.manuals.lexical import tokenize
 from service.manuals.search import make_quote
@@ -88,9 +88,9 @@ LEVEL_PROMPT: dict[Level, str] = {
     "Статус check_failed или normal — одно предложение.",
     "steps": "Уровень механика: ПОШАГОВО (механик начинающий или неуверенный). Этот ответ — нумерованными шагами "
     "«1. …», «2. …», в каждом шаге одно действие и ссылка [R…]. Перед шагами строка «Понадобится: …» (инструмент "
-    "из фрагмента). Если во фрагменте есть меры безопасности — отдельной строкой «Безопасность: …». Термины "
-    "поясняй простыми словами в скобках. Если вопрос о неисправности — шаги внутри разделов «Проверки» и "
-    "«Возможный ремонт». До 220 слов.",
+    "из фрагмента). Обязательно отдельной строкой «Безопасность: …» — условия и меры из фрагмента (например, "
+    "двигатель заглушён или холодный); если во фрагментах их нет — «Безопасность: в руководстве не указано». Термины "
+    "поясняй простыми словами в скобках. До 220 слов.",
 }
 LEVEL_MAX_TOKENS: dict[Level, int] = {"expert": 300, "steps": 900}
 
@@ -188,6 +188,10 @@ class Source:
             "pdf_page": self.pdf_page,
             "section": self.section,
             "url": f"/manuals/{self.manual_id}#page={self.pdf_page}",
+            # «Как в руководстве»: дословный фрагмент, который видела модель и с которым сверены цифры ответа.
+            "quote": self.text,
+            # Картинка страницы — только если PDF есть на этом сервере (на стенде PDF нет, D-9).
+            "image": f"/manuals/{self.manual_id}/page/{self.pdf_page}.png" if manual_pdf(self.manual_id) else None,
         }
 
 
@@ -499,7 +503,9 @@ class Agent:
             str(card.compatible),
             str(card.ticket_possible),
             knowledge_version(),
-            hashlib.sha256((SYSTEM_PROMPT + self.provider.name + self.provider.model).encode()).hexdigest()[:12],
+            hashlib.sha256(
+                (SYSTEM_PROMPT + LEVEL_PROMPT[level] + self.provider.name + self.provider.model).encode()
+            ).hexdigest()[:12],
         ]
         return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
 

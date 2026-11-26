@@ -288,6 +288,36 @@ def send_ticket(req: TicketIn, request: Request) -> dict[str, Any]:
     return {**resp.model_dump(), "state": conv_state.dump(conv)}
 
 
+@app.get("/manuals/{manual_id}/page/{page}.png")
+def manual_page_image(manual_id: str, page: int) -> Response:
+    """Картинка страницы PDF для «как в руководстве» (#17). Только если PDF есть на этом сервере."""
+    path = manual_pdf(manual_id)
+    if path is None:
+        raise HTTPException(404, "Файл руководства недоступен на этом сервере.")
+    png = render_page_png(str(path), page)
+    if png is None:
+        raise HTTPException(404, f"В руководстве нет страницы {page}.")
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
+@lru_cache(maxsize=32)
+def render_page_png(path: str, page: int) -> bytes | None:
+    import io
+
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument(path)
+    try:
+        if not 1 <= page <= len(pdf):
+            return None
+        image = pdf[page - 1].render(scale=1.6).to_pil()
+        buf = io.BytesIO()
+        image.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+    finally:
+        pdf.close()
+
+
 @app.get("/manuals/{manual_id}")
 def manual(manual_id: str) -> FileResponse:
     """PDF руководства для ссылки «документ, страница» (страница — якорем #page=N)."""

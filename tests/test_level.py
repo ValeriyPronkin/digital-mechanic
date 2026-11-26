@@ -53,3 +53,40 @@ def test_api_passes_level(ml: MLClient, toir: ToirClient, monkeypatch: pytest.Mo
     assert ag.provider.max_tokens == [LEVEL_MAX_TOKENS["expert"]]
     bad = client.post("/api/chat", json={"vehicle_id": vid, "session_id": sid, "message": "?", "level": "boss"})
     assert bad.status_code == 422
+
+
+def test_cache_key_changes_with_level_prompt(ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Правка текста уровня не должна отдавать из кэша ответ в старом формате."""
+    from service import agent as agent_mod
+
+    ag, _ = make_agent([], ml, toir)
+    conv = ag.start(*ANOMALY)
+    conv.messages.append({"role": "user", "content": "зазор клапанов"})
+    before = ag._answer_cache_key(conv, "зазор клапанов", "steps")
+    monkeypatch.setitem(agent_mod.LEVEL_PROMPT, "steps", agent_mod.LEVEL_PROMPT["steps"] + " Новое правило.")
+    assert ag._answer_cache_key(conv, "зазор клапанов", "steps") != before
+
+
+def test_sources_carry_quote_for_as_in_manual(ml: MLClient, toir: ToirClient) -> None:
+    """«Как в руководстве» (#17): у источника — дословный фрагмент; картинки нет, если нет PDF на сервере."""
+    steps = [call("search_manual", query="давление масла"), say("Не менее 0,1 МПа [R1].")]
+    ag, _ = make_agent(steps, ml, toir)
+    reply = ag.ask(ag.start(*ANOMALY), "Какое давление масла?")
+    src = reply.sources[0]
+    assert "0,1 МПа" in src["quote"] and src["image"] is None  # doc-1 — тестовый, PDF нет
+
+
+def test_page_image_404_without_pdf() -> None:
+    client = TestClient(main.app)
+    assert client.get("/manuals/doc-1/page/1.png").status_code == 404
+
+
+def test_page_image_renders_real_page() -> None:
+    from service.manual_search import manual_pdf
+
+    if manual_pdf("yamz-236-rk") is None:
+        pytest.skip("нужны PDF руководств (MANUALS_DIR)")
+    client = TestClient(main.app)
+    r = client.get("/manuals/yamz-236-rk/page/270.png")
+    assert r.status_code == 200 and r.content[:8] == b"\x89PNG\r\n\x1a\n"
+    assert client.get("/manuals/yamz-236-rk/page/99999.png").status_code == 404
