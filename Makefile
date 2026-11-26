@@ -1,4 +1,4 @@
-.PHONY: run-local stop-local mocks-local stop-mocks-local web web-test engineer-pack logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
+.PHONY: run-local stop-local mocks-local stop-mocks-local web web-test engineer-pack demo-check logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
 
 PORT ?= 8000
 
@@ -32,6 +32,9 @@ LABEL ?= $(shell date +%Y%m%d-%H%M)
 STAND_URL ?= https://bbab8qkqhuhg3ere9dam.containers.yandexcloud.net/
 engineer-pack: install
 	uv run python scripts/engineer_pack.py $(STAND_URL) $(PACK_ARGS)
+
+demo-check: install  ## сценарий видео на стенде /v2 перед дублем: таблица шагов, код 0 = готово (заявку не шлёт)
+	uv run python scripts/demo_check.py $(or $(STAND),$(STAND_URL)) $(ARGS)
 
 cost: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/cost_report.py --label $(LABEL)
