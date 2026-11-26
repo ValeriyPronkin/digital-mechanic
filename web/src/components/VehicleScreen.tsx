@@ -21,6 +21,7 @@ import { ActionLog } from './ActionLog'
 import { Answer } from './Answer'
 import { GuideCard } from './GuideCard'
 import { PageSheet } from './PageSheet'
+import { getLevel, setLevel, type Level } from '../lib/level'
 import { ScoreChart } from './ScoreChart'
 import { TicketCard } from './TicketCard'
 import { TicketSheet } from './TicketSheet'
@@ -443,6 +444,7 @@ export function VehicleScreen({
                 ))}
             </div>
           )}
+          <LevelSwitch />
           {voice.error && (
             <p role="status" className="text-[13px] text-warn">
               {voice.error}
@@ -560,6 +562,31 @@ export function VehicleScreen({
           onClose={() => setSource(null)}
         />
       )}
+    </div>
+  )
+}
+
+/** «Как объяснять»: коротко (опытный механик) или по шагам — на этом устройстве, для следующих вопросов (#17). */
+function LevelSwitch() {
+  const [level, set] = useState<Level>(getLevel)
+  const pick = (l: Level) => {
+    setLevel(l)
+    set(l)
+  }
+  return (
+    <div role="group" aria-label="Как объяснять" className="flex items-center gap-2 text-[13px] text-dim">
+      <span className="shrink-0">Как объяснять:</span>
+      {(['expert', 'steps'] as const).map((l) => (
+        <button
+          key={l}
+          type="button"
+          aria-pressed={level === l}
+          onClick={() => pick(l)}
+          className="min-h-12 flex-1 rounded-lg border border-line px-2 aria-pressed:border-accent aria-pressed:bg-surface-2 aria-pressed:text-text"
+        >
+          {l === 'expert' ? 'Коротко' : 'По шагам'}
+        </button>
+      ))}
     </div>
   )
 }

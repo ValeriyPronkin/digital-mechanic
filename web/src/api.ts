@@ -376,7 +376,13 @@ export const rejectTicket = (pendingId: string, vehicleId: string) =>
 
 /** POST /api/chat and deliver each server-sent event to `onEvent`. Resolves when the stream ends. */
 export async function streamChat(
-  body: { vehicle_id: string; message: string; session_id?: string | null; new_thread?: boolean },
+  body: {
+    vehicle_id: string
+    message: string
+    session_id?: string | null
+    new_thread?: boolean
+    level?: 'expert' | 'steps' // the mechanic's level (#17): form and length of the answer
+  },
   onEvent: (event: ChatEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
