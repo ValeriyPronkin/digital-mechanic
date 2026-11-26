@@ -11,15 +11,26 @@
 лицензия на использование не предоставляется.
 
 
-## Запуск
+## Запуск за 5 минут
+
+**Docker (всё сразу):** сервис + заглушки Mock ML и Mock ТОиР из `vendor/neurodvs_mock`.
 
 ```sh
-cp .env.example .env   # вписать ключ
-make setup             # зависимости и git-хуки — один раз после клона
-make run               # http://localhost:8000
+cp .env.example .env          # ключи модели пока не нужны
+docker compose up --build     # http://localhost:8000 (заглушки — :8001 и :8002)
 ```
 
-Или в Docker: `docker compose up --build`.
+**Без Docker** (нужен [uv](https://docs.astral.sh/uv/)):
+
+```sh
+cp .env.example .env
+make setup                    # зависимости и git-хуки — один раз после клона
+make mocks                    # терминал 1: Mock ML :8001 и Mock ТОиР :8002
+make run                      # терминал 2: http://localhost:8000
+```
+
+С телефона: откройте `http://<IP компьютера в той же сети>:8000` или ссылку превью из PR.
+Сценарий: машина → проверка из истории → «Получить результат диагностики» → карточка вердикта.
 
 ## Проверки
 

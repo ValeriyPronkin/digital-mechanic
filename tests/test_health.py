@@ -24,4 +24,4 @@ def test_health_hides_key(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_index_page() -> None:
     resp = client.get("/")
     assert resp.status_code == 200
-    assert "Сервис запущен" in resp.text
+    assert "Цифровой механик" in resp.text
