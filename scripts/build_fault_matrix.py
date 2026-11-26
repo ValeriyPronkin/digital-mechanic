@@ -23,6 +23,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from matrix_enrich import REPORT as PARTS_REPORT
+from matrix_enrich import enrich, load_pages
+from matrix_enrich import report as parts_report
 from service.fault_matrix import Cell, Ref, verify_cell
 from service.manuals.catalog import ENGINES
 from service.manuals.index import Fragment, index_dir, load_fragments
@@ -285,6 +288,8 @@ def main() -> int:
     args = ap.parse_args()
     path = index_dir()
     cells, problems = build(path)
+    cells, more = enrich(cells, load_pages())  # запчасти с обозначениями и инструмент (issue #10, п. 2)
+    problems += more
     passport = json.loads((path / "passport.json").read_text(encoding="utf-8"))
     OUT.write_text(
         json.dumps(
@@ -300,6 +305,7 @@ def main() -> int:
         + "\n",
         encoding="utf-8",
     )
+    PARTS_REPORT.write_text(parts_report(cells), encoding="utf-8")
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(report(cells, problems), encoding="utf-8")
     rep = args.report.relative_to(ROOT)

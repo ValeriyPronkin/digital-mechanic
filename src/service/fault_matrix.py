@@ -36,16 +36,34 @@ class Ref:
     page: int
     quote: str
     what: str = ""  # для страниц: проверка / регулировка / ремонт / нормы / неисправности / устройство
+    designation: str = ""  # запчасть: каталожное обозначение — стоит в самой цитате (строка перечня)
+    tools: list[str] = field(default_factory=list)  # работа: инструмент, как его называет страница (дословно)
 
     @classmethod
     def from_json(cls, d: dict[str, Any]) -> Ref:
-        return cls(doc=str(d["doc"]), page=int(d["page"]), quote=str(d["quote"]), what=str(d.get("what", "")))
+        return cls(
+            doc=str(d["doc"]),
+            page=int(d["page"]),
+            quote=str(d["quote"]),
+            what=str(d.get("what", "")),
+            designation=str(d.get("designation", "")),
+            tools=[str(t) for t in d.get("tools") or []],
+        )
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = {"doc": self.doc, "page": self.page, "quote": self.quote}
         if self.what:
             out["what"] = self.what
+        if self.designation:
+            out["designation"] = self.designation
+        if self.tools:
+            out["tools"] = list(self.tools)
         return out
+
+    @property
+    def part_name(self) -> str:
+        """Запчасть без обозначения (обозначение — в конце цитаты строки перечня)."""
+        return self.quote.replace(self.designation, "").strip(" .,;") if self.designation else self.quote
 
 
 @dataclass
@@ -131,10 +149,16 @@ def ref_problem(ref: Ref, engine: str, page_text: PageText | None) -> str | None
         return f"{ref.doc}: страницы {ref.page} нет (в PDF {doc.pages})"
     if not ref.quote.strip():
         return "пустая цитата"
+    if ref.designation and normalize(ref.designation) not in normalize(ref.quote):
+        return f"{ref.doc}:{ref.page}: обозначения {ref.designation} нет в цитате"
     if page_text is not None:
         text = page_text(ref.doc, ref.page)
         if text is None or normalize(ref.quote) not in normalize(text):
             return f"{ref.doc}:{ref.page}: цитаты нет на странице"
+        page = normalize(text)
+        missing = [t for t in ref.tools if normalize(t) not in page]
+        if missing:
+            return f"{ref.doc}:{ref.page}: инструмента нет на странице: {', '.join(missing)}"
     return None
 
 
@@ -218,9 +242,11 @@ def card_explanation(code: str, engine: str) -> dict[str, Any] | None:
     def ref(r: Ref) -> dict[str, Any]:
         doc = DOCS_BY_ID[r.doc]
         url = f"/manuals/{r.doc}#page={r.page}"
-        out = {"text": r.quote, "manual": doc.designation, "pdf_page": r.page, "url": url}
+        out: dict[str, Any] = {"text": r.quote, "manual": doc.designation, "pdf_page": r.page, "url": url}
         if r.what:
             out["what"] = r.what
+        if r.tools:
+            out["tools"] = list(r.tools)
         return out
 
     if cell.status != "confirmed":
@@ -231,5 +257,8 @@ def card_explanation(code: str, engine: str) -> dict[str, Any] | None:
         "pages": [ref(p) for p in cell.pages],
         "steps": [ref(o) for o in cell.operations],
         "safety": [ref(x) for x in cell.safety],
+        "parts": [
+            {**ref(p), "text": p.part_name, "designation": p.designation} for p in cell.spare_parts if p.designation
+        ],
         "note": cell.note,
     }

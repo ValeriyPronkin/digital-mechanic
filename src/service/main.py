@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from service import IMPORT_STARTED, INSTANCE_ID, __version__, conv_state, kb_store, passport, stand_log
+from service import parts_supplier as parts_supplier_mod
 from service.agent import Agent, Level
 from service.clients import MLClient, ServiceError, ToirClient
 from service.fault_matrix import card_explanation
@@ -211,6 +212,21 @@ def manuals_index_status() -> dict[str, Any]:
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
     return INDEX_HTML.read_text(encoding="utf-8")
+
+
+@lru_cache(maxsize=1)
+def parts_supplier() -> parts_supplier_mod.PartsSupplier:
+    return parts_supplier_mod.from_env()
+
+
+@app.get("/api/parts")
+def parts_lookup(q: str) -> dict[str, Any]:
+    """Поставщик запчастей по обозначению или наименованию: наличие, цена, срок — если поставщик подключён
+    (PARTS_SUPPLIER=csv|http); по умолчанию — «каталог не подключён» (STUB: parts-catalog)."""
+    query = q.strip()[:120]
+    if not query:
+        raise HTTPException(status_code=422, detail="Пустой запрос.")
+    return {"query": query, **parts_supplier().find(query).public()}
 
 
 @app.get("/api/vehicles")

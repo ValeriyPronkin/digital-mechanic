@@ -1,0 +1,10 @@
+{
+ "_comment": "Пример настроек HTTP API поставщика (PARTS_SUPPLIER=http, PARTS_SUPPLIER_CONFIG=этот файл). Адрес вымышленный; секреты — в .env, здесь только имя переменной (env:…).",
+ "kind": "http",
+ "url": "https://supplier.example/api/search?q={query}",
+ "items_key": "items",
+ "supplier": "Поставщик (пример)",
+ "headers": {"Authorization": "env:PARTS_SUPPLIER_TOKEN"},
+ "timeout_s": 10,
+ "fields": {"designation": "article", "name": "title", "available": "stock", "price_rub": "price", "lead_days": "delivery_days", "url": "link"}
+}
