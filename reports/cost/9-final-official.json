@@ -1,0 +1,97 @@
+{
+ "label": "9-final-official",
+ "at": "2026-11-26 16:16",
+ "repeat": 2,
+ "provider": "deepseek",
+ "model": "deepseek-chat",
+ "scenarios": {
+  "С1": {
+   "title": "Отклонение → объяснение → заявка (F02, ЯМЗ-536)",
+   "rub": 0.0858,
+   "rub_llm": 0.0857,
+   "llm_calls": 3.0,
+   "llm_ms": 4683,
+   "tokens_in": 9656,
+   "tokens_cached": 8128,
+   "tokens_out": 444,
+   "problems": []
+  },
+  "С2": {
+   "title": "Диалог по ТЗ: «Можно ли своим ходом перегнать машину на базу?» (F02, ЯМЗ-536)",
+   "rub": 0.0505,
+   "rub_llm": 0.0503,
+   "llm_calls": 1.0,
+   "llm_ms": 1829,
+   "tokens_in": 2679,
+   "tokens_cached": 1856,
+   "tokens_out": 294,
+   "problems": []
+  },
+  "Нр": {
+   "title": "Норма: вопрос механика (ЯМЗ-536)",
+   "rub": 0.0102,
+   "rub_llm": 0.0102,
+   "llm_calls": 1.0,
+   "llm_ms": 796,
+   "tokens_in": 1664,
+   "tokens_cached": 1408,
+   "tokens_out": 32,
+   "problems": []
+  },
+  "С3": {
+   "title": "Сбой проверки + инъекция в описании (ЗМЗ)",
+   "rub": 0.0131,
+   "rub_llm": 0.0131,
+   "llm_calls": 1.0,
+   "llm_ms": 1113,
+   "tokens_in": 1732,
+   "tokens_cached": 1536,
+   "tokens_out": 76,
+   "problems": []
+  },
+  "Р1": {
+   "title": "Вопрос по руководству: тепловой зазор (F01, ЯМЗ-536)",
+   "rub": 0.0753,
+   "rub_llm": 0.0751,
+   "llm_calls": 1.5,
+   "llm_ms": 2374,
+   "tokens_in": 4485,
+   "tokens_cached": 3136,
+   "tokens_out": 407,
+   "problems": []
+  },
+  "Н1": {
+   "title": "Несовместимый код: бензин на дизеле (ЯМЗ-536)",
+   "rub": 0.0139,
+   "rub_llm": 0.0139,
+   "llm_calls": 1.0,
+   "llm_ms": 1335,
+   "tokens_in": 1749,
+   "tokens_cached": 1536,
+   "tokens_out": 80,
+   "problems": []
+  },
+  "Г1": {
+   "title": "Голосовой вопрос (как С1, вопрос 1; распознавание и синтез — оценка, голос — #14)",
+   "rub": 0.7009,
+   "rub_llm": 0.0343,
+   "llm_calls": 1.0,
+   "llm_ms": 1966,
+   "tokens_in": 2831,
+   "tokens_cached": 2688,
+   "tokens_out": 298,
+   "problems": []
+  },
+  "К1": {
+   "title": "Повторный вопрос: тот же вопрос, двигатель и результат проверки (кэш ответов)",
+   "rub": 0.0,
+   "rub_llm": 0.0,
+   "llm_calls": 0.0,
+   "llm_ms": 0,
+   "tokens_in": 0,
+   "tokens_cached": 0,
+   "tokens_out": 0,
+   "problems": []
+  }
+ }
+}

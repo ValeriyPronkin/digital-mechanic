@@ -1,4 +1,4 @@
-.PHONY: setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost index kb-publish kb-fetch
+.PHONY: setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch
 
 PORT ?= 8000
 
@@ -38,6 +38,10 @@ kb-publish: install
 ## Проверить выкладку: скачать index/LATEST из бакета в каталог KB_OUT (по умолчанию .state/kb-check)
 kb-fetch: install
 	uv run $(if $(wildcard .env),--env-file .env,) python -m service.kb_store fetch --out $(or $(KB_OUT),.state/kb-check)
+
+## Шаблон организаторов по замеру: reports/cost-template-<замер>.xlsx (шаблон — COST_TEMPLATE, в git не входит)
+cost-xlsx: install
+	uv run python scripts/cost_xlsx.py $(if $(XLSX_LABEL),--label $(XLSX_LABEL),)
 
 ## Всё, что проверяет CI, кроме смоука в Docker. Зелёный = код возврата 0.
 check: lint types test stubs third-party secrets
