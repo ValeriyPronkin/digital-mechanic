@@ -101,6 +101,9 @@ class Store:
             cols = {r[1] for r in self._db.execute("PRAGMA table_info(tickets)")}
             if "fingerprint" not in cols:  # база от S2
                 self._db.execute("ALTER TABLE tickets ADD COLUMN fingerprint TEXT")
+            for col in ("outcome", "outcome_note", "urgency_proposed"):  # исход дефектовки (интерфейс v2, #52)
+                if col not in cols:
+                    self._db.execute(f"ALTER TABLE tickets ADD COLUMN {col} TEXT")
 
     def _exec(self, sql: str, args: tuple[Any, ...] = ()) -> None:
         with self._lock:
@@ -204,6 +207,25 @@ class Store:
                 fingerprint,
             ),
         )
+
+    def tickets(self, vehicle_id: str | None = None) -> list[dict[str, Any]]:
+        """Заявки (новые сверху) с исходом дефектовки — для интерфейса v2 и выгрузки outcomes.csv."""
+        if vehicle_id is None:
+            return self._rows("SELECT * FROM tickets ORDER BY id DESC")
+        return self._rows("SELECT * FROM tickets WHERE vehicle_id=? ORDER BY id DESC", (vehicle_id,))
+
+    def ticket(self, pk: int) -> dict[str, Any] | None:
+        rows = self._rows("SELECT * FROM tickets WHERE id=?", (pk,))
+        return rows[0] if rows else None
+
+    def set_outcome(self, pk: int, outcome: str, note: str | None) -> None:
+        if note is None:
+            self._exec("UPDATE tickets SET outcome=? WHERE id=?", (outcome, pk))
+        else:
+            self._exec("UPDATE tickets SET outcome=?, outcome_note=? WHERE id=?", (outcome, note or None, pk))
+
+    def set_urgency_proposed(self, ticket_id: str, urgency: str) -> None:
+        self._exec("UPDATE tickets SET urgency_proposed=? WHERE ticket_id=?", (urgency, ticket_id))
 
     def vehicle_memory(self, vehicle_id: str, limit: int = 10) -> dict[str, list[dict[str, Any]]]:
         views = self._rows(
