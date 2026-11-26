@@ -92,3 +92,24 @@ def test_agent_reads_page_and_cites_it(
     assert tool_msgs and [p["source"] for p in tool_msgs[0]["pages"]] == ["R1", "R2"]
     assert "4,0" in reply.text  # цифра со страницы проходит проверку
     assert {(s["manual"], int(s["pdf_page"])) for s in reply.sources} == {(DOC.designation, 10)}
+
+
+def test_other_variant_page_confirms_no_numbers(
+    ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from service.agent import Source
+
+    monkeypatch.setenv("SEARCH_ENGINE", "nikita")
+    vid = next(v.vehicle_id for v in fleet().vehicles if canonical_engine(v.engine_model) == "ЗМЗ-40904.10")
+    sid = next(v for v in fleet().vehicles if v.vehicle_id == vid).sessions[0].session_id
+    ag, _ = make_agent([], ml, toir)
+    conv = ag.start(vid, sid)
+    for ref, page, t in (("R1", 68, 15), ("R2", 66, 30)):  # стр. 68 — раздел ЗМЗ-40905.10, стр. 66 — общая
+        conv.sources[ref] = Source(
+            ref=ref, manual_id="zmz-409-rk", manual="РК", pdf_page=page, section="", text=f"до −{t} °С"
+        )
+    text, *_ = ag.guard(conv, "Зимой до −15 °С [R1]. Летом до −30 °С [R2].")
+    assert "15 °С" not in text and "30 °С" in text
+    monkeypatch.delenv("SEARCH_ENGINE")
+    text, *_ = ag.guard(conv, "Зимой до −15 °С [R1].")
+    assert "15 °С" in text  # наш поиск — как раньше

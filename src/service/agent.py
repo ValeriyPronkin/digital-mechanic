@@ -1004,8 +1004,17 @@ class Agent:
     def _allowed_numbers(self, conv: Conversation, cited: list[Source]) -> set[str]:
         allowed = self._context_numbers(conv)
         for src in cited:
-            allowed |= numbers(src.text)
+            if not self._other_variant(conv, src):
+                allowed |= numbers(src.text)
         return allowed
+
+    def _other_variant(self, conv: Conversation, src: Source) -> bool:
+        """Как _has в app/verify.py Никиты: страница другой модификации двигателя (registry/page_scope.yaml) читается
+        по номеру, но цифр не подтверждает. Только при SEARCH_ENGINE=nikita."""
+        if search_engine() != "nikita":
+            return False
+        engine = canonical_engine(conv.vehicle.engine_model) or conv.vehicle.engine_model
+        return nk_pages.other_variant(engine, src.manual_id, src.pdf_page) is not None
 
     def _context_numbers(self, conv: Conversation) -> set[str]:
         """Цифры-факты из кода и данных: карточка ТС, проверки этой машины, найденные документы.
