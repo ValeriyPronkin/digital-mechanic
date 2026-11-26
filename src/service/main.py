@@ -57,7 +57,8 @@ def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "version": __version__,
-        "llm_key_present": bool(os.environ.get("LLM_API_KEY")),
+        "llm_key_present": any(os.environ.get(k) for k in ("DEEPSEEK_API_KEY", "GIGACHAT_CREDENTIALS", "LLM_API_KEY")),
+        "llm_provider": os.environ.get("LLM_PROVIDER", "deepseek"),
     }
 
 

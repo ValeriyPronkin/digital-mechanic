@@ -314,3 +314,24 @@ def test_fleet_summary(ml: MLClient, toir: ToirClient) -> None:
     ag.ask(ag.start(*ANOMALY), "как парк?")
     result = json.loads(llm.seen[-1][-1]["content"])
     assert result["vehicles"] == 50 and sum(result["last_check_status"].values()) == 50
+
+
+def test_list_markers_survive_number_check(ml: MLClient, toir: ToirClient) -> None:
+    text = "Проверки:\n1. Замерьте давление: не менее 0,1 МПа [R1].\n2. Проверьте датчик.\n- Осмотрите насос."
+    ag, _ = make_agent([call("search_manual", query="давление"), say(text)], ml, toir)
+    reply = ag.ask(ag.start(*ANOMALY), "?")
+    assert "1. Замерьте давление" in reply.text and "2. Проверьте датчик." in reply.text
+    assert reply.notes == []
+
+
+def test_ticket_numbers_must_be_in_fragment(ml: MLClient, toir: ToirClient) -> None:
+    bad = {**DRAFT, "operations": ["Затянуть пробку моментом 45 Н·м"]}
+    good = {**DRAFT, "operations": ["Проверить, что давление на холостом ходу не менее 0,1 МПа"]}
+    steps = [call("search_manual", query="x"), call("draft_ticket", **bad), call("draft_ticket", **good), say("ок")]
+    ag, llm = make_agent(steps, ml, toir)
+    conv = ag.start(*ANOMALY)
+    reply = ag.ask(conv, "Оформи заявку")
+    results = [json.loads(m["content"]) for m in llm.seen[-1] if m["role"] == "tool"]
+    first_try = results[1]
+    assert "45" in first_try["refused"]
+    assert reply.draft is not None and "0,1 МПа" in reply.draft["body"]["operations"][0]
