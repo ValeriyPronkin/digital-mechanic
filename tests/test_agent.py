@@ -82,6 +82,7 @@ def make_agent(
     steps: list[Step], ml: MLClient, toir: ToirClient, search: Any = None, **kw: Any
 ) -> tuple[Agent, ScriptedLLM]:
     llm = ScriptedLLM(steps)
+    kw.setdefault("plan_search", False)  # план поиска (#28) — свой вызов модели; его проверяют отдельные тесты
     ag = Agent(llm, ml, toir, search or FixtureSearch(), Store(":memory:"), fleet(), **kw)
     return ag, llm
 
