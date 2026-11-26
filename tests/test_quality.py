@@ -127,7 +127,8 @@ def test_unsourced_diagnosis_is_marked(ml: MLClient, toir: ToirClient) -> None:
     answer = "Прогиб ремня 0,20…0,30 мм [R1].\nРемень здесь ни при чём: цокот в головках — это клапанный узел."
     text = _guarded(ml, toir, answer)
     assert "Прогиб ремня 0,20…0,30 мм [R1]." in text  # со ссылкой — как есть
-    assert f"это клапанный узел. {OPINION}" in text
+    # мнение — только общий совет: деталь из рассуждения модели не остаётся (приёмка v2)
+    assert "клапанный узел" not in text and f"дефектовка или специалист {OPINION}" in text
 
 
 def test_sourced_cause_is_kept_as_is(ml: MLClient, toir: ToirClient) -> None:
@@ -137,7 +138,7 @@ def test_sourced_cause_is_kept_as_is(ml: MLClient, toir: ToirClient) -> None:
 
 def test_unsourced_cause_in_list_is_marked(ml: MLClient, toir: ToirClient) -> None:
     text = _guarded(ml, toir, "Нажать на ветвь с усилием 40 Н [R1].\n- Скорее всего, ремень вытянулся.")
-    assert f"вытянулся. {OPINION}" in text
+    assert "вытянулся" not in text and f"дефектовка или специалист {OPINION}" in text
 
 
 def test_plain_steps_without_diagnosis_are_not_marked(ml: MLClient, toir: ToirClient) -> None:
@@ -242,3 +243,18 @@ def test_any_unsourced_card_sentence_is_replaced_by_code_line(ml: MLClient, toir
     answer = "Прогиб 7–12 мм [R1].\n\nПо карточке: отклонение по клапанному механизму, к ремням связи не даёт."
     reply = _ask_b418(ml, toir, BELT, answer, "Как проверить натяжение ремня")
     assert "связи не даёт" not in reply.text and reply.text.count("К найденной неисправности") == 1
+
+
+def test_opinion_with_work_part_or_number_is_cut(ml: MLClient, toir: ToirClient) -> None:
+    """Приёмка v2: под пометкой «мнение» — советы по деталям и цифры. Остаётся один общий совет."""
+    answer = ("Нажать на ветвь с усилием 40 Н [R1].\n"
+              "1. Скорее всего, люфт ротора турбины больше 0,5 мм — снимите патрубок и проверьте рукой.\n"
+              "2. Вероятно, изношен натяжитель — замените его.")  # fmt: skip
+    text = _guarded(ml, toir, answer)
+    assert "люфт ротора" not in text and "натяжитель" not in text and "0,5" not in text
+    assert text.count(OPINION) == 1 and "усилием 40 Н [R1]" in text
+
+
+def test_generic_opinion_advice_is_kept(ml: MLClient, toir: ToirClient) -> None:
+    text = _guarded(ml, toir, "Нажать на ветвь [R1].\nСкорее всего, нужна дефектовка у специалиста.")
+    assert "нужна дефектовка у специалиста" in text

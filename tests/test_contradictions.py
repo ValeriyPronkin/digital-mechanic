@@ -131,3 +131,11 @@ def test_known_quotes_are_on_their_pages_in_real_index() -> None:
     searcher = default_searcher()
     for k in known():
         assert len(verified_quotes(k, getattr(searcher, "page_text", None))) == len(k.quotes), k.id
+
+
+def test_value_in_same_line_as_timing_claim_survives(ml: MLClient, toir: ToirClient) -> None:
+    """Eval Q02: «Зазор 0,25–0,30 мм [R1]. Регулировать на холодном или через 15 мин» — значение остаётся."""
+    answer = "Зазор 0,25-0,30 мм [R1]. Ставить на холодном или не позже 15 мин после остановки.\n\n1. Снять крышки."
+    reply, _ = _ask(ml, toir, answer, question="Какой зазор на клапанах? На холодную или на горячую?")
+    first = reply.text.split("\n\n")[0]
+    assert "0,25-0,30 мм" in first and "не позже 15 мин" not in reply.text and "Регулировать на холодном" in first

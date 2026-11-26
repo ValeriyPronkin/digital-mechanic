@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from service import contradictions
+from service import absent_parts, contradictions
 from service.clients import (
     Diagnosis,
     MLClient,
@@ -97,7 +97,10 @@ operations и spare_parts — они подставятся из матрицы)
 8. Если в найденных фрагментах этого двигателя инструкции противоречат друг другу (цифры, условия, порядок) — \
 не выбирай одну как бесспорную: строка «Противоречие в документации:», затем каждая формулировка дословно в кавычках \
 «…» со ссылкой [R…], и совет уточнить у специалиста или производителя для модификации двигателя. Если в результате \
-поиска есть contradiction — блок с цитатами покажет код, а ответ строй на его выводе.
+поиска есть contradiction — блок с цитатами покажет код, а ответ строй на его выводе. \
+9. Фрагмент с context «испытания на стенде» — нормы и действия при обкатке и испытаниях двигателя на стенде после \
+ремонта (например, аварийная защита стенда), а не поведение машины в эксплуатации: так и скажи, не выдавай за норму \
+эксплуатации.
 
 Прямой вопрос (значение, как проверить или отрегулировать, порядок, чем мерить, что заменить, можно ли ехать) — \
 сначала прямой ответ: значение, как делать, ссылка [R…]; затем до 5 коротких шагов. Не пропускай ничего по сути \
@@ -224,6 +227,7 @@ class Source:
             "url": f"/manuals/{self.manual_id}#page={self.pdf_page}",
             # «Как в руководстве»: дословный фрагмент, который видела модель и с которым сверены цифры ответа.
             "quote": self.text,
+            "context": bench_context(self.manual_id, self.pdf_page),
             # Картинка страницы — только если PDF есть на этом сервере (на стенде PDF нет, D-9).
             "image": f"/manuals/{self.manual_id}/page/{self.pdf_page}.png" if manual_pdf(self.manual_id) else None,
         }
@@ -342,6 +346,12 @@ def leaks_prompt(text: str) -> bool:
     return False
 
 
+def _quote_label(q: Any) -> str:
+    doc = DOCS_BY_ID.get(q.doc)
+    short = _DOC_SHORT.get(q.doc.rsplit("-", 1)[-1], "")
+    return f"{short + ' — ' if short else ''}{doc.designation if doc else q.doc}, стр. {q.page}"
+
+
 OPINION_MARK = "(мнение помощника, не из руководства)"
 # Утверждение о причине или диагнозе (#28, проверка с телефона): без ссылки [R…] — рассуждение модели
 _DIAG = re.compile(
@@ -399,6 +409,70 @@ def _drop_card_sentences(text: str) -> str:
             out.append(ln)
         elif kept:
             out.append(prefix + " ".join(kept))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+
+
+@lru_cache(maxsize=1)
+def _bench_ranges() -> tuple[str, dict[str, list[tuple[int, int]]]]:
+    path = Path(__file__).resolve().parents[2] / "data" / "test_bench_pages.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data["label"], {d: [(int(a), int(b)) for a, b in r] for d, r in data["docs"].items()}
+
+
+def bench_context(manual_id: str, pdf_page: int) -> str | None:
+    """«испытания на стенде» — страница из раздела РК об обкатке и испытаниях после ремонта, иначе None."""
+    label, docs = _bench_ranges()
+    return label if any(a <= pdf_page <= b for a, b in docs.get(manual_id, [])) else None
+
+
+def _mark_bench(text: str, sources: dict[str, Any]) -> str:
+    """Строка со ссылкой на страницу стендовых испытаний — с пометкой: это не поведение машины в эксплуатации."""
+    bench = {ref for ref, s in sources.items() if bench_context(s.manual_id, s.pdf_page)}
+    if not bench:
+        return text
+    out = []
+    for ln in text.split("\n"):
+        if set(_REF.findall(ln)) & bench and "стенд" not in ln.lower():
+            ln = f"{ln.rstrip()} (испытания на стенде)"
+        out.append(ln)
+    return "\n".join(out)
+
+
+OPINION_GENERIC = f"Точную причину определит дефектовка или специалист {OPINION_MARK}."
+_GENERIC_ADVICE = re.compile(r"специалист|дефектовк|производител", re.I)
+
+
+def _restrict_opinions(text: str) -> str:
+    """«Мнение помощника» — только общий совет (специалист, дефектовка), без работ, деталей и цифр (приёмка v2:
+    под пометкой модель советовала работы с узлом, которого нет). Иное мнение — заменяется общим советом, один раз."""
+    out: list[str] = []
+    generic_used = False
+    for line in text.split("\n"):
+        if OPINION_MARK not in line:
+            out.append(line)
+            continue
+        mark = _LIST_MARK.match(line)
+        prefix = mark.group(0) if mark else ""
+        parts: list[str] = []
+        for part in _SENTENCE.split(line[len(prefix) :]):
+            if part.strip().startswith(OPINION_MARK) and parts:  # пометка после точки — к своей фразе
+                parts[-1] = f"{parts[-1].rstrip()} {part.strip()}"
+            else:
+                parts.append(part)
+        kept = []
+        for part in parts:
+            if not part or OPINION_MARK not in part:
+                kept.append(part)
+                continue
+            bare = part.replace(OPINION_MARK, "")
+            if _GENERIC_ADVICE.search(bare) and not _NUM.search(bare):
+                kept.append(part)
+            elif not generic_used:
+                kept.append(OPINION_GENERIC)
+                generic_used = True
+        body = " ".join(p for p in kept if p).strip()
+        if body:
+            out.append(prefix + body)
     return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
 
 
@@ -533,6 +607,9 @@ class Agent:
         # Уровень — приставкой к вопросу, а не системным сообщением: GigaChat принимает system только первым.
         conv.messages.append({"role": "user", "content": f"[{LEVEL_PROMPT[level]}]\n\n{mask_pii(question)}"})
         self._note_contradiction(conv, question)
+        absent = self._absent_reply(conv, question, request_id)
+        if absent is not None:  # узла у двигателя нет — ответ кода, без модели (ТЗ F4)
+            return absent
         cache_key = self._answer_cache_key(conv, question, level)
         if cache_key:
             hit = self.store.cached_answer(cache_key)
@@ -590,6 +667,7 @@ class Agent:
         final, grounded, notes, cited = self.guard(conv, text)
         final, cited, more = self._contradiction_text(conv, final, cited)
         notes += more
+        final = _mark_bench(final, conv.sources)
         if cache_key and conv.draft is None and final:
             self.store.save_answer(
                 cache_key,
@@ -779,6 +857,7 @@ class Agent:
         text = _fill_sources(text, cited)
         text = _drop_no_link_card_lines(text)
         text, opinions = _mark_opinions(text)
+        text = _restrict_opinions(text)
         if opinions:
             notes.append("Часть выводов — рассуждение помощника, а не руководство: они помечены.")
         if dropped:
@@ -925,6 +1004,40 @@ class Agent:
         if matrix is not None:
             out["manual_matrix"] = matrix
         return out
+
+    # ---- узел, которого у двигателя нет (ТЗ F4, приёмка «нет в руководстве») ----
+    def _absent_reply(self, conv: Conversation, question: str, request_id: str) -> AgentReply | None:
+        a = absent_parts.match(conv.vehicle.engine_model, question)
+        if a is None:
+            return None
+        quotes = absent_parts.verified(a, getattr(self.searcher, "page_text", None))
+        if not quotes:
+            return None
+        cited: list[Source] = []
+        for q in quotes:
+            src = self._source_for(conv, q.doc, q.page, a.part, q.quote)
+            if src not in cited:
+                cited.append(src)
+        refs = {(s.manual_id, s.pdf_page): s.ref for s in cited}
+        text = absent_parts.answer(conv.vehicle.engine_model, a, quotes, refs, _quote_label)
+        conv.messages.append({"role": "assistant", "content": text})
+        trace = {
+            "request_id": request_id,
+            "provider": self.provider.name,
+            "steps": [{"step": 0, "kind": "code", "name": "узла нет у двигателя", "ok": True, "ms": 0}],
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "tokens_cached": 0,
+            "cost_rub": 0.0,
+        }
+        return AgentReply(
+            text=text,
+            grounded=True,
+            notes=[f"У этого двигателя нет узла из вопроса — ответ по руководству, без советов модели ({a.id})."],
+            sources=[s.public() for s in cited],
+            draft=None,
+            trace=trace,
+        )
 
     # ---- противоречивые инструкции (требование заказчика, 26.11) ----
     def _note_contradiction(self, conv: Conversation, question: str) -> None:
@@ -1076,7 +1189,10 @@ class Agent:
                 shown = window
             else:
                 shown = make_quote(h.text, words, FRAGMENT_CHARS) or h.text[:FRAGMENT_CHARS]
-            out.append({"ref": existing.ref, "manual": h.manual, "section": h.section, "text": shown})
+            item = {"ref": existing.ref, "manual": h.manual, "section": h.section, "text": shown}
+            if ctx := bench_context(h.manual_id, h.pdf_page):
+                item["context"] = f"{ctx}: нормы обкатки и испытаний после ремонта, не эксплуатация машины"
+            out.append(item)
         lang = str(args.get("answer_language") or "")
         hint: dict[str, Any] = (
             {"answer_language": f"{lang}: ответь на языке вопроса; цифры, детали и ссылки [R…] — как в руководстве"}
