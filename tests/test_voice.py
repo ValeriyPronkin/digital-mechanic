@@ -238,10 +238,13 @@ def test_voice_prices_from_table(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.delenv("STT_PRICE_RUB_PER_15S", raising=False)
     monkeypatch.delenv("TTS_PRICE_RUB_PER_1M_CHARS", raising=False)
-    stt = price_table()["other"]["stt_sync"]["value"]
+    from service.store import ex_vat
+
+    stt = ex_vat(price_table()["other"]["stt_sync"]["value"], True)  # суммы — без НДС, как весь расчёт (#19)
     assert stt_cost_rub(3) == pytest.approx(stt) and stt_cost_rub(16) == pytest.approx(2 * stt)
-    tts = price_table()["other"]["tts"]["value"]
-    assert tts_cost_rub(1000) == pytest.approx((tts if tts is not None else TTS_RUB_PER_1M_UPPER) / 1000)
+    tts = ex_vat(price_table()["other"]["tts_v1"]["value"], True)  # голос синтезирует через API v1
+    assert tts == pytest.approx(TTS_RUB_PER_1M_UPPER / 1.22)
+    assert tts_cost_rub(1000) == pytest.approx(tts / 1000)
     monkeypatch.setenv("TTS_PRICE_RUB_PER_1M_CHARS", "200")
     assert tts_cost_rub(1000) == pytest.approx(0.2)
 

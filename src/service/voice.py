@@ -196,26 +196,28 @@ def speech_for(answer: str, sources: dict[str, Source]) -> Speech:
 # ---------- расход ----------
 
 
-# Тариф синтеза в data/prices.json пока не найден (вопрос #19): источники дают 183,05 и 1 342 ₽ за 1 млн символов.
-# До ответа журнал считает по верхней оценке — расход не занижается.
+# Синтез идёт через SpeechKit API v1 — тариф `tts_v1` в data/prices.json (официальная страница, #19).
+# Запасное значение — та же цена с НДС, если строки в таблице нет (расход не занижается).
 TTS_RUB_PER_1M_UPPER = 1342.0
 
 
 def stt_cost_rub(seconds: float) -> float:
     """Синхронное распознавание — блоками по 15 с; цена — `data/prices.json` (`STT_PRICE_RUB_PER_15S` перекрывает)."""
-    from service.store import price_table
+    from service.store import ex_vat, price_table
 
     blocks = max(1, int(np.ceil(seconds / 15)))
-    price = os.environ.get("STT_PRICE_RUB_PER_15S") or price_table()["other"]["stt_sync"]["value"] or 0.0
+    row = price_table()["other"]["stt_sync"]
+    price = os.environ.get("STT_PRICE_RUB_PER_15S") or ex_vat(float(row["value"]), bool(row.get("vat_included")))
     return blocks * float(price)
 
 
 def tts_cost_rub(chars: int) -> float:
     """Синтез — за символы; цена — `data/prices.json` (`TTS_PRICE_RUB_PER_1M_CHARS` перекрывает) или верхняя оценка."""
-    from service.store import price_table
+    from service.store import ex_vat, price_table
 
-    price = os.environ.get("TTS_PRICE_RUB_PER_1M_CHARS") or price_table()["other"]["tts"]["value"]
-    return chars * float(price if price is not None else TTS_RUB_PER_1M_UPPER) / 1_000_000
+    row = price_table()["other"].get("tts_v1") or {"value": TTS_RUB_PER_1M_UPPER, "vat_included": True}
+    price = os.environ.get("TTS_PRICE_RUB_PER_1M_CHARS") or ex_vat(float(row["value"]), bool(row.get("vat_included")))
+    return chars * float(price) / 1_000_000
 
 
 def timed(fn: Any, *args: Any) -> tuple[Any, int]:

@@ -104,6 +104,7 @@
   <header>
     <button id="back" hidden aria-label="Назад">←</button>
     <h1 id="title">Цифровой механик</h1>
+    <a id="fleet-link" href="/fleet" style="color:#fff;text-decoration:none;padding:.5rem;min-height:44px;display:inline-flex;align-items:center">Парк →</a>
     <div class="lvl" role="group" aria-label="Как объяснять">
       <button id="lvl-expert" aria-pressed="false">Опытный</button>
       <button id="lvl-steps" aria-pressed="false">Пошагово</button>
@@ -164,7 +165,7 @@ function retryNote(where) {
 function showError(msg) { main.prepend(el("div", {class:"err", role:"alert"}, msg)); }
 
 function screenList(filter = "") {
-  current = null; selected = null; rerenderCard = null;
+  current = null; selected = null; rerenderCard = null; $("fleet-link").hidden = false;
   if (!getLevel()) { main.replaceChildren(askLevelBlock(() => screenList(filter))); $("actionbar").hidden = true; return; }
   $("title").textContent = "Цифровой механик"; $("back").hidden = true; $("actionbar").hidden = true;
   const q = filter.trim().toLowerCase();
@@ -190,6 +191,7 @@ async function openVehicle(id) {
   try { current = await api("/api/vehicles/" + encodeURIComponent(id)); }
   catch (e) { showError(e.message); return; }
   selected = current.sessions[0] ? current.sessions[0].session_id : null;
+  $("fleet-link").hidden = true;  // на экране машины в шапке — «←», госномер и уровень; «Парк» — со списка
   $("title").textContent = current.vehicle_id; $("back").hidden = false; $("actionbar").hidden = false;
   screenHistory();
   window.scrollTo(0, 0);
