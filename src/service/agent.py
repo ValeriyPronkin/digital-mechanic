@@ -62,6 +62,7 @@ SEARCH_PLAN_PROMPT = """Ты готовишь поиск по руководст
 Как пишут в руководствах: форсунка — также «инжектор»; «заменить на новое» — «одноразового использования», \
 «запасные части»; «можно ли ставить повторно» — «количество использования», «повторное использование не допускается»; \
 «чем мерить» — «приспособление», «щуп», «шаблон», «индикатор»; «порядок цилиндров» — «порядок работы цилиндров».
+Если упомянут стук, шум или вибрация — запросы про стуки и шумы двигателя и запрет эксплуатации до устранения.
 Если спрашивают, можно ли ехать, перегнать машину своим ходом или продолжать эксплуатацию, — запросы про аварийное \
 давление масла и сигнализатор, перегрев, когда немедленно остановить двигатель, запрет эксплуатации.
 Код неисправности проверки в запросы не добавляй, если вопрос не о ней."""
@@ -230,6 +231,7 @@ class AgentReply:
     sources: list[dict[str, Any]]
     draft: dict[str, Any] | None
     trace: dict[str, Any]
+    followup: dict[str, str] | None = None  # кнопка «к проверке по неисправности из карточки» (#28)
 
 
 # ---------- правила вокруг модели ----------
@@ -319,6 +321,22 @@ _DIAG = re.compile(
 )
 
 
+_CARD_ASK = re.compile(
+    r"что с двигател|что делать|что случил|что (?:это )?значит|почему|неисправност|диагноз|карточк", re.I
+)
+_DOC_SHORT = {"re": "РЭ", "rk": "РК"}
+
+
+def _short(op: str, limit: int = 110) -> str:
+    """Работа из матрицы — коротко: до запятой во второй половине лимита, без обрыва посреди слова."""
+    op = op.strip().rstrip(".;")
+    op = op[:1].lower() + op[1:]
+    if len(op) <= limit:
+        return op
+    cut = op.rfind(",", limit // 2, limit)
+    return op[:cut] if cut > 0 else op[: op.rfind(" ", 0, limit)] + "…"
+
+
 _CARD_LINE = re.compile(r"карточк|\bF\d{2}\b|по проверке|результат[а-я]* проверки", re.I)
 _NO_LINK = re.compile(r"не относ|не указыва|не связ|не называ|отдельн[аяое]+ тем|ни при ч[её]м|не имеет отношени", re.I)
 
@@ -326,10 +344,32 @@ _NO_LINK = re.compile(r"не относ|не указыва|не связ|не �
 def _drop_no_link_card_lines(text: str) -> str:
     """Связь с карточкой — только если руководство её называет: строка о карточке без ссылки, которая говорит
     об отсутствии связи, убирается (проверка с телефона, #28)."""
-    keep = [
-        ln for ln in text.split("\n") if not (_CARD_LINE.search(ln) and _NO_LINK.search(ln) and not _REF.search(ln))
-    ]
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(keep)).strip()
+    out = []
+    for ln in text.split("\n"):  # по предложениям: такая фраза бывает в одной строке с фразой со ссылкой
+        mark = _LIST_MARK.match(ln)
+        prefix = mark.group(0) if mark else ""
+        parts = [p for p in _SENTENCE.split(ln[len(prefix) :]) if p]
+        kept = [p for p in parts if not (_CARD_LINE.search(p) and _NO_LINK.search(p) and not _REF.search(p))]
+        if not parts:
+            out.append(ln)
+        elif kept:
+            out.append(prefix + " ".join(kept))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+
+
+def _drop_card_sentences(text: str) -> str:
+    """Фразы модели о карточке без ссылки — убрать: связь строит код по матрице."""
+    out = []
+    for ln in text.split("\n"):
+        mark = _LIST_MARK.match(ln)
+        prefix = mark.group(0) if mark else ""
+        parts = [p for p in _SENTENCE.split(ln[len(prefix) :]) if p]
+        kept = [p for p in parts if not (_CARD_LINE.search(p) and not _REF.search(p))]
+        if not parts:
+            out.append(ln)
+        elif kept:
+            out.append(prefix + " ".join(kept))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
 
 
 def _mark_opinions(text: str) -> tuple[str, int]:
@@ -463,7 +503,7 @@ class Agent:
         if cache_key:
             hit = self.store.cached_answer(cache_key)
             if hit is not None:
-                return self._reply_from_cache(conv, hit, request_id)
+                return self._reply_from_cache(conv, hit, request_id, question)
         if self.prefetch:
             self._prefetch(conv, question, request_id, steps)
         text = ""
@@ -537,6 +577,7 @@ class Agent:
                     ],
                 },
             )  # fmt: skip
+        final, followup = self._card_link(conv, question, cited, final)
         calls = self.store.llm_calls(request_id)
         trace = {
             "request_id": request_id,
@@ -554,7 +595,36 @@ class Agent:
             sources=[s.public() for s in cited],
             draft=conv.draft.public() if conv.draft else None,
             trace=trace,
+            followup=followup,
         )
+
+    # ---- связь вопроса с неисправностью из карточки — кодом по матрице (#28) ----
+    def _card_link(
+        self, conv: Conversation, question: str, cited: list[Source], text: str
+    ) -> tuple[str, dict[str, str] | None]:
+        """Прямой вопрос не про найденную неисправность: страницы ответа не входят в ячейку «код × двигатель» —
+        строка с работами из ячейки и кнопка к этой проверке. Строит код, а не модель (рассуждения модели о связи
+        убирает guard)."""
+        card = conv.card
+        if card is None or card.status != "anomaly" or not card.compatible or not card.fault_code or not cited:
+            return text, None
+        if _CARD_ASK.search(question) or _TICKET_ASK.search(question):
+            return text, None
+        cell = cell_for(card.fault_code, conv.vehicle.engine_model)
+        if cell is None or cell.status != "confirmed":
+            return text, None
+        cell_pages = {(r.doc, r.page) for r in [*cell.pages, *cell.operations]}
+        if any((s.manual_id, s.pdf_page) in cell_pages for s in cited):
+            return text, None
+        title = card.fault_title or card.fault_code
+        ops = "; ".join(_short(o.quote) for o in cell.operations[:3])
+        refs = sorted({(r.doc, r.page) for r in [*cell.pages[:2], *cell.operations[:3]]})
+        pages = ", ".join(f"{p} ({_DOC_SHORT.get(d.rsplit('-', 1)[-1], d)})" for d, p in refs)
+        line = f"К найденной неисправности это не относится. По руководству при «{title}»: {ops} — стр. {pages}."
+        text = _drop_card_sentences(text)  # о карточке — одна строка, и её пишет код
+        followup = {"label": f"Проверка по «{title}»",
+                    "question": f"Что проверить по неисправности {card.fault_code} «{title}»?"}  # fmt: skip
+        return f"{text.rstrip()}\n\n{line}", followup
 
     # ---- кэш ответов (issue #16) ----
     def _answer_cache_key(self, conv: Conversation, question: str) -> str | None:
@@ -583,7 +653,9 @@ class Agent:
         ]
         return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
 
-    def _reply_from_cache(self, conv: Conversation, hit: dict[str, Any], request_id: str) -> AgentReply:
+    def _reply_from_cache(
+        self, conv: Conversation, hit: dict[str, Any], request_id: str, question: str = ""
+    ) -> AgentReply:
         cited = []
         for s in hit["sources"]:
             src = Source(
@@ -596,7 +668,8 @@ class Agent:
             )
             conv.sources[src.ref] = src
             cited.append(src)
-        conv.messages.append({"role": "assistant", "content": hit["text"]})
+        text, followup = self._card_link(conv, question, cited, hit["text"])
+        conv.messages.append({"role": "assistant", "content": text})
         trace = {
             "request_id": request_id,
             "provider": self.provider.name,
@@ -608,12 +681,13 @@ class Agent:
             "cache": True,
         }
         return AgentReply(
-            text=hit["text"],
+            text=text,
             grounded=hit["grounded"],
             notes=hit["notes"],
             sources=[s.public() for s in cited],
             draft=None,
             trace=trace,
+            followup=followup,
         )
 
     def check_budget(self) -> None:
