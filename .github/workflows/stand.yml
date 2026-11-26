@@ -1,0 +1,153 @@
+# Стенд для жюри: постоянный URL из main в Yandex Cloud Serverless Containers.
+# Push в main (или ручной запуск) → образ → ревизия контейнера stand-<репозиторий> → проверка /health
+# → ссылка в сводке запуска. Контейнер не удаляется: URL не меняется между деплоями.
+# Сроки хакатона: работает с 28.11 10:00 до 23:59 3.12; до 15.12 — поднять за 24 ч по запросу
+# (Actions → Stand → Run workflow).
+# Переменные приложения (ключи моделей) — секрет APP_ENV, строки KEY=VALUE; в логи не печатаются.
+# Без переменной YC_REGISTRY_ID job пропускается, CI не краснеет.
+name: Stand
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+  workflow_dispatch:
+    inputs:
+      min_instances:
+        description: "Тёплые экземпляры (1 — на время питча, без холодного старта; 0 — экономия)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# Деплои стенда идут по одному, свежий не отменяет начатый.
+concurrency:
+  group: stand
+  cancel-in-progress: false
+
+env:
+  YC_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
+  YC_REGISTRY_ID: ${{ vars.YC_REGISTRY_ID }}
+  YC_SA_ID: ${{ vars.YC_SA_ID }}
+  # Ответ агента бывает дольше 30 с превью: даём 120 с.
+  STAND_TIMEOUT: ${{ vars.STAND_TIMEOUT || '120s' }}
+  STAND_MEMORY: ${{ vars.STAND_MEMORY || '1GB' }}
+  STAND_MIN_INSTANCES: ${{ inputs.min_instances || vars.STAND_MIN_INSTANCES || '0' }}
+
+jobs:
+  deploy:
+    name: Стенд — деплой
+    if: vars.YC_REGISTRY_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Имя контейнера
+        run: |
+          set -eu
+          # Имя в Yandex Cloud: строчные буквы, цифры, дефис, до 63 символов.
+          NAME="stand-$(printf '%s' "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | cut -c1-56)"
+          NAME="${NAME%-}"
+          echo "CONTAINER_NAME=$NAME" >> "$GITHUB_ENV"
+          echo "Контейнер: $NAME"
+
+      - name: Ключ сервисного аккаунта во временный файл
+        env:
+          YC_SA_JSON_CREDENTIALS: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
+        run: |
+          set -eu
+          umask 077
+          KEY_FILE="$RUNNER_TEMP/yc-sa-key.json"
+          printf '%s' "$YC_SA_JSON_CREDENTIALS" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          echo "KEY_FILE=$KEY_FILE" >> "$GITHUB_ENV"
+
+      - name: Установить и настроить yc CLI
+        run: |
+          set -eu
+          curl -sSfL https://storage.yandexcloud.net/yandexcloud-yc/install.sh -o "$RUNNER_TEMP/yc-install.sh"
+          bash "$RUNNER_TEMP/yc-install.sh" -i "$HOME/yandex-cloud" -n
+          echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
+          YC="$HOME/yandex-cloud/bin/yc"
+          "$YC" config profile create stand >/dev/null
+          "$YC" config set service-account-key "$KEY_FILE"
+          "$YC" config set folder-id "$YC_FOLDER_ID"
+          "$YC" version
+
+      - name: Сборка и push образа
+        run: |
+          set -eu
+          IMAGE="cr.yandex/${YC_REGISTRY_ID}/service:stand-$(printf '%s' "$GITHUB_SHA" | cut -c1-7)"
+          docker login --username json_key --password-stdin cr.yandex < "$KEY_FILE"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Деплой ревизии контейнера
+        env:
+          APP_ENV: ${{ secrets.APP_ENV }}
+        run: |
+          set -eu
+          if ! yc serverless container get --name "$CONTAINER_NAME" >/dev/null 2>&1; then
+            yc serverless container create --name "$CONTAINER_NAME"
+          fi
+          # Переменные приложения: каждая строка KEY=VALUE — отдельный флаг --environment (yc сливает их).
+          # Запятая в значении ломает разбор yc — такие значения не класть.
+          set --
+          if [ -n "${APP_ENV:-}" ]; then
+            while IFS= read -r line || [ -n "$line" ]; do
+              line="${line%$'\r'}"
+              case "$line" in ''|'#'*) continue ;; esac
+              case "$line" in *=*) set -- "$@" --environment "$line" ;; *) echo "APP_ENV: строка без '=' пропущена" >&2 ;; esac
+            done <<< "$APP_ENV"
+          fi
+          yc serverless container revision deploy \
+            --container-name "$CONTAINER_NAME" \
+            --image "$IMAGE" \
+            --service-account-id "$YC_SA_ID" \
+            --memory "$STAND_MEMORY" \
+            --cores 1 \
+            --execution-timeout "$STAND_TIMEOUT" \
+            --min-instances "$STAND_MIN_INSTANCES" \
+            "$@" >/dev/null
+          yc serverless container allow-unauthenticated-invoke --name "$CONTAINER_NAME"
+          URL=$(yc serverless container get --name "$CONTAINER_NAME" --format json | jq -r '.url')
+          if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+            echo "Не получили url контейнера $CONTAINER_NAME" >&2
+            exit 1
+          fi
+          URL="${URL%/}/"
+          echo "STAND_URL=$URL" >> "$GITHUB_ENV"
+          echo "Стенд: $URL"
+
+      - name: Проверка /health
+        run: |
+          set -eu
+          i=0
+          until HEALTH=$(curl -fsS --max-time 30 "${STAND_URL}health"); do
+            i=$((i + 1))
+            if [ "$i" -ge 12 ]; then
+              echo "stand: ${STAND_URL}health не ответил 200" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          case "$HEALTH" in
+            *'"status"'*) echo "stand: /health ок" ;;
+            *) echo "stand: в ответе /health нет status" >&2; exit 1 ;;
+          esac
+          {
+            echo "### 🟢 Стенд"
+            echo
+            echo "- Сервис: ${STAND_URL}"
+            echo "- Здоровье: ${STAND_URL}health"
+            echo "- Коммит: \`$(printf '%s' "$GITHUB_SHA" | cut -c1-7)\` · контейнер \`${CONTAINER_NAME}\` · тёплых экземпляров: ${STAND_MIN_INSTANCES}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Убрать ключ
+        if: always()
+        run: rm -f "$RUNNER_TEMP/yc-sa-key.json"

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Запрещает push в main (защита веток GitHub недоступна в приватном репо на бесплатном плане).
+# Обойти осознанно: git push --no-verify
+while read local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master)
+      echo "pre-push: push в ${remote_ref#refs/heads/} запрещён — сливайте через PR при зелёном CI." >&2
+      exit 1 ;;
+  esac
+done
+exit 0

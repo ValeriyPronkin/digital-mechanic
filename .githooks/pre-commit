@@ -1,0 +1,4 @@
+#!/bin/sh
+# Секретов нет в git (CONSTRAINTS): gitleaks по индексу перед каждым коммитом.
+command -v gitleaks >/dev/null 2>&1 || { echo "pre-commit: нужен gitleaks (brew install gitleaks)" >&2; exit 1; }
+exec gitleaks git --staged --no-banner --redact

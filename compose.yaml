@@ -1,0 +1,17 @@
+services:
+  api:
+    build: .
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      # Ключи берутся из .env (docker compose читает его сам); в образ не попадают.
+      LLM_API_KEY: ${LLM_API_KEY:-}
+    # Данные заказчика монтировать только на чтение, например:
+    # volumes:
+    #   - ./task/data:/data/source:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      start_period: 30s
+      interval: 10s
+      timeout: 3s
+      retries: 3

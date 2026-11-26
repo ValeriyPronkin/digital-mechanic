@@ -1,0 +1,53 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make *)",
+      "Bash(uv *)",
+      "Bash(uv run *)",
+      "Bash(python3 *)",
+      "Bash(pytest *)",
+      "Bash(ruff *)",
+      "Bash(sqlite3 *)",
+      "Bash(curl -fsS localhost:*)",
+      "Bash(curl -s localhost:*)",
+      "Bash(kill *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git checkout *)",
+      "Bash(git switch *)",
+      "Bash(git branch *)",
+      "Bash(gitleaks *)",
+      "Bash(git push origin *)",
+      "Bash(git push -u origin *)",
+      "Bash(docker compose *)",
+      "Edit(./**)",
+      "Write(./**)"
+    ],
+    "deny": [
+      "Bash(git push origin main*)",
+      "Bash(git push -u origin main*)",
+      "Bash(git push origin HEAD:main*)",
+      "Bash(git push origin master*)",
+      "Bash(git push -u origin master*)",
+      "Bash(git push origin HEAD:master*)",
+      "Bash(git push origin +*)",
+      "Bash(git push origin :*)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f *)",
+      "Bash(git push * -f)",
+      "Bash(git push -f*)",
+      "Bash(git push --force*)",
+      "Bash(git push * --delete*)",
+      "Bash(git push * --mirror*)",
+      "Bash(git push * --no-verify*)",
+      "Bash(git reset --hard*)",
+      "Bash(rm -rf *)",
+      "Read(./.env)",
+      "Edit(./task/**)",
+      "Edit(./.claude/**)"
+    ]
+  }
+}

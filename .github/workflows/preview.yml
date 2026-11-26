@@ -1,0 +1,214 @@
+# Превью-деплой каждого PR в Yandex Cloud Serverless Containers .
+# Открыт/обновлён PR → образ в Container Registry → ревизия контейнера pr-<номер> → проверка /health
+# → комментарий со ссылкой (один на PR, обновляется). Закрыт/слит PR → контейнер удаляется.
+# Без переменной YC_REGISTRY_ID (Yandex Cloud не настроен) jobs пропускаются, CI не краснеет.
+# Ключ сервисного аккаунта — только из секрета во временный файл (chmod 600); set -x не включать.
+name: Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    # PR только с документацией превью не нужен: меньше писем и трат.
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# Один PR — одна очередь: деплой и удаление не идут параллельно.
+concurrency:
+  group: preview-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+env:
+  CONTAINER_NAME: pr-${{ github.event.pull_request.number }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  COMMENT_MARKER: "<!-- preview-deploy -->"
+  YC_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
+  YC_REGISTRY_ID: ${{ vars.YC_REGISTRY_ID }}
+  YC_SA_ID: ${{ vars.YC_SA_ID }}
+
+jobs:
+  deploy:
+    name: Превью — деплой
+    # PR из форков секретов не получают — пропускаем.
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository && vars.YC_REGISTRY_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ключ сервисного аккаунта во временный файл
+        env:
+          YC_SA_JSON_CREDENTIALS: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
+        run: |
+          set -eu
+          umask 077
+          KEY_FILE="$RUNNER_TEMP/yc-sa-key.json"
+          printf '%s' "$YC_SA_JSON_CREDENTIALS" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          echo "KEY_FILE=$KEY_FILE" >> "$GITHUB_ENV"
+
+      - name: Установить и настроить yc CLI
+        run: |
+          set -eu
+          curl -sSfL https://storage.yandexcloud.net/yandexcloud-yc/install.sh -o "$RUNNER_TEMP/yc-install.sh"
+          bash "$RUNNER_TEMP/yc-install.sh" -i "$HOME/yandex-cloud" -n
+          echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
+          YC="$HOME/yandex-cloud/bin/yc"
+          "$YC" config profile create preview >/dev/null
+          "$YC" config set service-account-key "$KEY_FILE"
+          "$YC" config set folder-id "$YC_FOLDER_ID"
+          "$YC" version
+
+      - name: Сборка и push образа
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          IMAGE="cr.yandex/${YC_REGISTRY_ID}/service:pr-${PR_NUMBER}-$(printf '%s' "$HEAD_SHA" | cut -c1-7)"
+          docker login --username json_key --password-stdin cr.yandex < "$KEY_FILE"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Деплой ревизии контейнера
+        run: |
+          set -eu
+          if ! yc serverless container get --name "$CONTAINER_NAME" >/dev/null 2>&1; then
+            yc serverless container create --name "$CONTAINER_NAME"
+          fi
+          yc serverless container revision deploy \
+            --container-name "$CONTAINER_NAME" \
+            --image "$IMAGE" \
+            --service-account-id "$YC_SA_ID" \
+            --memory 512MB \
+            --cores 1 \
+            --execution-timeout 30s
+          yc serverless container allow-unauthenticated-invoke --name "$CONTAINER_NAME"
+          URL=$(yc serverless container get --name "$CONTAINER_NAME" --format json | jq -r '.url')
+          if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+            echo "Не получили url контейнера $CONTAINER_NAME" >&2
+            exit 1
+          fi
+          URL="${URL%/}/"
+          echo "PREVIEW_URL=$URL" >> "$GITHUB_ENV"
+          echo "Превью: $URL"
+
+      - name: Проверка /health
+        run: |
+          set -eu
+          # Холодный старт контейнера — даём до ~2 минут.
+          i=0
+          until HEALTH=$(curl -fsS --max-time 30 "${PREVIEW_URL}health"); do
+            i=$((i + 1))
+            if [ "$i" -ge 12 ]; then
+              echo "preview: ${PREVIEW_URL}health не ответил 200" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "$HEALTH"
+          case "$HEALTH" in
+            *'"status"'*) echo "preview: /health ок" ;;
+            *) echo "preview: в ответе /health нет status" >&2; exit 1 ;;
+          esac
+          {
+            echo "HEALTH_JSON<<__HEALTH__"
+            echo "$HEALTH"
+            echo "__HEALTH__"
+          } >> "$GITHUB_ENV"
+
+      - name: Комментарий в PR со ссылкой
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          BODY_FILE="$RUNNER_TEMP/preview-comment.md"
+          {
+            echo "$COMMENT_MARKER"
+            echo "### 🔎 Превью PR #${PR_NUMBER}"
+            echo
+            echo "- Сервис: ${PREVIEW_URL}"
+            echo "- Здоровье: ${PREVIEW_URL}health"
+            echo "- Коммит: \`$(printf '%s' "$HEAD_SHA" | cut -c1-7)\` · образ \`${IMAGE##*/}\` · контейнер \`${CONTAINER_NAME}\`"
+            echo
+            echo "Ответ \`/health\` при деплое: \`${HEALTH_JSON}\`"
+            echo
+            echo "_Обновляется при каждом push; контейнер удаляется при закрытии PR._"
+          } > "$BODY_FILE"
+          jq -Rs '{body: .}' "$BODY_FILE" > "$BODY_FILE.json"
+          COMMENT_ID=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            --jq ".[] | select(.body | startswith(\"${COMMENT_MARKER}\")) | .id" | head -n1)
+          if [ -n "$COMMENT_ID" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" --input "$BODY_FILE.json" >/dev/null
+            echo "Комментарий обновлён: $COMMENT_ID"
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --input "$BODY_FILE.json" >/dev/null
+            echo "Комментарий создан"
+          fi
+
+      - name: Убрать ключ
+        if: always()
+        run: rm -f "$RUNNER_TEMP/yc-sa-key.json"
+
+  cleanup:
+    name: Превью — удаление
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository && vars.YC_REGISTRY_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Ключ сервисного аккаунта во временный файл
+        env:
+          YC_SA_JSON_CREDENTIALS: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
+        run: |
+          set -eu
+          umask 077
+          KEY_FILE="$RUNNER_TEMP/yc-sa-key.json"
+          printf '%s' "$YC_SA_JSON_CREDENTIALS" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          echo "KEY_FILE=$KEY_FILE" >> "$GITHUB_ENV"
+
+      - name: Установить и настроить yc CLI
+        run: |
+          set -eu
+          curl -sSfL https://storage.yandexcloud.net/yandexcloud-yc/install.sh -o "$RUNNER_TEMP/yc-install.sh"
+          bash "$RUNNER_TEMP/yc-install.sh" -i "$HOME/yandex-cloud" -n
+          echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
+          YC="$HOME/yandex-cloud/bin/yc"
+          "$YC" config profile create preview >/dev/null
+          "$YC" config set service-account-key "$KEY_FILE"
+          "$YC" config set folder-id "$YC_FOLDER_ID"
+
+      - name: Удалить контейнер PR
+        run: |
+          set -eu
+          if yc serverless container get --name "$CONTAINER_NAME" >/dev/null 2>&1; then
+            yc serverless container delete --name "$CONTAINER_NAME"
+            echo "Контейнер $CONTAINER_NAME удалён"
+          else
+            echo "Контейнера $CONTAINER_NAME нет — удалять нечего"
+          fi
+
+      - name: Отметить в комментарии PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          COMMENT_ID=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            --jq ".[] | select(.body | startswith(\"${COMMENT_MARKER}\")) | .id" | head -n1)
+          if [ -z "$COMMENT_ID" ]; then
+            echo "Комментария превью нет"
+            exit 0
+          fi
+          printf '%s\n### 🔎 Превью PR #%s\n\nPR закрыт — контейнер `%s` удалён.\n' \
+            "$COMMENT_MARKER" "$PR_NUMBER" "$CONTAINER_NAME" | jq -Rs '{body: .}' > "$RUNNER_TEMP/body.json"
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" --input "$RUNNER_TEMP/body.json" >/dev/null
+          echo "Комментарий обновлён: $COMMENT_ID"
+
+      - name: Убрать ключ
+        if: always()
+        run: rm -f "$RUNNER_TEMP/yc-sa-key.json"
