@@ -1109,7 +1109,7 @@ class Agent:
         stripped, _ = contradictions.check_model_blocks(text, lambda ref: None)  # свои блоки модели — убрать
         parts = contradictions.neutralize(k, stripped).split("\n\n", 1)
         blk = contradictions.block(k, quotes, refs)
-        text = f"{parts[0]}\n\n{blk}" + (f"\n\n{parts[1]}" if len(parts) > 1 else "")
+        text = "\n\n".join(p for p in (parts[0], blk, parts[1] if len(parts) > 1 else "") if p.strip())
         for ref in refs.values():
             if conv.sources[ref] not in cited:
                 cited.append(conv.sources[ref])

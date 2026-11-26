@@ -40,6 +40,8 @@ class Absent:
     statement: str
     quotes: tuple[Quote, ...]
     absent_on: tuple[str, tuple[int, ...], re.Pattern[str]] | None
+    header: str = ""  # вместо «У <двигатель> нет <узел>», если руководство отсутствие прямо не утверждает
+    not_applicable_text: str = NOT_APPLICABLE
 
 
 @lru_cache(maxsize=1)
@@ -58,6 +60,8 @@ def items() -> tuple[Absent, ...]:
                 statement=i["statement"],
                 quotes=tuple(Quote(q["doc"], int(q["page"]), q["quote"]) for q in i["quotes"]),
                 absent_on=(ao["doc"], tuple(ao["pages"]), re.compile(ao["pattern"], re.I)) if ao else None,
+                header=i.get("header", ""),
+                not_applicable_text=i.get("not_applicable_text", NOT_APPLICABLE),
             )
         )
     nodes = {k: v for k, v in data.get("matrix_nodes", {}).items() if not k.startswith("_")}
@@ -110,9 +114,10 @@ def verified(a: Absent, page_text: PageText | None) -> list[Quote] | None:
 def answer(
     engine: str, a: Absent, quotes: list[Quote], refs: dict[tuple[str, int], str], label: Callable[[Quote], str]
 ) -> str:
-    lines = [f"**У {engine} нет {a.part}.** {a.statement}", "", "По руководству этого двигателя:"]
+    head = a.header or f"У {engine} нет {a.part}."
+    lines = [f"**{head}** {a.statement}", "", "По руководству этого двигателя:"]
     for q in quotes:
         ref = refs.get((q.doc, q.page))
         lines.append(f"- {label(q)}: «{q.quote}»" + (f" [{ref}]" if ref else ""))
-    lines += ["", NOT_APPLICABLE, ADVICE]
+    lines += ["", a.not_applicable_text, ADVICE]
     return "\n".join(lines)

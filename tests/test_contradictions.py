@@ -139,3 +139,54 @@ def test_value_in_same_line_as_timing_claim_survives(ml: MLClient, toir: ToirCli
     reply, _ = _ask(ml, toir, answer, question="Какой зазор на клапанах? На холодную или на горячую?")
     first = reply.text.split("\n\n")[0]
     assert "0,25-0,30 мм" in first and "не позже 15 мин" not in reply.text and "Регулировать на холодном" in first
+
+
+# ---------- общий механизм: разные значения одного параметра (моменты затяжки) ----------
+
+TORQUE_PAGES = {
+    ("yamz-236-rk", 41): "затяжку болтов крепления крышек производить с моментом 421-461 Н*м (43-47 кгс*м)",
+    ("yamz-236-rk", 56): "должны быть затянуты моментом силы от 421 до 461 Н·м ( от 43 до 47 кгс·м)",
+    ("yamz-236-rk", 248): "- затянуть болты крепления крышек коренных подшипников не менее,\n"
+    "чем в три приема, моментом силы от 421 до 461 Нм (от 42 до 46 кгс·м);",
+    ("yamz-236-rk", 286): "Болты крепления крышек коренных\nподшипников:\n вертикальные 430-470 (43-47)",
+    ("yamz-536-re", 274): "Болты крепления скоб форсунок в\nголовке цилиндров\nПредварительный момент\nзатяжки: 16±1 "
+    "(1,6± 0,1)\nБолты крепления рампы 45 ± 2 (4,5 ± 0,2)",
+    ("yamz-536-rk", 585): "Болты крепления скоб\nфорсунок в головке\nцилиндров\nПредварительный момент затяжки: 3-5 "
+    "(SВН=6)\nОкончательный момент затяжки: 15-17 (SВН=6)\nБолты крепления\nрампы 22-25 (S=13)",
+}
+
+
+class TorquePages(Manual236):
+    def search(self, query: str, engine: str, k: int = 5) -> list[ManualHit]:
+        doc, page = ("yamz-536-rk", 585) if "536" in engine else ("yamz-236-rk", 286)
+        return [ManualHit(doc, "РК", page, "Моменты затяжки", TORQUE_PAGES[(doc, page)])]
+
+    def page_text(self, manual_id: str, pdf_page: int) -> str | None:
+        return TORQUE_PAGES.get((manual_id, pdf_page))
+
+
+def test_main_bearing_torque_both_values_no_pick(ml: MLClient, toir: ToirClient) -> None:
+    """ЯМЗ-236: 421–461 Н·м (РК стр. 41, 56, 248) против 430–470 Н·м (РК стр. 286) — оба, без выбора."""
+    ag, _ = make_agent([say("Затянуть 430-470 Н·м [R1].\n\n1. В три приёма.")], ml, toir, TorquePages())
+    question = "С каким моментом тянуть болты крышек коренных подшипников?"
+    text = ag.ask(ag.start("B418HK98", "S-0007"), question).text
+    assert HEADER in text and ADVICE in text and "Вывод:" not in text  # правила заказчика нет — не выбираем
+    assert "421-461" in text and "430-470 (43-47)" in text
+    for page in (41, 56, 248, 286):
+        assert f"стр. {page}" in text
+    assert "Затянуть 430-470 Н·м" not in text  # строка модели, выбравшая одно значение, заменена
+
+
+def test_injector_bracket_torque_536(ml: MLClient, toir: ToirClient) -> None:
+    """ЯМЗ-536: болты скоб форсунок — РЭ стр. 274 (16±1) против РК стр. 585 (3-5, затем 15-17)."""
+    ag, _ = make_agent([say("Окончательно 15-17 [R1], затем 95°.")], ml, toir, TorquePages())
+    text = ag.ask(ag.start("M260EH47", "S-0079"), "Какой момент затяжки болтов скоб форсунок?").text
+    assert HEADER in text and "16±1" in text and "15-17 (SВН=6)" in text
+    assert "стр. 274" in text and "стр. 585" in text and "Окончательно 15-17 [R1]" not in text
+
+
+def test_safe_line_once_for_bullets(ml: MLClient, toir: ToirClient) -> None:
+    ag, _ = make_agent([say("- Предварительно 3-5 [R2].\n- Окончательно 15-17 [R2].\n\n1. Довернуть на 95°.")],
+                       ml, toir, TorquePages())  # fmt: skip
+    text = ag.ask(ag.start("M260EH47", "S-0079"), "Какой момент затяжки болтов скоб форсунок?").text
+    assert text.count("указан по-разному") == 1 and not text.startswith("\n")
