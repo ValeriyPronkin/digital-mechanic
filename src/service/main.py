@@ -291,7 +291,9 @@ def diagnose(req: DiagnoseIn) -> VerdictCard:
     if diag.vehicle_id != req.vehicle_id or diag.session_id != req.session_id:
         raise HTTPException(502, "Сервис диагностики вернул результат для другой проверки.")
     vehicle = fleet().vehicle(req.vehicle_id)
-    card = build_card(diag, fleet().fault_titles, vehicle.engine_model if vehicle else None)
+    card = build_card(
+        diag, fleet().fault_titles, vehicle.engine_model if vehicle else None, vehicle.sessions if vehicle else None
+    )
     if card.status == "anomaly" and card.compatible and card.fault_code and vehicle:
         card.manual = card_explanation(card.fault_code, vehicle.engine_model)
     store().remember_view(req.vehicle_id, req.session_id, card.status, card.fault_code)

@@ -259,6 +259,7 @@ function screenCard(card) {
       el("p", {}, card.action),
       meta.length ? el("div", {class:"meta"}, meta.join(" · ")) : null,
       card.urgency ? el("div", {class:"urgency"}, el("b", {}, "Срочность: " + URG[card.urgency]), " — " + card.urgency_reason) : null,
+      card.trend ? el("div", {class:"urgency"}, "📈 " + card.trend) : null,
       card.design_fact ? el("div", {class:"fact"}, el("b", {}, "Факт о конструкции: "), card.design_fact.text, " ",
         el("q", {}, card.design_fact.quote), " — ", pageLink(card.design_fact)) : null),
     explain,
