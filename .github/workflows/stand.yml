@@ -103,10 +103,17 @@ jobs:
         run: |
           set -eu
           case "$LOGS_MINUTES" in ''|*[!0-9]*) echo "logs_minutes — целое число минут" >&2; exit 1 ;; esac
+          echo "Группы журнала каталога:"
+          yc logging group list --format json | jq -r '.[] | "\(.id) \(.name) retention=\(.retention_period)"' || true
           for name in "$CONTAINER_NAME" "$ML_NAME" "$TOIR_NAME"; do
             id=$(yc serverless container get --name "$name" --format json | jq -r '.id')
+            rev=$(yc serverless container revision list --container-name "$name" --limit 1 --format json | jq '.[0]')
+            echo "Ревизия $name: $(printf '%s' "$rev" | jq -c '{id, created_at, log_options, resources, execution_timeout}')"
+            group=$(printf '%s' "$rev" | jq -r '.log_options.log_group_id // empty')
             echo "::group::$name ($id) — последние $LOGS_MINUTES мин"
-            yc logging read --resource-ids "$id" --since "${LOGS_MINUTES}m" --limit 1000 \
+            if [ -n "$group" ]; then sel="--group-id=$group"; else sel="--group-name=default"; fi
+            yc logging read "$sel" \
+              --resource-ids "$id" --since "${LOGS_MINUTES}m" --limit 1000 \
               --format json | jq -r '.[] | [.timestamp, .level, (.message // "" | tostring), ((.json_payload // {}) | tostring)] | join(" | ")' \
               | tail -n 400 || echo "чтение журнала не удалось (роль logging.reader у сервисного аккаунта?)"
             echo "::endgroup::"
