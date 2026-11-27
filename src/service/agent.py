@@ -1985,8 +1985,10 @@ class Agent:
             )
 
     def _ensure_diag(self, conv: Conversation) -> tuple[Diagnosis, VerdictCard]:
-        if conv.diag is None or conv.card is None:
+        if conv.diag is None or conv.diag.session_id != conv.session_id:
             conv.diag = self.ml.diagnose(conv.vehicle.vehicle_id, conv.session_id)
+            conv.card = None
+        if conv.card is None:  # из нити пришёл результат проверки — карточку собирает код, без ML
             conv.card = build_card(conv.diag, self.fleet.fault_titles, conv.vehicle.engine_model, conv.vehicle.sessions)
         return conv.diag, conv.card
 

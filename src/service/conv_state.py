@@ -20,7 +20,7 @@ from functools import lru_cache
 from typing import Any
 
 from service.agent import Conversation, Source, TicketDraft
-from service.clients import ServiceError, TicketRequest
+from service.clients import Diagnosis, ServiceError, TicketRequest
 from service.fleet import Fleet
 from service.llm import ToolCall
 
@@ -68,6 +68,9 @@ def dump(conv: Conversation) -> str:
         "session_id": conv.session_id,
         "messages": [_msg_out(m) for m in conv.messages],
         "sources": [s.__dict__ for s in conv.sources.values()],
+        # результат проверки — в нити: следующий вопрос не ходит в ML заново (холодная заглушка — до 30 с), карточку
+        # код собирает из него (замечание Валерия 27.11: «Какой нужен инструмент» после карточки)
+        "diag": conv.diag.model_dump() if conv.diag is not None else None,
         "draft": None
         if conv.draft is None
         else {
@@ -100,6 +103,8 @@ def load(token: str, fleet: Fleet) -> Conversation:
     conv = Conversation(id=state["id"], vehicle=vehicle, session_id=state["session_id"])
     conv.messages = [_msg_in(m) for m in state["messages"]]
     conv.sources = {s["ref"]: Source(**s) for s in state["sources"]}
+    if state.get("diag") and state["diag"].get("session_id") == conv.session_id:
+        conv.diag = Diagnosis.model_validate(state["diag"])
     d = state.get("draft")
     if d:
         conv.draft = TicketDraft(

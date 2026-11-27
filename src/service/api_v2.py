@@ -490,7 +490,9 @@ def tool_events(reply: AgentReply, conv: Conversation, verdict_sent: bool) -> tu
         name = s.get("tool") or s.get("name", "")
         tid = f"t{n}"
         block = None
-        if name == "get_diagnosis" and not verdict_sent:
+        if name == "get_diagnosis" and verdict_sent:
+            continue  # карточка уже на экране — второй раз шаг «Результат проверки» не показываем
+        if name == "get_diagnosis":
             block = verdict_block(conv)
             verdict_sent = block is not None
         events.append(
