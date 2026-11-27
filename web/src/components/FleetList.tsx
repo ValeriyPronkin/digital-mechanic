@@ -1,10 +1,18 @@
-import { Fragment, useMemo, useRef, useState } from 'react'
-import { type FleetStatus, type FleetView, type VehicleBrief } from '../api'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  getContradictions,
+  type ContradictionStatus,
+  type FleetStatus,
+  type FleetView,
+  type VehicleBrief,
+} from '../api'
 import { copy } from '../copy'
 import { rowBadges } from '../lib/checks'
+import { queueCounts } from '../lib/contradictions'
 import { outcomesPlace, reasonLine, reasonParts } from '../lib/fleet'
 import { dateRu, plateKey } from '../lib/format'
 import { CHECKED, nextChoice, PRESSED_STATUS } from '../lib/ui'
+import { QueueRow } from './ContradictionQueue'
 import { REGISTER } from './TicketRegister'
 
 export type Role = 'mechanic' | 'chief'
@@ -212,9 +220,24 @@ export function FleetList({
   // full list, after the last match of a search or a status filter, nowhere when nothing matches. Its place
   // does not hang on the height of the view, so it does not move when the keyboard opens. It used to sit
   // above the list on a tall view and after it on a short one, by a media query on the height.
-  const outcomes = role === 'chief' && fleet !== null && fleet.outcomes.tickets > 0 && (
-    <li className="py-2">
-      <OutcomesRow outcomes={fleet.outcomes} />
+  // The queue of contradictions between manuals (#93) sits in the same place, under the outcomes row.
+  const [queue, setQueue] = useState<Record<ContradictionStatus, number> | null>(null)
+  useEffect(() => {
+    if (role !== 'chief') return
+    let live = true
+    getContradictions('all')
+      .then((items) => live && setQueue(queueCounts(items)))
+      .catch(() => undefined) // no queue row; the fleet works without it
+    return () => {
+      live = false
+    }
+  }, [role, fleet])
+  const hasTickets = role === 'chief' && fleet !== null && fleet.outcomes.tickets > 0
+  const hasQueue = role === 'chief' && queue !== null && queue.open + queue.sent + queue.resolved > 0
+  const outcomes = (hasTickets || hasQueue) && (
+    <li className="space-y-2 py-2">
+      {hasTickets && <OutcomesRow outcomes={fleet.outcomes} />}
+      {hasQueue && <QueueRow counts={queue} />}
     </li>
   )
   const outcomesAt = outcomes ? outcomesPlace(shown.length, plateKey(query) !== '' || only !== null) : null
