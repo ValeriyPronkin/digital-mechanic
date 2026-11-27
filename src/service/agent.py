@@ -52,6 +52,7 @@ from service.spend import SpendLedger
 from service.store import Store
 from service.ticket_once import TicketMarks
 from service.verdict_policy import (  # noqa: F401
+    BANNER_EARLY_RECHECK,
     CONFIDENCE_LOW,
     CRITICAL_CODES,
     Urgency,
@@ -98,6 +99,16 @@ TICKET_NOT_ASKED = (
     "«можно» или «нельзя» со ссылкой [R…]); заявку можно предложить одной строкой в конце."
 )
 SILENT_NOTE = "В руководстве этого двигателя нет порядка работ по этому узлу — нужна дефектовка."
+# Ответ на кнопку «Получить результат диагностики» при норме и сбое записи — под карточкой, без модели (приёмка 27.11)
+VERDICT_ONLY_NORMAL = "Отклонений не найдено. Проверка оценивает только звук двигателя; заявка не нужна."
+VERDICT_ONLY_NORMAL_EARLY = (
+    "Отклонений не найдено, но оценка выше обычной — повторите проверку раньше срока. "
+    "Проверка оценивает только звук двигателя; заявка не нужна."
+)
+VERDICT_ONLY_FAILED = (
+    "Запись не годится для анализа: выводов о двигателе нет, заявка не оформляется. "
+    "Повторите запись по шагам из карточки."
+)
 
 log = logging.getLogger(__name__)
 
@@ -684,16 +695,6 @@ def _manual_kind(manual: str) -> str:
     return "руководство по ремонту" if "ремонт" in manual.lower() else "руководство по эксплуатации"
 
 
-def _short(op: str, limit: int = 110) -> str:
-    """Работа из матрицы — коротко: до запятой во второй половине лимита, без обрыва посреди слова."""
-    op = op.strip().rstrip(".;")
-    op = op[:1].lower() + op[1:]
-    if len(op) <= limit:
-        return op
-    cut = op.rfind(",", limit // 2, limit)
-    return op[:cut] if cut > 0 else op[: op.rfind(" ", 0, limit)] + "…"
-
-
 _CARD_LINE = re.compile(r"карточк|\bF\d{2}\b|по проверке|результат[а-я]* проверки", re.I)
 _NO_LINK = re.compile(r"не относ|не указыва|не связ|не называ|отдельн[аяое]+ тем|ни при ч[её]м|не имеет отношени", re.I)
 
@@ -1122,6 +1123,9 @@ class Agent:
         absent = self._absent_reply(conv, question, request_id)
         if absent is not None:  # узла у двигателя нет — ответ кода, без модели (ТЗ F4)
             return self._code_reply_in(absent, conv, target, request_id)
+        verdict_only = self._verdict_only_reply(conv, question, request_id)
+        if verdict_only is not None:  # норма или сбой записи: всё сказала карточка — строка кода, без модели
+            return self._code_reply_in(verdict_only, conv, target, request_id)
         cache_key = self._answer_cache_key(conv, question, level, target or "")
         if cache_key:
             hit = self.store.cached_answer(cache_key)
@@ -1397,8 +1401,9 @@ class Agent:
         self, conv: Conversation, question: str, cited: list[Source], text: str
     ) -> tuple[str, dict[str, str] | None]:
         """Прямой вопрос не про найденную неисправность: страницы ответа не входят в ячейку «код × двигатель» —
-        строка с работами из ячейки и кнопка к этой проверке. Строит код, а не модель (рассуждения модели о связи
-        убирает guard)."""
+        кнопка к этой проверке. Рассуждения модели о связи с карточкой убираются. Строку с работами ячейки код больше
+        не дописывает (приёмка 27.11, K961TH198): это был сырой текст таблицы руководства, обрезанный посреди слова,
+        а работы по неисправности уже есть в ответе на карточку."""
         card = conv.card
         if card is None or card.status != "anomaly" or not card.compatible or not card.fault_code or not cited:
             return text, None
@@ -1411,14 +1416,10 @@ class Agent:
         if any((s.manual_id, s.pdf_page) in cell_pages for s in cited):
             return text, None
         title = card.fault_title or card.fault_code
-        ops = "; ".join(_short(o.quote) for o in cell.operations[:3])
-        refs = sorted({(r.doc, r.page) for r in [*cell.pages[:2], *cell.operations[:3]]})
-        pages = ", ".join(f"{p} ({_DOC_SHORT.get(d.rsplit('-', 1)[-1], d)})" for d, p in refs)
-        line = f"К найденной неисправности это не относится. По руководству при «{title}»: {ops} — стр. {pages}."
-        text = _drop_card_sentences(text)  # о карточке — одна строка, и её пишет код
+        text = _drop_card_sentences(text)  # о связи с карточкой модель не судит
         followup = {"label": f"Проверка по «{title}»",
                     "question": f"Что проверить по неисправности {card.fault_code} «{title}»?"}  # fmt: skip
-        return f"{text.rstrip()}\n\n{line}", followup
+        return text.rstrip(), followup
 
     def _card_question(self, conv: Conversation, question: str) -> bool:
         """Вопрос о неисправности из карточки при аномалии совместимого кода — ответ разделами (`CARD_FORMAT`)."""
@@ -1974,6 +1975,57 @@ class Agent:
             trace=trace,
         )
 
+    # ---- кнопка «Получить результат диагностики» при норме и сбое записи (приёмка 27.11) ----
+    def _verdict_only_reply(self, conv: Conversation, question: str, request_id: str) -> AgentReply | None:
+        """Норма или сбой записи: ответ — карточка проверки, а под ней одна строка кода. Без модели, поиска и страниц
+        руководства: при норме модель выдавала порядок ТО (C808CM178 / S-0145: крепление стартера, «через 96…»), при
+        сбое — пересказ карточки (H142OX78 / S-0113). Результат проверки идёт в историю разговора, как при `_prefetch`,
+        и вопрос механика после этого модель видит с ним."""
+        if not _DIAG_ASK.search(question):
+            return None
+        try:
+            diag, card = self._ensure_diag(conv)
+        except ServiceError:
+            return None  # ML недоступен — путь модели покажет ошибку инструмента
+        if diag.status == "check_failed" or diag.signal_quality == "bad":
+            text, why = VERDICT_ONLY_FAILED, "сбой записи"
+        elif diag.status == "normal":
+            early = BANNER_EARLY_RECHECK in card.banners
+            text, why = (VERDICT_ONLY_NORMAL_EARLY if early else VERDICT_ONLY_NORMAL), "отклонений нет"
+        else:
+            return None
+        steps: list[dict[str, Any]] = []
+        if not any(m.get("role") == "tool" for m in conv.messages):
+            call = ToolCall("pre-diag", "get_diagnosis", {"vehicle_id": conv.vehicle.vehicle_id,
+                                                          "session_id": conv.session_id})  # fmt: skip
+            conv.messages.append({"role": "assistant", "content": "", "tool_calls": [call]})
+            t0 = time.monotonic()
+            result, ok = self._run_tool(conv, call.name, call.arguments)
+            tms = int((time.monotonic() - t0) * 1000)
+            self.store.log_tool(request_id, 0, call.name, call.arguments, ok, tms)
+            steps.append(tool_step(0, call.name, call.arguments, result, ok, tms, by_code=True))
+            conv.messages.append({"role": "tool", "tool_call_id": call.id, "name": call.name,
+                                  "content": json.dumps(result, ensure_ascii=False)})  # fmt: skip
+        conv.messages.append({"role": "assistant", "content": text})
+        steps.append({"step": 0, "kind": "code", "name": f"ответ по карточке: {why}", "ok": True, "ms": 0})
+        trace = {
+            "request_id": request_id,
+            "provider": self.provider.name,
+            "steps": steps,
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "tokens_cached": 0,
+            "cost_rub": 0.0,
+        }
+        return AgentReply(
+            text=text,
+            grounded=False,
+            notes=[f"Проверка: {why} — ответ кода по карточке, без модели и страниц руководства."],
+            sources=[],
+            draft=None,
+            trace=trace,
+        )
+
     # ---- противоречивые инструкции (требование заказчика, 26.11) ----
     def _note_contradiction(self, conv: Conversation, question: str) -> None:
         conv.contradiction = None
@@ -2329,7 +2381,7 @@ class Agent:
         if card is None or card.status == "check_failed":
             line = "**Решить по проверке нельзя:** запись не годится — повторите проверку; до неё следите за приборами."
         elif card.status == "normal":
-            line = "**По проверке — можно:** двигатель в норме."
+            line = "**По проверке — можно:** отклонений не найдено."
         elif card.urgency == "high":
             line = f"**{NO_BAN_LINE}** Срочность по проверке высокая: {RECOMMEND['high'].split(': ', 1)[1]}"
         else:
@@ -2475,9 +2527,9 @@ class Agent:
     @staticmethod
     def _ticket_refusal(diag: Diagnosis, card: VerdictCard) -> str | None:
         if diag.status == "normal":
-            return "Двигатель в норме — заявка не нужна."
+            return "Отклонений не найдено — заявка не нужна."
         if diag.status == "check_failed":
-            return "Проверка не удалась — сначала повторите запись, заявку не оформляем."
+            return "Проверка не удалась — сначала повторите запись, заявка не оформляется."
         if not card.compatible:
             return "Код неисправности не подходит к двигателю этой машины — нужна повторная проверка."
         if not card.ticket_possible or not diag.anomaly_type:

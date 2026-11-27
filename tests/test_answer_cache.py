@@ -27,8 +27,8 @@ def test_same_question_same_check_comes_from_cache(ml: MLClient, toir: ToirClien
 
 
 def test_other_result_is_not_taken_from_cache(ml: MLClient, toir: ToirClient) -> None:
-    _, llm, _, r2 = _two(ml, toir, ANOMALY, NORMAL)
-    assert len(llm.seen) == 2 and not r2.trace.get("cache")
+    _, _, r1, r2 = _two(ml, toir, ANOMALY, NORMAL)  # при норме на «Что с двигателем?» отвечает код (приёмка 27.11)
+    assert not r2.trace.get("cache") and r2.text != r1.text
 
 
 def test_ticket_and_followups_are_not_cached(ml: MLClient, toir: ToirClient) -> None:

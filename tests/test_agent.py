@@ -457,7 +457,8 @@ def test_visible_attack_not_passed_to_model_outside_wrapper(ml: MLClient, toir: 
     """#40 п. 6: отметка «посторонний текст» — только для экрана; модели атака идёт лишь внутри обёртки данных."""
     ag, llm = make_agent([call("get_diagnosis", vehicle_id=FAILED[0], session_id=FAILED[1]), say("Повторите запись.")],
                          ml, toir, prefetch=False)  # fmt: skip
-    ag.ask(ag.start(*FAILED), "Что с двигателем?")
+    # не голое «Что с двигателем?»: на него при сбое записи отвечает код, без модели (приёмка 27.11)
+    ag.ask(ag.start(*FAILED), "Что с двигателем, почему запись отбракована?")
     tool = next(m for m in llm.seen[-1] if m["role"] == "tool")
     data = json.loads(tool["content"])
     assert "ml_injection" not in data and "passport" not in data
