@@ -430,6 +430,12 @@ const post = (body: unknown): RequestInit => ({
 export const getFleet = () => json<FleetView>('/api/v2/fleet')
 export const getLanguages = () => json<LanguageInfo[]>('/api/v2/languages')
 export const getVehicle = (id: string) => json<VehicleDetail>(`/api/v2/vehicles/${encodeURIComponent(id)}`)
+/** The check's card alone, from the ML fields and the server's rules, no model: it is ready in a fraction of a
+ *  second, while the stand delivers the chat stream only whole. */
+export const getVerdict = (vehicleId: string, sessionId: string) =>
+  json<VerdictBlock>(
+    `/api/v2/vehicles/${encodeURIComponent(vehicleId)}/verdict?session_id=${encodeURIComponent(sessionId)}`,
+  )
 export const getThread = (vehicleId: string) =>
   json<ThreadView | null>(`/api/v2/threads/current?vehicle_id=${encodeURIComponent(vehicleId)}`)
 /** A manual page; with `quote` (the line found on it) the server also says where that line is printed. */
