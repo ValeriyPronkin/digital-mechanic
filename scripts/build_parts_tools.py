@@ -65,6 +65,19 @@ SPECIAL_ROW = re.compile(
     r"(?P<name>Оправк\w*|Съ[её]мник\w*|Приспособлени\w*|Ключ\w*|Головк\w*|Шаблон\w*|Переходник\w*|Державк\w*|"
     r"Втулк\w*\s+монтажн\w*|Рукоятк\w*|Стержень|Сектор\w*|Кондуктор\w*|Индикатор\w*|Щуп\w*)",
 )
+# «Перечень деталей разового монтажа» (ЗМЗ-409, прил. 4): строки таблицы «№ | обозначение | наименование | кол-во»
+ONE_TIME_TABLE = re.compile(r"разового\s+монтажа|одноразового\s+(?:монтажа|использования)", re.I)
+TABLE_ROW = re.compile(
+    r"^\s*\d+\s*\|\s*(?:(?P<all>(?P<des>[\d][\d.\-]*\d)(?:,\s*[\d][\d.\-]*\d)*)\s*\|\s*)?"
+    r"(?P<name>[А-ЯЁ][^|]{3,80}?)\s*\|\s*\d+\s*$"
+)
+# таблица «неисправность — причина — способ устранения»: «заменить форсунки» там — способ устранения, а не перечень
+# запчастей к работе (#162, класс (г))
+TROUBLE = re.compile(r"способ\w*\s+устранени|причин\w*\s+неисправн|возможные\s+неисправност", re.I)
+# «D×S = 105×128 мм» — диаметр и ход поршня, а не ключ (#162, класс (б))
+NOT_A_KEY = re.compile(r"[DdДд]\s*[хx×]\s*$")
+_GEN_ADJ = re.compile(r"(?:ого|его|ых|их)$", re.I)
+_BARE = re.compile(r"^(?:кольц[оа]|шайб[аы]|прокладк[аи]|болт[ы]?|гайк[аи]|винт[ы]?|детал[ьи]|уплотнени[ея])$", re.I)
 # «Уплотнительные кольца инжектора (6) и бокового штуцера (7), упорная шайба (8) инжектора одноразового использования»
 ONE_TIME = re.compile(r"одноразов\w*\s+(?:использ|примен)\w*|повторно\s+не\s+(?:использ|применя|устанавл)\w*", re.I)
 
@@ -101,6 +114,15 @@ _TOOL_BASE = {
     "стерж": "стержень",
     "кондуктор": "кондуктор",
 }
+
+
+def key_size(mention: str, after: str) -> str:
+    """«(S =5)» и следом «вн» → «Sвн=5»; «S = 22» → «S=22»: один ключ — одна запись (#162, класс (б))."""
+    m = re.match(r"\(?S\s*(вн|ВН)?\s*=\s*(\d+)\)?", mention.strip())
+    if not m:
+        return mention
+    inner = bool(m.group(1)) or bool(re.match(r"\s*\)?\s*вн\b", after, re.I))
+    return f"S{'вн' if inner else ''}={m.group(2)}"
 
 
 def tool_name(match: str) -> str:
@@ -184,15 +206,36 @@ def build_engine(engine: str, pages: Pages, sections: Pages) -> dict[str, Any]:
             if normalize(quote) in page_norm:
                 parts.setdefault(("des", des), {"name": name, "designation": des, "doc": doc, "page": page,
                                                 "node": node, "source": "перечень", "quote": quote})  # fmt: skip
+        if ONE_TIME_TABLE.search(text):
+            for line in text.split("\n"):
+                row = TABLE_ROW.match(line)
+                if not row:
+                    continue
+                name, des = re.sub(r"\s+", " ", row.group("name")).strip(), row.group("des") or ""
+                quote = f"{row.group('all')} | {name}" if des else name
+                if normalize(quote) in page_norm and not _NOT_A_PART.match(name.lower()):
+                    parts.setdefault(("once", doc, page, name.lower()), {
+                        "name": name, "designation": des, "doc": doc, "page": page, "node": node,
+                        "source": "одноразовая", "quote": quote})  # fmt: skip
+        trouble = bool(TROUBLE.search(text) or TROUBLE.search(node))
         # перечень одноразовых деталей бывает на двух строках — фразы страницы целиком
         joined = re.sub(r"\n(?=[а-яё(])", " ", flat(text))  # строка со строчной — продолжение фразы
         for sent in re.split(r"(?<=[.!?])\s+|\n", joined):
             one = ONE_TIME.search(sent)
             if one:
                 head = re.sub(r"\(\s*\d+\s*\)", " ", sent[: one.start()])
-                for item in re.split(r",|\s+и\s+", head):
-                    words = [w for w in re.findall(r"[А-Яа-яЁё\-]+", item) if not _PART_STOP.match(w)]
+                for item in re.split(r"[,;]|\s+и\s+", head):
+                    item = re.split(r"\(\s*\d+\s*\)", item)[0]  # «кольца инжектора (6)» — до номера позиции
+                    words: list[str] = []
+                    for w in re.findall(r"[А-Яа-яЁё\-]+", item):
+                        if _PART_STOP.match(w):
+                            if words:
+                                break  # «кольца на инжекторах» — не склеиваем через предлог
+                            continue
+                        words.append(w)
                     name = " ".join(words[:4]).lower()
+                    if words and (_GEN_ADJ.search(words[0]) or (len(words) == 1 and _BARE.match(name))):
+                        continue  # «бокового штуцера», «кольца» — обрывок, а не позиция перечня
                     if len(name) < 4 or _NOT_A_PART.match(name) or name.startswith(("данн", "эти")):
                         continue
                     quote = window(sent, 0, one.end())
@@ -204,8 +247,8 @@ def build_engine(engine: str, pages: Pages, sections: Pages) -> dict[str, Any]:
             for sent in _SENT.split(line):
                 if len(sent) < 8:
                     continue
-                for m in _REPLACE.finditer(sent):
-                    raw = m.group("a") or m.group("c") or ""
+                for m in _REPLACE.finditer(sent) if not trouble else ():
+                    raw = m.group("a") or ""  # «инжектора одноразового…» — обрывок; одноразовые — ONE_TIME выше
                     name = _part_name(raw)
                     if len(name) < 4:
                         continue
@@ -228,8 +271,10 @@ def build_engine(engine: str, pages: Pages, sections: Pages) -> dict[str, Any]:
                                       "page": page, "operation": quote, "node": node, "quote": quote}  # fmt: skip
                 for m in TOOL.finditer(sent):
                     mention = m.group(0).strip(" ()")
+                    if mention.upper().startswith("S") and NOT_A_KEY.search(sent[: m.start()]):
+                        continue
                     name = tool_name(mention)
-                    size = mention if re.search(r"\d", mention) else ""
+                    size = key_size(mention, sent[m.end() :]) if re.search(r"\d", mention) else ""
                     if name in ("приспособление", "съёмник") and (d := re.search(r"(?:И-?|\d)[\w.\-]*\d$", size)):
                         size = d.group(0)  # «приспособления 5340.3901010» → «5340.3901010»
                     if name == "ключ" and not size:
