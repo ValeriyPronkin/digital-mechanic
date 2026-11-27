@@ -74,6 +74,7 @@
 | Заглушки Mock ML и Mock ТОиР, `data/vehicles.json`, `data/fault_types.json` | материалы ООО «НейроДВС» для команд хакатона, синтетические; **материалы задачи не в репозитории, загружаются по ссылке при развёртывании (п. 9.1)** — `make fetch-materials` по `TASK_MATERIALS_URL` в `vendor/neurodvs_mock/` и `data/` (в `.gitignore`) | контракт API и тестовые данные по ТЗ |
 | Руководства по эксплуатации и ремонту ЯМЗ, ЗМЗ (6 PDF) | материалы заказчика; в репозиторий не входят | база знаний агента |
 | gitleaks | MIT | поиск секретов в pre-commit и CI |
+| imageio-ffmpeg и ffmpeg (бинарник из пакета) | BSD-2-Clause; ffmpeg — LGPL/GPL | `make video`: ускорение ожидания ответа модели в записи дубля; ставится `uv run --with`, в зависимости проекта не входит |
 | Docker-образ `python:3.12-slim` | PSF и лицензии пакетов Debian | образ для запуска |
 | Docker-образ `node:24-bookworm-slim` | MIT и лицензии пакетов Debian | стадия сборки интерфейса v2 |
 | GitHub Actions `actions/checkout`, `actions/setup-python`, `actions/setup-node` | MIT | CI |
