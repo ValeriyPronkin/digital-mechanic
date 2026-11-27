@@ -54,7 +54,7 @@ export function VerdictCard({ verdict: v }: { verdict: VerdictBlock }) {
         {/* Columns as wide as what they hold: in three equal ones «Уверенность» (81 px) ran into
             «Запись» on a 320 px screen, where a column is 75 px. */}
         {!mismatch && v.anomaly_score !== null && v.confidence !== null && (
-          <dl className="grid grid-cols-[auto_auto_auto] justify-between gap-x-2.5 border-t border-line pt-3">
+          <dl className="grid grid-cols-[auto_auto_auto] justify-between gap-x-2.5 border-t border-line pt-3 min-[900px]:justify-start min-[900px]:gap-x-12">
             <Fact label={copy.verdict.score} value={num(v.anomaly_score)} note={copy.verdict.scoreOf} />
             <Fact label={copy.verdict.confidence} value={v.confidence_word ?? ''} note={num(v.confidence)} />
             <Fact label={copy.verdict.recording} value={copy.quality[v.signal_quality]} />
@@ -68,8 +68,12 @@ export function VerdictCard({ verdict: v }: { verdict: VerdictBlock }) {
                 <span className="text-dim">{copy.verdict.urgency}: </span>
                 <span className={`font-semibold ${urgencyTone[v.urgency.level]}`}>{v.urgency.word}</span>
               </span>
-              <span className="text-[13px] text-accent group-open:hidden">{copy.verdict.why}</span>
-              <span className="hidden text-[13px] text-accent group-open:inline">{copy.verdict.hide}</span>
+              <span className="text-[13px] text-accent group-open:hidden [@media(hover:hover)]:[summary:hover_&]:underline">
+                {copy.verdict.why}
+              </span>
+              <span className="hidden text-[13px] text-accent group-open:inline [@media(hover:hover)]:[summary:hover_&]:underline">
+                {copy.verdict.hide}
+              </span>
               {v.urgency.action && (
                 <span className="basis-full pb-2">
                   {v.urgency.action}

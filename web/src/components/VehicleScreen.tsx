@@ -57,7 +57,7 @@ function SessionPicker({
             role="radio"
             aria-checked={selected === s.session_id}
             onClick={() => onSelect(s.session_id)}
-            className={`flex min-h-12 shrink-0 items-center gap-2 rounded-lg border border-line px-3 text-[13px] text-dim ${CHECKED}`}
+            className={`flex min-h-12 shrink-0 items-center gap-2 rounded-lg border border-line px-3 text-[13px] text-dim hover:text-text ${CHECKED}`}
           >
             <span className={`size-2 rounded-full ${look.dot}`} aria-hidden />
             <span>
@@ -175,8 +175,10 @@ function AssistantBlock({
  *  depends on a request. */
 function Header({ title, onBack, children }: { title: ReactNode; onBack: () => void; children?: ReactNode }) {
   return (
-    <header className="border-b border-line px-4">
-      <div className="mx-auto flex min-h-14 max-w-3xl items-center gap-1">
+    // the 16 px at the sides belong to the centred column, as they do in the thread under the bar: on a
+    // wide screen the title starts on the thread's left edge, not 16 px before it
+    <header className="border-b border-line">
+      <div className="mx-auto flex min-h-14 max-w-3xl items-center gap-1 px-4">
         <button
           type="button"
           onClick={onBack}
@@ -427,9 +429,10 @@ export function VehicleScreen({
         {thread.turns.length > 0 && (
           <button
             type="button"
+            data-waits
             disabled={thread.busy}
             onClick={() => send(copy.vehicle.diagnose, true)}
-            className="min-h-12 shrink-0 pl-2 text-[13px] text-accent disabled:opacity-50"
+            className="min-h-12 shrink-0 pl-2 text-[13px] text-accent enabled:hover:underline disabled:opacity-50"
           >
             {copy.vehicle.newThread}
           </button>
@@ -437,7 +440,12 @@ export function VehicleScreen({
       </Header>
 
       {/* A size container: the last exchange below takes its height from this view (.last-exchange). */}
-      <div className={`min-h-0 flex-1 overflow-y-auto [container-type:size] ${anchoringWhile(thread.busy)}`}>
+      {/* `data-thread`: a sheet beside the thread passes the wheel and a press on a chip on to it (Sheet.tsx).
+          `data-waits`, on the controls around the thread: they are drawn quieter meanwhile (index.css). */}
+      <div
+        data-thread
+        className={`min-h-0 flex-1 overflow-y-auto [container-type:size] ${anchoringWhile(thread.busy)}`}
+      >
         <div className="mx-auto max-w-3xl space-y-5 p-4">
           <section className="space-y-3">
             <p className="text-[13px] text-dim">
@@ -450,7 +458,7 @@ export function VehicleScreen({
               type="button"
               disabled={thread.busy}
               onClick={() => send(copy.vehicle.diagnose)}
-              className="min-h-12 w-full rounded-lg bg-accent px-4 font-semibold text-bg disabled:opacity-50"
+              className="min-h-12 w-full rounded-lg bg-accent px-4 font-semibold text-bg enabled:hover:bg-accent/90 disabled:opacity-50 min-[900px]:w-auto min-[900px]:px-8"
             >
               {copy.vehicle.diagnose}
             </button>
@@ -477,14 +485,16 @@ export function VehicleScreen({
         </div>
       </div>
 
-      <footer className="border-t border-line bg-bg px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))]">
-        <div className="mx-auto max-w-3xl space-y-2">
+      <footer className="border-t border-line bg-bg pt-3 pb-[max(12px,env(safe-area-inset-bottom))]">
+        {/* the sides' 16 px are the column's, as in the thread: the field and the chips keep its edges */}
+        <div className="mx-auto max-w-3xl space-y-2 px-4">
           {/* While the mechanic types, the ready-made questions step aside: the keyboard has taken half
               the screen, and the answer above needs the room. «Создать заявку» is not one of them: it
               stays whatever is in the field (ТЗ F7). */}
           {(canTicket || !typing) && (
             <div
               ref={quickRow}
+              data-waits
               onScroll={measureQuick}
               className={`no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 min-[900px]:flex-wrap ${quickMore ? 'fade-right' : ''}`}
             >
@@ -493,7 +503,7 @@ export function VehicleScreen({
                   type="button"
                   disabled={thread.busy}
                   onClick={() => send(copy.thread.createTicketMessage)}
-                  className="min-h-12 shrink-0 rounded-lg border border-accent px-3 font-semibold text-accent disabled:opacity-50"
+                  className="min-h-12 shrink-0 rounded-lg border border-accent px-3 font-semibold text-accent enabled:hover:bg-accent/10 disabled:opacity-50"
                 >
                   {copy.thread.createTicket}
                 </button>
@@ -519,6 +529,7 @@ export function VehicleScreen({
             </p>
           )}
           <form
+            data-waits
             className="flex items-end gap-2"
             onSubmit={(e) => {
               e.preventDefault()
@@ -557,7 +568,7 @@ export function VehicleScreen({
                 disabled={voice.state === 'sending'}
                 aria-label={voice.state === 'recording' ? copy.thread.voice.stop : copy.thread.voice.start}
                 aria-pressed={voice.state === 'recording'}
-                className={`grid size-12 shrink-0 place-items-center rounded-lg border disabled:opacity-40 ${
+                className={`grid size-12 shrink-0 place-items-center rounded-lg border enabled:hover:text-accent disabled:opacity-40 ${
                   voice.state === 'recording' ? 'border-stop bg-stop text-bg' : 'border-line bg-surface-2 text-text'
                 }`}
               >
@@ -648,7 +659,7 @@ function LevelSwitch() {
     set(l)
   }
   return (
-    <div role="group" aria-label="Как объяснять" className="flex items-center gap-2 text-[13px] text-dim">
+    <div data-waits role="group" aria-label="Как объяснять" className="flex items-center gap-2 text-[13px] text-dim">
       <span className="shrink-0">Как объяснять:</span>
       {(['expert', 'steps'] as const).map((l) => (
         <button

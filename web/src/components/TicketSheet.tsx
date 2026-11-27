@@ -320,7 +320,17 @@ export function TicketSheet({
                 onClick={() => setUrgency(c.level)}
                 className={`min-h-12 flex-1 rounded-lg border border-line px-1 text-dim ${CHECKED}`}
               >
-                <span className="block leading-tight">{c.word}</span>
+                {/* The choice goes to ТОиР, from a phone in a garage: it is told by a shape, not by
+                    brightness alone. A filled dot in the chosen one, an empty ring in the other two. */}
+                <span className="flex items-center justify-center gap-1.5 leading-tight">
+                  <span
+                    aria-hidden
+                    className="grid size-3.5 shrink-0 place-items-center rounded-full border-[1.5px] border-current"
+                  >
+                    {urgency === c.level && <span className="size-1.5 rounded-full bg-current" />}
+                  </span>
+                  {c.word}
+                </span>
                 {c.level === pending.urgency.level && (
                   <span className="block text-[13px] leading-tight text-dim">{copy.ticket.proposed}</span>
                 )}

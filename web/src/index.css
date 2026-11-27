@@ -47,13 +47,20 @@ body {
   outline-offset: 2px;
 }
 
+/* In the base layer, so that a utility can say otherwise: the manual page is a button with a zoom cursor. */
+@layer base {
+  button,
+  [role='button'] {
+    cursor: pointer;
+  }
+}
 button,
 [role='button'] {
-  cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Sheets: a native <dialog>, from the bottom on a phone, from the right on a wide screen. */
+/* Sheets: a native <dialog>, from the bottom on a phone; on a wide screen a panel on the right with the
+   thread beside it. */
 dialog.sheet {
   margin: 0;
   padding: 0;
@@ -87,13 +94,21 @@ dialog.sheet[open] {
     opacity: 0;
   }
 }
+/* From 900 px the page and the ticket open beside the answer, not over it: the reader sees the sentence
+   with its chip on the left and the marked line of the page on the right. The panel takes what a
+   720 px thread leaves (480 to 720 px), nothing is dimmed, and the thread moves over by the panel's
+   width. Below 1560 px the fleet list steps aside while a sheet is open, or the thread would have
+   less than a phone's width; from 1560 px all three stand side by side. */
 @media (min-width: 900px) {
+  :root {
+    --sheet: clamp(480px, calc(100vw - 720px), 720px);
+  }
   dialog.sheet {
     top: 0;
     bottom: 0;
     left: auto;
     right: 0;
-    width: min(640px, 50vw);
+    width: var(--sheet);
     max-height: 100dvh;
     height: 100dvh;
     border-radius: 0;
@@ -103,11 +118,42 @@ dialog.sheet[open] {
   dialog.sheet[open] {
     animation: sheet-in 150ms ease-out;
   }
+  dialog.sheet::backdrop {
+    background: transparent;
+  }
+  main:has(dialog.sheet[open]) {
+    padding-right: var(--sheet);
+  }
+  body:has(dialog.sheet[open]) aside {
+    display: none;
+  }
+  /* Beside an open panel the thread is live (the wheel, its chips) and the controls around it are not:
+     the composer, the quick replies and «Начать заново» only close the panel when pressed. They are
+     drawn quieter, so that they read as «not now» and a press that seems to do nothing is no
+     surprise; still above 3:1, so they do not read as broken. Opacity 0,6: a quick reply is 3,40:1,
+     «Создать заявку» and «Начать заново» 4,42:1. The field has the weakest text of the three, its
+     placeholder, which needs 0,7 to stay at 3,05:1. The thread keeps its full contrast: it is what
+     is being read. */
+  main:has(dialog.sheet[open]) [data-waits] {
+    opacity: 0.6;
+  }
+  main:has(dialog.sheet[open]) form[data-waits] {
+    opacity: 0.7;
+  }
   @keyframes sheet-in {
     from {
       transform: translateX(16px);
       opacity: 0;
     }
+  }
+}
+
+@media (min-width: 1560px) {
+  :root {
+    --sheet: clamp(480px, calc(100vw - 1080px), 720px);
+  }
+  body:has(dialog.sheet[open]) aside {
+    display: block;
   }
 }
 

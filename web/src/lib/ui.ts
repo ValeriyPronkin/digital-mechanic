@@ -49,3 +49,38 @@ export function focusable<T extends { isConnected: boolean; disabled?: boolean }
 ): T | null {
   return candidates.find((el): el is T => !!el && el.isConnected && !el.disabled) ?? null
 }
+
+/** A box on the screen, as `getBoundingClientRect` gives it. */
+export type Box = { left: number; top: number; right: number; bottom: number }
+
+/** Is the point on the box? */
+export function holds(box: Box, x: number, y: number): boolean {
+  return x >= box.left && x <= box.right && y >= box.top && y <= box.bottom
+}
+
+/** Which of the boxes is under the point: its index, or -1. A box takes the point up to `pad` px above and
+ *  below it (a chip is drawn smaller than its tap area).
+ *
+ *  Two padded boxes on neighbouring lines both hold a point between them: in a list where every line ends
+ *  in a chip, the 7,5 px under one chip are the 7,5 px over the next. The box whose middle line is nearer
+ *  takes the point, whatever the order of the boxes, so the upper chip never wins by coming first on the
+ *  page. Nearer is counted down the screen only: a long chip pressed near its end is still that chip, not
+ *  a short one on the next line whose centre happens to be closer. Only on an exact tie, the point on the
+ *  line midway between two chips, does the distance across decide. */
+export function boxAt(boxes: Box[], x: number, y: number, pad = 0): number {
+  let found = -1
+  let nearest = Infinity
+  let across = Infinity
+  boxes.forEach((box, i) => {
+    // the sides are read one by one: a DOMRect keeps them on its prototype, and a spread copy of it is empty
+    if (x < box.left || x > box.right || y < box.top - pad || y > box.bottom + pad) return
+    const away = Math.abs(y - (box.top + box.bottom) / 2)
+    const aside = Math.abs(x - (box.left + box.right) / 2)
+    if (away < nearest || (away === nearest && aside < across)) {
+      found = i
+      nearest = away
+      across = aside
+    }
+  })
+  return found
+}
