@@ -7,7 +7,7 @@
     щуп с размером, ключ S=…, динамометрический ключ, торцевая головка, съёмник, приспособление, оправка, манометр…
     Не назван — поле пустое, не догадываемся.
 
-  uv run python scripts/matrix_enrich.py           → дополнить data/fault_matrix.json и reports/parts-tools.md
+  uv run python scripts/matrix_enrich.py  → дополнить fault_matrix.json (data/ и INDEX_DIR) и reports/parts-tools.md
 Вызывается и из scripts/build_fault_matrix.py после сборки.
 """
 
@@ -20,13 +20,12 @@ from collections import Counter, defaultdict
 from collections.abc import Callable
 from pathlib import Path
 
-from service.fault_matrix import Cell, Ref, normalize, verify_cell
+from service.fault_matrix import Cell, Ref, matrix_path, normalize, save_matrix, verify_cell
 from service.manuals.catalog import documents_for_engine
 from service.manuals.index import index_dir, load_fragments
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "data" / "fault_matrix.src.json"
-OUT = ROOT / "data" / "fault_matrix.json"
 REPORT = ROOT / "reports" / "parts-tools.md"
 MAX_DESIGNATED = 6
 
@@ -181,13 +180,13 @@ def load_pages() -> dict[tuple[str, int], str]:
 
 
 def main() -> int:
-    data = json.loads(OUT.read_text(encoding="utf-8"))
+    data = json.loads(matrix_path().read_text(encoding="utf-8"))
     cells = [Cell.from_json(d) for d in data["cells"]]
     cells, problems = enrich(cells, load_pages())
     data["cells"] = [c.to_json() for c in cells]
-    OUT.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    out = save_matrix(data)
     REPORT.write_text(report(cells), encoding="utf-8")
-    print(f"{OUT.relative_to(ROOT)} дополнена; отчёт {REPORT.relative_to(ROOT)}; выброшено {len(problems)}")
+    print(f"{', '.join(map(str, out))} дополнена; отчёт {REPORT.relative_to(ROOT)}; выброшено {len(problems)}")
     for p in problems:
         print("  выброшено:", p)
     return 0

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from service.fault_matrix import all_cells, normalize
+from service.fault_matrix import applicability_cells, normalize
 from service.manuals.catalog import canonical_engine
 
 PATH = Path(__file__).resolve().parents[2] / "data" / "absent_parts.json"
@@ -65,7 +65,7 @@ def items() -> tuple[Absent, ...]:
             )
         )
     nodes = {k: v for k, v in data.get("matrix_nodes", {}).items() if not k.startswith("_")}
-    for cell in all_cells():
+    for cell in applicability_cells():
         node = nodes.get(cell.code)
         if cell.applicable != "false" or cell.basis is None or node is None:
             continue

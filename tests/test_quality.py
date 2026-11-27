@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from matrix_fixture import needs_matrix
 from service.agent import _page_window
 from service.clients import MLClient, ToirClient
 from service.llm import DeepSeekProvider, LLMReply
@@ -196,6 +197,7 @@ def _ask_b418(ml: MLClient, toir: ToirClient, page: tuple[str, int, str], answer
     return ag.ask(ag.start("B418HK98", "S-0008"), question)
 
 
+@needs_matrix
 def test_unrelated_question_gets_matrix_link_line_and_button(ml: MLClient, toir: ToirClient) -> None:
     from service.fault_matrix import cell_for
 
@@ -221,6 +223,7 @@ def test_card_question_has_no_link_line(ml: MLClient, toir: ToirClient) -> None:
     assert "К найденной неисправности" not in reply.text and reply.followup is None
 
 
+@needs_matrix
 def test_link_line_survives_answer_cache(ml: MLClient, toir: ToirClient) -> None:
     ag, _ = make_agent([_cite("Прогиб 7–12 мм при усилии 40 Н [R1].")], ml, toir, OnePage(BELT))
     ag.ask(ag.start("B418HK98", "S-0008"), "Как проверить натяжение ремня")
@@ -229,6 +232,7 @@ def test_link_line_survives_answer_cache(ml: MLClient, toir: ToirClient) -> None
     assert hit.text.count("К найденной неисправности") == 1
 
 
+@needs_matrix
 def test_model_no_link_sentence_inside_sourced_line_is_dropped(ml: MLClient, toir: ToirClient) -> None:
     answer = (
         "Прогиб 7–12 мм при усилии 40 Н [R1]. По карточке проверки — неисправность клапанного механизма, "
@@ -239,6 +243,7 @@ def test_model_no_link_sentence_inside_sourced_line_is_dropped(ml: MLClient, toi
     assert reply.text.count("К найденной неисправности") == 1
 
 
+@needs_matrix
 def test_any_unsourced_card_sentence_is_replaced_by_code_line(ml: MLClient, toir: ToirClient) -> None:
     answer = "Прогиб 7–12 мм [R1].\n\nПо карточке: отклонение по клапанному механизму, к ремням связи не даёт."
     reply = _ask_b418(ml, toir, BELT, answer, "Как проверить натяжение ремня")
