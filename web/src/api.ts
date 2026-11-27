@@ -85,6 +85,9 @@ export interface VerdictBlock {
   anomaly_score: number | null
   confidence: number | null
   confidence_word: string | null
+  // The confidence below which the result is preliminary (the server's rule; 0,6 in data/danger_classes.json).
+  // Absent from a server that does not send it: then the card says nothing about it.
+  confidence_threshold?: number | null
   signal_quality: SignalQuality
   quality_word: string
   urgency: UrgencyView | null

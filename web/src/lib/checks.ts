@@ -70,3 +70,17 @@ export function rowBadges(badges: { code: string; label: string }[]): {
     withReason: badges.some((b) => b.code === 'result_mismatch'),
   }
 }
+
+/** The confidence against the server's threshold, in numbers: below it the result is preliminary. Null when
+ *  the server did not send the threshold or the check has no confidence (a failed recording). */
+export function confidenceLine(
+  v: Pick<VerdictBlock, 'confidence' | 'confidence_threshold'>,
+): { text: string; below: boolean } | null {
+  const t = v.confidence_threshold
+  if (v.confidence === null || t === null || t === undefined) return null
+  const below = v.confidence < t
+  return {
+    text: (below ? copy.verdict.belowThreshold : copy.verdict.atThreshold)(num(v.confidence), num(t)),
+    below,
+  }
+}
