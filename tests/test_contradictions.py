@@ -206,3 +206,18 @@ def test_model_block_under_known_conflict_is_not_withdrawn(ml: MLClient, toir: T
     ag, _ = make_agent([say(answer)], ml, toir, TorquePages())
     reply = ag.ask(ag.start("B418HK98", "S-0007"), "С каким моментом тянуть болты крышек коренных подшипников?")
     assert HEADER in reply.text and "Утверждение снято" not in reply.text and reply.withdrawn == []
+
+
+def test_disputed_timing_outside_the_topic_gets_the_rule_without_block(ml: MLClient, toir: ToirClient) -> None:
+    """B418HK98 (видео), текст к черновику заявки: «регулировка — на холодном или не позднее 15 минут после остановки»
+    по одной странице. Блок противоречия только под вопросом о зазорах, а здесь — правило вместо одной формулировки."""
+    answer = (
+        "Черновик готов: дефектовка клапанного механизма.\n\n"
+        "1. Регулировка — на холодном двигателе или не позднее 15 минут после остановки [R1]."
+    )
+    from test_agent import call
+
+    ag, _ = make_agent([call("search_manual", query="регулировка зазоров"), say(answer)], ml, toir, Manual236())
+    reply = ag.ask(ag.start("B418HK98", "S-0007"), "Создай заявку на дефектовку.")
+    assert "не позднее 15 минут" not in reply.text and HEADER not in reply.text
+    assert "1. Безопасное правило: Регулировать зазоры на холодном двигателе" in reply.text

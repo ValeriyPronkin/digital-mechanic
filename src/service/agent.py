@@ -2106,6 +2106,13 @@ class Agent:
             # блок — только под ответом на вопрос о спорной теме (зазоры), а не под диагнозом или «можно ли ехать»
             k = contradictions.match_answer(conv.vehicle.engine_model, text)
             if k is not None and not k.topic.search(_last_question(conv)):
+                # ответ не о спорной теме, но называет спорный срок или значение (B418HK98, текст к черновику заявки:
+                # «не позднее 15 минут после остановки [S2]») — без блока, но вместо одной формулировки — правило
+                page_text = getattr(self.searcher, "page_text", None)
+                quotes = contradictions.verified_quotes(k, page_text)
+                if len(quotes) >= 2:
+                    rule = k.conclusion or contradictions.safe_rule(k, quotes, page_text)
+                    text = contradictions.neutralize(k, text, f"{contradictions.RULE} {rule}")
                 k = None
             if k is not None:
                 quotes = contradictions.verified_quotes(k, getattr(self.searcher, "page_text", None))
