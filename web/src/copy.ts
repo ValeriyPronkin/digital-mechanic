@@ -295,6 +295,26 @@ export const copy = {
   } as Record<string, string>,
   // Manuals disagree (D-20): both wordings verbatim, each with its page; the line under them is the server's
   // hand-over to the chief mechanic (#93), shown as it comes.
+  // The vehicle's earlier conversations (#92): continue one, or print it for a warranty claim.
+  history: {
+    title: 'Обращения по машине',
+    count: (n: number) => `${n}`,
+    status: {
+      open: 'разговор',
+      ticket_pending: 'заявка ждёт подтверждения',
+      ticket_sent: 'заявка отправлена',
+    } as Record<string, string>,
+    noTopic: 'без вопроса',
+    records: (n: number) => `записей: ${n}`,
+    current: 'Открыто сейчас',
+    resume: 'Продолжить',
+    resuming: 'Открываем…',
+    claim: 'Для рекламации',
+    claimHint: 'Все ответы со страницами руководства, модель и проверка, что записи не правили. Откроется для печати',
+    json: 'JSON',
+    loadFailed: 'Не получилось загрузить обращения',
+    resumeFailed: 'Не получилось открыть обращение. Попробуйте ещё раз',
+  },
   contradiction: {
     title: (what: string) => `Противоречие в документации — ${what}`,
     label: 'Противоречие в документации',

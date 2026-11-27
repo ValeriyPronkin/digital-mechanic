@@ -671,6 +671,24 @@ def topic_of(question: str) -> str:
     return q if len(q) <= 80 else q[:79].rstrip() + "…"
 
 
+DIAG_TOPIC = "Результат проверки"
+
+
+def thread_topic(current: str | None, question: str, session_id: str) -> str:
+    """Тема обращения в истории машины — первый настоящий вопрос нити. Кнопка «Получить результат диагностики»
+    своих слов не несёт: пока других вопросов нет, тема — «Результат проверки S-…», а первый вопрос механика её
+    заменяет (и в нитях, где темой уже стоит текст кнопки)."""
+    from service.agent import _DIAG_ASK
+
+    diag = bool(_DIAG_ASK.match(question))
+    placeholder = not current or current.startswith(DIAG_TOPIC) or bool(_DIAG_ASK.match(current))
+    if not placeholder:
+        return current or ""
+    if diag:
+        return current if current and current.startswith(DIAG_TOPIC) else f"{DIAG_TOPIC} {session_id}".strip()
+    return topic_of(question)
+
+
 def answer_record(conv: Conversation, reply: AgentReply, question: str, text: str) -> dict[str, Any]:
     """Запись для рекламации об ответе: что спросили, что ответили, по каким страницам, чем и какой версией."""
     from service.agent import mask_pii
@@ -1094,7 +1112,7 @@ def build_router(
             ]
             thread["pending"] = {k: pending[k] for k in pending if k != "type"} if pending else None
             thread["state"] = conv_state.dump(conv)
-            thread.setdefault("topic", topic_of(req.message))  # тема обращения — первый вопрос нити
+            thread["topic"] = thread_topic(thread.get("topic"), req.message, thread.get("session_id") or "")
             threads.put(b, v.vehicle_id, thread)
             remember(
                 v.vehicle_id,
