@@ -25,7 +25,51 @@
    "must": "клапан|коромысл|толкател",
    "cells": {
     "ЯМЗ-236М2": {
-     "applicable": "true"
+     "applicable": "true",
+     "pages": [
+      {
+       "doc": "yamz-236-re",
+       "page": 53,
+       "what": "неисправности"
+      },
+      {
+       "doc": "yamz-236-re",
+       "page": 31,
+       "what": "регулировка"
+      },
+      {
+       "doc": "yamz-236-rk",
+       "page": 229,
+       "what": "нормы"
+      },
+      {
+       "doc": "yamz-236-rk",
+       "page": 269,
+       "what": "регулировка"
+      },
+      {
+       "doc": "yamz-236-re",
+       "page": 34,
+       "what": "регулировка"
+      }
+     ],
+     "operations": [
+      {
+       "doc": "yamz-236-re",
+       "page": 53,
+       "anchor": "Нарушена регулировка клапанного механи",
+       "last": "в клапанном механизме",
+       "words": 12
+      },
+      {
+       "doc": "yamz-236-rk",
+       "page": 269,
+       "anchor": "Проверить и подрегулировать тепловые",
+       "last": "после остановки двигателя",
+       "words": 23
+      }
+     ],
+     "signed": "registry/coverage.yaml, подпись V Pronkin 27.11"
     },
     "ЯМЗ-536": {
      "applicable": "true"
