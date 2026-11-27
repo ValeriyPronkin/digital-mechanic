@@ -11,9 +11,11 @@ from typing import Any
 import pytest
 
 from service.clients import MLClient, ToirClient
-from service.contradictions import ADVICE, HEADER, check_model_blocks, known, verified_quotes
+from service.contradictions import ESCALATION, HEADER, check_model_blocks, known, verified_quotes
 from service.manual_search import ManualHit
 from test_agent import make_agent, say
+
+ADVICE = "Передано главному механику на решение (№ "  # строка эскалации вместо совета (Валерий, 27.11)
 
 RE31 = "Тепловые зазоры регулировать на холодном двигателе или менее чем через 15 минут после его остановки."
 RK269 = ("Проверить и подрегулировать тепловые зазоры клапанного механизма перед началом и по окончании обкатки, "
@@ -114,8 +116,8 @@ def test_without_page_text_no_contradiction_claimed(ml: MLClient, toir: ToirClie
 def test_model_block_kept_only_with_two_verified_quotes() -> None:
     sources = {"R1": PAGES[("yamz-236-re", 31)], "R2": PAGES[("yamz-236-rk", 269)]}
     good = f"Ответ.\n\nПротиворечие в документации:\n- «{RE31}» [R1]\n- «{RK269}» [R2]"
-    text, notes = check_model_blocks(good, sources.get)
-    assert RE31 in text and RK269 in text and ADVICE in text and not notes
+    text, notes = check_model_blocks(good, sources.get, lambda found: f"{ADVICE}9). Пока — …")
+    assert RE31 in text and RK269 in text and ADVICE in text and not notes and ESCALATION.search(text)
     fake = f"Ответ.\n\nПротиворечие в документации:\n- «{RE31}» [R1]\n- «Регулировать на горячем двигателе сразу.» [R2]"
     text, notes = check_model_blocks(fake, sources.get)
     assert "Противоречие" not in text and "горячем" not in text and notes  # вторая цитата не со страницы — убрано

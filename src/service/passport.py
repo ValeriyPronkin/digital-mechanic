@@ -70,6 +70,7 @@ def build(
     stt: dict[str, Any] | None = None,
     speech_text: str = "",
     level: str | None = None,
+    level_reason: str | None = None,
 ) -> dict[str, Any]:
     """Паспорт по разделам issue #31. `stt` — запись журнала голоса о распознавании этого вопроса."""
     steps = trace.get("steps") or []
@@ -141,6 +142,7 @@ def build(
             "lang": plan.get("lang", "ru"),
             "question_ru": plan.get("question_ru"),
             "level": level,
+            "level_reason": level_reason,
         },
         "tools": tools,
         "searches": searches,
