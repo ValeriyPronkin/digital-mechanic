@@ -26,13 +26,29 @@ _GENERIC = {
 }  # fmt: skip
 
 
+# Обозначения («ЯМЗ-236М2», «ЯМЗ-5363») и ссылки [R12] — метки, а не числа фразы (стенд 27.11: «236» из «ЯМЗ-236М2»
+# искался в строках таблицы и снимал верную фразу про 2100 об/мин)
+_LABEL = re.compile(r"\b(?:ЯМЗ|ЗМЗ|МАЗ|КамАЗ|ГАЗ|УАЗ)[\s‑–-]*\d[\d.]*(?:[А-ЯA-Z]\d*)*|\[[RS]\d+\]", re.I)
+
+
 def _nums(text: str) -> set[str]:
     return {n.replace(",", ".") for n in _NUM.findall(text) if len(n.replace(",", "").replace(".", "")) >= 2}
+
+
+def _claim_nums(sentence: str) -> set[str]:
+    return _nums(_LABEL.sub(" ", sentence))
 
 
 def distinct(text: str) -> set[str]:
     """Отличительные слова: леммы длиной ≥ 4 без общих слов таблиц."""
     return {t for t in tokenize(text) if len(t) >= 4 and not t[0].isdigit() and t not in _GENERIC}
+
+
+def _prose_goes_on(lines: list[str], i: int) -> bool:
+    """Строка кончается числом, но это обычный текст: следующая строка продолжает фразу со строчной буквы и сама
+    числом не кончается («…усилием 39,2» / «должен быть от 4 до 8 мм.», «…(360» / «градусов).»)."""
+    nxt = next((ln for ln in lines[i + 1 :] if ln), "")
+    return bool(nxt) and nxt[0].islower() and not _ROW_END.search(nxt)
 
 
 def rows_with(number: str, page: str) -> list[str] | None:
@@ -43,7 +59,7 @@ def rows_with(number: str, page: str) -> list[str] | None:
     for i, ln in enumerate(lines):
         if number not in _nums(ln):
             continue
-        if not _ROW_END.search(ln):
+        if not _ROW_END.search(ln) or _prose_goes_on(lines, i):
             in_text = True
             continue
         row = [ln]
@@ -71,6 +87,8 @@ def rows_with(number: str, page: str) -> list[str] | None:
                     row.insert(0, f"{lines[k - 1]} {lines[k]}" if joined else lines[k])
                     break
                 k -= 1
+        if not distinct(" ".join(row)):  # значение без названия (колонка таблицы по моделям) — строку не узнать
+            continue
         rows.append(" ".join(row))
     if not rows or in_text:
         return None  # в обычном тексте число тоже есть — строку таблицы не требуем
@@ -94,15 +112,52 @@ def _matches(want: set[str], row: str, weak: set[str]) -> bool:
     return bool(want & (strong or words))
 
 
+# фраза «в руководстве этого нет» числа со страницы не утверждает — повторяет вопрос («расход AdBlue на 100 л … в
+# руководстве не нашёл»); строку таблицы для неё не ищем
+_NO_DATA = r"(?:не\s+наш[её]л|не\s+найден\w*|не\s+указан\w*|не\s+привод\w*|нет)"
+_ABSENT = re.compile(
+    rf"(?:руководств|фрагмент)\w*[^.!?]{{0,80}}?\b{_NO_DATA}\b"
+    rf"|\b{_NO_DATA}\b[^.!?]{{0,80}}?(?:руководств|фрагмент)",
+    re.I,
+)
+
+
+def _table_words(page: str) -> set[str]:
+    """Различающие слова строк таблиц страницы: строка, кончающаяся числом, и до двух строк названия над ней."""
+    lines = [ln.strip() for ln in page.split("\n")]
+    out: set[str] = set()
+    for i, ln in enumerate(lines):
+        if ln and _ROW_END.search(ln) and not _prose_goes_on(lines, i):
+            out |= distinct(" ".join(lines[max(0, i - 2) : i + 1]))
+    return out
+
+
+def _whole_range(want: set[str], row: str, page: str, nums: set[str]) -> bool:
+    """Фраза повторяет диапазон строки целиком (в строке ≥ 2 числа фразы), строка совпадает с фразой или вопросом
+    хотя бы по двум словам (пусть и общим для страницы), а другой строки таблицы фраза и вопрос не называют.
+    Так проходит «от 130,00 до 130,02 мм» внутреннего диаметра гильзы и «1300…1600 мин⁻¹» при максимальном моменте,
+    где все слова строки есть и в соседних строках; «430-470» для «крышек шатунов» по-прежнему снимается."""
+    words = distinct(row)
+    if len(nums & _nums(row)) < 2 or len(want & words) < 2:
+        return False
+    return not (want & (_table_words(page) - _weak(page)) - words)
+
+
 def row_ok(sentence: str, question: str, pages: list[str]) -> bool:
     """Каждое число фразы, стоящее на странице в строке таблицы, — в строке с деталью из фразы или вопроса
     (по различающим словам строки; общие для многих строк слова не в счёт)."""
     want = distinct(sentence) | distinct(question)
-    for n in _nums(sentence):
+    if _ABSENT.search(sentence):
+        return True
+    nums = _claim_nums(sentence)
+    for n in nums:
         checked = [rows_with(n, p) for p in pages]
         if any(c is None and n in _nums(p) for c, p in zip(checked, pages, strict=True)):
             continue  # число есть в обычном тексте страницы
-        pairs = [(r, _weak(p)) for c, p in zip(checked, pages, strict=True) if c is not None for r in c]
-        if pairs and want and not any(_matches(want, r, weak) for r, weak in pairs):
-            return False
+        found = [(r, p) for c, p in zip(checked, pages, strict=True) if c is not None for r in c]
+        if not found or not want:
+            continue
+        if any(_matches(want, r, _weak(p)) or _whole_range(want, r, p, nums) for r, p in found):
+            continue
+        return False
     return True
