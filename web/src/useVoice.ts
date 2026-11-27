@@ -23,9 +23,12 @@ type State = 'idle' | 'recording' | 'sending'
 export function useVoice(onText: (text: string) => void) {
   const [state, setState] = useState<State>('idle')
   const [error, setError] = useState<string | null>(null)
-  const rec = useRef<{ ctx: AudioContext; stream: MediaStream; node: ScriptProcessorNode; chunks: Float32Array[] } | null>(
-    null,
-  )
+  const rec = useRef<{
+    ctx: AudioContext
+    stream: MediaStream
+    node: ScriptProcessorNode
+    chunks: Float32Array[]
+  } | null>(null)
   const timer = useRef<number | undefined>(undefined)
   const gone = useRef(false) // the screen was left: release the microphone, send nothing
 

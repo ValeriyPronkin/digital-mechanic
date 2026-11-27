@@ -131,7 +131,7 @@ def test_c1_anomaly_to_ticket(ml: MLClient, toir: ToirClient) -> None:
     body = reply.draft["body"]
     assert body["anomaly_type"] == "F02" and body["urgency"] == "high"
     assert body["references"] == [{"manual": "Руководство по ремонту", "pdf_page": 42}]
-    assert reply.draft["urgency_reason"].startswith("Низкое давление масла — класс 3 из 3 → высокая")
+    assert reply.draft["urgency_reason"].startswith("Опасная неисправность: без давления масла")
     resp = ag.confirm_ticket(conv, reply.draft["fingerprint"])
     assert resp.ticket_id.startswith("TKT-")
     assert ag.store.vehicle_memory(ANOMALY[0])["tickets"][0]["ticket_id"] == resp.ticket_id
