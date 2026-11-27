@@ -135,3 +135,65 @@ def find(
         if len(out) >= limit:
             break
     return out
+
+
+# ---------- разметка ответа для /api/v2: запчасти и инструмент отдельным цветом (Валерий и Никита, 27.11) ----------
+
+_VERB = re.compile(r"(?:ить|ать|ять|еть|уть)$", re.I)
+
+
+def _name_pattern(name: str) -> re.Pattern[str] | None:
+    """Название в любом падеже: основа каждого слова («уплотнительн\\w* кольц\\w* инжектор\\w*»)."""
+    words = [w for w in re.findall(r"[а-яёa-z]+", name.lower()) if len(w) >= 3]
+    if not words or (len(words) == 1 and len(words[0]) < 3):
+        return None
+    stems = [re.escape(w[: max(3, len(w) - 2)] if len(w) > 4 else w) + r"\w*" for w in words]
+    return re.compile(r"(?<![\wё])" + r"\s+".join(stems) + r"(?![\wё])", re.I)
+
+
+def spans(engine: str, text: str, cited: dict[tuple[str, int], str] | None = None) -> list[dict[str, object]]:
+    """Где в тексте ответа запчасти и инструмент из реестра двигателя: [{type, text, start, end, name, designation,
+    page, ref}]. Обозначение или размер ищется дословно, название — по основам слов. Без пересечений: длинное
+    совпадение важнее короткого. `cited` — {(doc, страница): метка S…} страниц ответа: ссылка ставится, если
+    страница записи в ответе; иначе ref=None (страница записи — в page). Размечает сервер по реестру, не модель."""
+    cited = cited or {}
+    where: dict[str, set[tuple[str, int]]] = {}
+    for r in records(engine):
+        if r.code:
+            where.setdefault(r.code.lower(), set()).add((r.doc, r.page))
+    found: list[tuple[int, int, int, bool, Record]] = []
+    for r in records(engine):
+        if _VERB.search(r.name):
+            continue  # «заменить» — не деталь (обрывок разбора)
+        pats: list[tuple[re.Pattern[str], bool]] = []
+        if r.code and re.search(r"\d", r.code) and len(r.code) >= 4:
+            pats.append((re.compile(r"(?<![\w.\-])" + re.escape(r.code) + r"(?![\w\-])", re.I), True))
+        if r.kind == "tool" or len(r.name.split()) > 1 or len(r.name) >= 6:
+            if p := _name_pattern(r.name):
+                pats.append((p, False))
+        for p, by_code in pats:
+            for m in p.finditer(text):
+                found.append((m.start(), m.end(), int((r.doc, r.page) in cited), by_code, r))
+    # длиннее — раньше; при равной длине — запись со страницы ответа, затем совпавшая обозначением
+    found.sort(key=lambda x: (-(x[1] - x[0]), -x[2], -int(x[3]), x[0]))
+    taken: list[tuple[int, int]] = []
+    out: list[dict[str, object]] = []
+    for start, end, on_page, by_code, r in found:
+        if any(start < e and s < end for s, e in taken):
+            continue
+        taken.append((start, end))
+        # страница записи — только если она в ответе или обозначение встречается в руководствах на одной странице
+        # («S=13» — на десятках страниц, «24-Ф-74784.001» — на одной); иначе страница и обозначение могут быть чужими
+        exact = bool(on_page or (by_code and len(where.get(r.code.lower(), ())) == 1))
+        out.append({
+            "type": r.kind,
+            "text": text[start:end],
+            "start": start,
+            "end": end,
+            "name": r.name,
+            "designation": (r.code or None) if (exact or by_code) else None,
+            "page": r.page if exact else None,
+            "manual_id": r.doc if exact else None,
+            "ref": cited.get((r.doc, r.page)),
+        })  # fmt: skip
+    return sorted(out, key=lambda s: int(s["start"]))  # type: ignore[call-overload]

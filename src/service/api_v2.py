@@ -69,6 +69,23 @@ def handle(ref: str) -> str:
     return "S" + ref[1:] if ref.startswith("R") else ref
 
 
+def answer_spans(conv: Conversation, reply: AgentReply, text: str) -> list[dict[str, Any]]:
+    """Запчасти и инструмент в тексте ответа — по реестру руководств (`parts_tools.spans`), для раскраски в web/:
+    {type: part|tool, text, start, end, name, designation, page, manual_id, ref}. Смещения — в символах Unicode."""
+    from service import parts_tools
+
+    cited: dict[tuple[str, int], str] = {}
+    for s in reply.sources:
+        doc = str(s.get("url") or "").removeprefix("/manuals/").split("#", 1)[0]
+        if doc:
+            cited[(doc, int(s["pdf_page"]))] = handle(str(s["ref"]))
+    try:
+        return parts_tools.spans(conv.vehicle.engine_model, text, cited)
+    except Exception:  # разметка — украшение: сбой не рвёт ответ
+        log.exception("разметка запчастей и инструмента")
+        return []
+
+
 def to_handles(text: str) -> str:
     return _REF.sub(lambda m: f"[S{m.group(1)}]", text)
 
@@ -1024,7 +1041,8 @@ def build_router(
                 "level_word": LEVEL_WORD[reply.level_used],  # type: ignore[index]
                 "level_reason": reply.level_reason,
             }
-            yield _sse({"type": "text", "text": text, "round": 1, **level_info})
+            spans = answer_spans(conv, reply, text)  # запчасти и инструмент — для раскраски в web/
+            yield _sse({"type": "text", "text": text, "round": 1, **level_info, "spans": spans})
             ver = verification(reply, text)
             yield _sse(ver)
             # «Показать по-русски» — вслед за ответом, механик его не ждёт; цифры проверены guard
