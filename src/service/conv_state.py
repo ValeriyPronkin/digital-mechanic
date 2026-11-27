@@ -75,6 +75,7 @@ def dump(conv: Conversation) -> str:
             "urgency_reason": conv.draft.urgency_reason,
             "fingerprint": conv.draft.fingerprint,
             "tools": conv.draft.tools,
+            "op_pages": conv.draft.op_pages,
         },
     }
     raw = zlib.compress(json.dumps(state, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), 9)
@@ -106,5 +107,6 @@ def load(token: str, fleet: Fleet) -> Conversation:
             urgency_reason=d["urgency_reason"],
             fingerprint=d["fingerprint"],
             tools=list(d.get("tools") or []),
+            op_pages=[(str(m), int(p)) for m, p in d.get("op_pages") or []],
         )
     return conv
