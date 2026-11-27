@@ -1,7 +1,11 @@
 """Чистый отказ (независимый прогон 26.11, п. 5): в 5 из 7 честных отказов агент всё равно приводил рядом числа
 с единицами — значения других деталей («нет в руководстве; есть болты распредвала 18,6…22,6 Н·м»). Малоквалифицированный
 механик примет их за ответ. Если прямой ответ (первый абзац) — «в руководстве нет», код убирает фразы с числами
-и единицами из всего ответа; шаги без чисел (дефектовка, к специалисту) остаются."""
+и единицами из всего ответа; шаги без чисел (дефектовка) остаются.
+
+Правило заказчика 27.11 (ответ в канале): отказ — правильная основа, но «обратитесь к специалисту» не подходит —
+механик сам специалист. Нужно конкретное действие: дефектовка узла и/или ближайший раздел руководства этого двигателя
+со страницей (`complete`). Фразы «к специалисту» без ссылки на руководство код убирает из любого ответа."""
 
 from __future__ import annotations
 
@@ -55,3 +59,43 @@ def clean(text: str) -> tuple[str, bool]:
         elif kept:
             out.append(prefix + " ".join(kept))
     return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip(), removed
+
+
+_SPECIALIST = re.compile(r"специалист", re.I)
+_REF = re.compile(r"\[R\d+\]")
+
+
+def drop_specialist(text: str) -> tuple[str, bool]:
+    """Фразы «к специалисту / уточните у специалиста» без ссылки [R…] — убрать: механик сам специалист.
+    Цитата руководства со ссылкой, где есть слово «специалист», остаётся."""
+    out, removed = [], False
+    for line in text.split("\n"):
+        m = _LIST.match(line)
+        prefix = m.group(1) if m else ""
+        parts = [p for p in _SENT.split(line[len(prefix) :]) if p]
+        kept = [p for p in parts if not (_SPECIALIST.search(p) and not _REF.search(p))]
+        removed = removed or len(kept) < len(parts)
+        if not parts:
+            out.append(line)
+        elif kept:
+            out.append(prefix + " ".join(kept))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip(), removed
+
+
+_ACTION = re.compile(r"дефектовк", re.I)
+_NEAREST = re.compile(r"ближе всего", re.I)
+
+
+def complete(text: str, action: str, nearest: str | None) -> tuple[str, list[str]]:
+    """Отказ без конкретного действия — дописать: дефектовка узла (`action`) и «ближе всего: раздел, стр. N»
+    (`nearest`, если поиск нашёл страницу этого двигателя, а ответ на неё не сослался). → (текст, что дописано)."""
+    if not is_refusal(text):
+        return text, []
+    added: list[str] = []
+    if not _ACTION.search(text):
+        added.append(action)
+    if nearest and not _NEAREST.search(text) and not _REF.search(text):
+        added.append(nearest)
+    if not added:
+        return text, []
+    return f"{text.rstrip()}\n\n" + "\n".join(added), added
