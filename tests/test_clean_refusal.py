@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from service.clean_refusal import NOTE, clean, is_refusal
+from service.clean_refusal import NOTE, clean, complete, drop_specialist, is_refusal
 from service.clients import MLClient, ToirClient
-from test_agent import make_agent, say
+from test_agent import ANOMALY, make_agent, say
 
 REFUSAL = (
     "В таблице моментов затяжки этого двигателя строки «гайки стоек оси коромысел» нет — в руководстве не нашёл. "
@@ -42,7 +42,43 @@ def test_refusal_detected_only_in_direct_answer() -> None:
 
 
 def test_agent_refusal_is_clean(ml: MLClient, toir: ToirClient) -> None:
-    answer = "В руководстве не нашёл момент для этой гайки. Есть давление масла 0,4–0,7 МПа [R1].\n\n1. К специалисту."
+    answer = "В руководстве не нашёл момент для этой гайки. Есть давление масла 0,4–0,7 МПа [R1].\n\n1. На дефектовку."
     ag, _ = make_agent([say(answer)], ml, toir)
     reply = ag.ask(ag.start("B418HK98", "S-0007"), "Какой момент гайки?")
-    assert "МПа" not in reply.text and "1. К специалисту." in reply.text and NOTE in reply.notes
+    assert "МПа" not in reply.text and "1. На дефектовку." in reply.text and NOTE in reply.notes
+
+
+def test_specialist_advice_dropped_but_manual_quote_kept() -> None:
+    """Правило заказчика 27.11: механик сам специалист — «к специалисту» без ссылки убирается."""
+    text, removed = drop_specialist("В руководстве нет. Обратитесь к специалисту.\n«Ремонт выполняет специалист» [R2].")
+    assert removed and "Обратитесь" not in text and "[R2]" in text
+
+
+def test_refusal_gets_action_and_nearest_page() -> None:
+    text, added = complete(
+        "В руководстве на ЯМЗ-236М2 этого нет.", "Что сделать: дефектовка.", "Ближе всего: стр. 5 [R3]."
+    )
+    assert added == ["Что сделать: дефектовка.", "Ближе всего: стр. 5 [R3]."] and text.endswith("[R3].")
+    # действие уже есть — второй раз не дописывается; положительный ответ не трогается
+    assert complete("В руководстве нет. Нужна дефектовка насоса.", "Что сделать: X.", None) == (
+        "В руководстве нет. Нужна дефектовка насоса.",
+        [],
+    )
+    assert complete("Зазор 0,25 мм [R1].", "Что сделать: X.", "Ближе: Y")[1] == []
+    # частичный ответ со ссылками (eval Q36: «прямо названы только болты маховика [R10]») — не дописывается
+    assert complete("В найденных фрагментах нет запрета.\n\n1. Болты маховика — новые [R10].", "X", "Y")[1] == []
+
+
+def test_agent_refusal_names_node_and_nearest_page(ml: MLClient, toir: ToirClient) -> None:
+    ag, _ = make_agent([say("В руководстве на этот двигатель этого нет. Обратитесь к специалисту.")], ml, toir)
+    reply = ag.ask(ag.start(*ANOMALY), "Что делать, почему давление падает?")
+    assert "специалист" not in reply.text
+    assert "Что сделать: дефектовка узла по неисправности" in reply.text and "(F02)" in reply.text
+    near = reply.sources[-1]  # ближайшая страница этого двигателя из поиска — в источниках ответа
+    assert f"Ближе всего в руководстве на ЯМЗ-236М2: «{near['section']}», стр. {near['pdf_page']}" in reply.text
+
+
+def test_refusal_off_card_question_names_question_node(ml: MLClient, toir: ToirClient) -> None:
+    ag, _ = make_agent([say("В руководстве на этот двигатель этого нет.")], ml, toir)
+    reply = ag.ask(ag.start(*ANOMALY), "Какой момент затяжки гайки шкива?")
+    assert "Что сделать: дефектовка узла, о котором вопрос." in reply.text and "F02" not in reply.text
