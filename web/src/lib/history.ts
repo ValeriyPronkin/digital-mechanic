@@ -39,3 +39,14 @@ export function historyRows(rows: ThreadRow[], currentId: string | null): Histor
     canClaim: (r.records ?? 0) > 0,
   }))
 }
+
+/** How many conversations show before «Показать все»: the jury will start conversations of its own, and the
+ *  list grows (Валерий, 27.11). */
+export const FIRST_ROWS = 3
+
+/** The newest `n` rows, and the open one wherever it stands: what is on the screen is always in the list. */
+export function firstRows<T extends { current: boolean }>(rows: readonly T[], n = FIRST_ROWS): T[] {
+  const head = rows.slice(0, n)
+  const open = rows.slice(n).find((r) => r.current)
+  return open ? [...head, open] : head
+}
