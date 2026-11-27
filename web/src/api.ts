@@ -1,5 +1,7 @@
 // Shapes mirror app/schemas.py. One place for every call to the backend.
 
+import type { LevelChoice } from './lib/level'
+
 export type Status = 'normal' | 'anomaly' | 'check_failed'
 export type SignalQuality = 'good' | 'warning' | 'bad'
 export type Urgency = 'low' | 'medium' | 'high'
@@ -245,7 +247,7 @@ export interface PassportFragment {
 }
 export interface Passport {
   request_id: string | null
-  question?: { text: string | null; by_voice: boolean; level: 'expert' | 'steps' | null } | null
+  question?: { text: string | null; by_voice: boolean; level: string | null } | null // novice | mechanic | master (#91)
   searches: { by: string; engine: string | null; queries: string[]; found: number; fragments: PassportFragment[] }[]
   llm: {
     name: string
@@ -325,7 +327,7 @@ export type ChatEvent =
   | { type: 'tool_started'; id: string; name: string; label: string; input?: Record<string, unknown> }
   | { type: 'tool_result'; id: string; name: string; ok: boolean; block: Block | null }
   | { type: 'sources'; items: SourceItem[] }
-  | { type: 'text'; text: string; round: number }
+  | { type: 'text'; text: string; round: number; level_used?: string }
   | ({ type: 'verification'; text: string } & Verification)
   | ({ type: 'ticket_pending' } & TicketPending)
   | ({ type: 'usage' } & UsageEvent)
@@ -418,7 +420,7 @@ export async function streamChat(
     message: string
     session_id?: string | null
     new_thread?: boolean
-    level?: 'expert' | 'steps' // the mechanic's level (#17): form and length of the answer
+    level?: LevelChoice // «auto»: the server picks per question (#91); a level only when the mechanic asked for it
   },
   onEvent: (event: ChatEvent) => void,
   signal?: AbortSignal,

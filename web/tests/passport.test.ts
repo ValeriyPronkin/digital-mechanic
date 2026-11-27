@@ -17,10 +17,29 @@ const passport: Passport = {
       ],
     },
   ],
-  llm: [{ name: 'deepseek-flash', provider: 'deepseek', tokens_in: 3936, tokens_cached: 3712, tokens_out: 293, ms: 1900, cost_rub: 0.0412 }],
+  llm: [
+    {
+      name: 'deepseek-flash',
+      provider: 'deepseek',
+      tokens_in: 3936,
+      tokens_cached: 3712,
+      tokens_out: 293,
+      ms: 1900,
+      cost_rub: 0.0412,
+    },
+  ],
   voice: { stt_seconds: 0, stt_rub: 0, tts_chars: 0, tts_rub_estimate: 0 },
   rules: ['Ответ прошёл проверки кода без правок.'],
-  total: { model_rub: 0.0412, search_rub: 0.00002, voice_rub: 0, total_rub: 0.0412, ms: 2400, fragments_tokens: 200, unused_tokens: 80, unused_share: 0.4 },
+  total: {
+    model_rub: 0.0412,
+    search_rub: 0.00002,
+    voice_rub: 0,
+    total_rub: 0.0412,
+    ms: 2400,
+    fragments_tokens: 200,
+    unused_tokens: 80,
+    unused_share: 0.4,
+  },
 }
 
 test('the passport reads as rows: used and unused context, calls with tokens and price, totals by area', () => {

@@ -148,6 +148,18 @@ export const copy = {
     // The reply was cut before a step of the agent (a search, a page, a ticket draft): the step was not done.
     stepCut: 'Ответ оборван, и последний шаг агент не выполнил. Повторите вопрос',
   },
+  // Under the last answer (#91): the level the server chose for this question, and the same question again one
+  // level down or up. `ask` is what goes to the thread as the mechanic's question.
+  level: {
+    answered: { novice: 'Объяснено для новичка', mechanic: 'Объяснено для механика', master: 'Объяснено для мастера' },
+    more: 'Подробнее',
+    shorter: 'Короче',
+    ask: {
+      novice: 'Объясни подробнее, по шагам',
+      mechanic: 'Объясни ещё раз: ответ и порядок работ',
+      master: 'Короче: только значение, инструмент и страница',
+    },
+  },
   sections: [
     'Что слышно',
     'Что это может быть',

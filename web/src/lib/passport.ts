@@ -37,5 +37,4 @@ export function passportRows(p: Passport) {
   return { fragments, calls, total, rules: p.rules }
 }
 
-export const passportFile = (p: Passport) =>
-  new Blob([JSON.stringify(p, null, 1)], { type: 'application/json' })
+export const passportFile = (p: Passport) => new Blob([JSON.stringify(p, null, 1)], { type: 'application/json' })
