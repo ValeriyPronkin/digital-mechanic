@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from service.fault_matrix import QUOTE_MAX_WORDS, Ref, ref_problem
+from matrix_fixture import needs_matrix
+from service.fault_matrix import QUOTE_MAX_WORDS, Ref, normalize, ref_problem
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = json.loads((ROOT / "data" / "fault_matrix.src.json").read_text(encoding="utf-8"))
@@ -73,3 +74,54 @@ def test_signed_cells_build_confirmed_with_registry_pages() -> None:
             assert (cell.pages[0].doc, cell.pages[0].page) == first
             assert len(cell.operations) == len(SRC["codes"][code]["cells"][group]["operations"])
             assert not [p for p in problems if p.startswith(f"{code} × {engine}:")]
+
+
+def test_page_quote_starts_at_cell_and_stays_within_words() -> None:
+    """Цитата страницы не режет слово («чина Способ…» на стенде 27.11): начало — у ячейки, строки с заглавной или
+    предложения рядом с узлом, конец — на границе слова; не длиннее 24 слов; подстрока страницы."""
+    from build_fault_matrix import flat, window
+
+    must = re.compile("температур", re.I)
+    table = (
+        "Таблица 5\nПричина | Способ устранения\nПовышенная температура в системе охлаждения | Заменить термостат. Ещё"
+    )
+    assert window(table, must) == "Повышенная температура в системе охлаждения Заменить термостат."
+    wrapped = "6. При работе следить за\nтемпературой жидкости; " + " ".join(["слово"] * 40)
+    quote = window(wrapped, must)
+    assert quote.startswith("При работе") and quote in flat(wrapped)  # перенос строки со строчной — не начало
+    prose = " ".join(f"слово{i}" for i in range(60)) + " температура " + " ".join(f"хвост{i}" for i in range(60))
+    quote = window(prose, must)
+    assert quote.startswith("температура ")  # начала ячейки рядом нет — с самого слова узла
+    assert len(re.findall(r"\w+", quote)) == QUOTE_MAX_WORDS
+    assert all(w in prose.split() for w in quote.split())  # ни одного обрезка слова
+
+
+def _at_word_bounds(quote: str, page: str) -> bool:
+    q = normalize(quote)
+    for m in re.finditer(re.escape(q), page):
+        before = page[m.start() - 1] if m.start() else " "
+        after = page[m.end()] if m.end() < len(page) else " "
+        if not re.match(r"\w", before) and not re.match(r"\w", after):
+            return True
+    return False
+
+
+@needs_matrix
+@pytest.mark.skipif(not (INDEX / "fragments.jsonl").exists(), reason="индекс не собран (make index)")
+def test_stored_quotes_do_not_start_or_end_inside_a_word() -> None:
+    """Каждая цитата матрицы (основание, страницы, работы, запчасти, предупреждения) на своей странице стоит
+    целыми словами: слева и справа от неё на странице — не буква и не цифра."""
+    from service.fault_matrix import all_cells
+    from service.manuals.index import load_fragments
+
+    texts: dict[tuple[str, int], list[str]] = {}
+    for f in load_fragments(INDEX / "fragments.jsonl"):
+        texts.setdefault((f.doc_id, f.page), []).append(f.text)
+    pages = {k: normalize("\n".join(v)) for k, v in texts.items()}
+    bad = [
+        (c.code, c.engine, r.page, r.quote[:40])
+        for c in all_cells()
+        for r in c.refs()
+        if not _at_word_bounds(r.quote, pages.get((r.doc, r.page), ""))
+    ]
+    assert not bad, bad[:10]

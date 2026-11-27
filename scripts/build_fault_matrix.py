@@ -27,7 +27,7 @@ from typing import Any
 from matrix_enrich import REPORT as PARTS_REPORT
 from matrix_enrich import enrich, load_pages
 from matrix_enrich import report as parts_report
-from service.fault_matrix import Cell, Ref, save_matrix, verify_cell
+from service.fault_matrix import QUOTE_MAX_WORDS, Cell, Ref, save_matrix, verify_cell
 from service.manuals.catalog import ENGINES
 from service.manuals.index import Fragment, index_dir, load_fragments
 from service.manuals.search import ManualIndex
@@ -90,20 +90,48 @@ def what_of(text: str) -> str:
     return "устройство"
 
 
-def window(text: str, must: re.Pattern[str], limit: int = 280) -> str:
-    """Короткая дословная цитата вокруг первого упоминания узла (по границам предложений, если можно)."""
-    t = flat(text)
-    m = must.search(t)
-    if not m:
-        return t[:limit]
-    start = max(t.rfind(". ", 0, m.start()) + 2 if t.rfind(". ", 0, m.start()) >= 0 else 0, m.start() - limit // 2)
-    end = t.find(". ", m.end())
-    end = len(t) if end < 0 else end + 1
-    end = min(end, start + limit)
-    quote = t[start:end].strip()
-    if end < len(t) and " " in quote[limit // 2 :]:
-        quote = quote[: quote.rfind(" ")]
-    return quote
+_CHUNK = re.compile(r"[^\s|]+")
+_WORD = re.compile(r"\w+")
+_LEAD_WORDS = 8  # столько слов до упоминания узла цитата может взять, чтобы начаться с ячейки или предложения
+
+
+def window(text: str, must: re.Pattern[str], limit: int = QUOTE_MAX_WORDS) -> str:
+    """Короткая дословная цитата вокруг первого упоминания узла: не длиннее `limit` слов (`\\w+`), начало и
+    конец — на границе слов. Начинается с ближайшего к узлу начала ячейки таблицы, строки или предложения не дальше
+    `_LEAD_WORDS` слов до узла, иначе — с самого слова узла; кончается концом предложения, если оно влезает.
+    Цитата — подстрока `flat(text)`: куски между пробелами и «|» через один пробел."""
+    chunks: list[tuple[str, int, bool]] = []  # (кусок, его начало в flat, начало ячейки / строки / предложения)
+    pos, prev_end = 0, 0
+    for m in _CHUNK.finditer(text):
+        gap = text[prev_end : m.start()]
+        # начало ячейки или предложения: после «|», после «.;:!?» или с заглавной в начале строки (перенос внутри
+        # фразы — со строчной, с него не начинаем)
+        strong = not chunks or "|" in gap or chunks[-1][0][-1] in ".;:!?" or ("\n" in gap and m.group()[0].isupper())
+        chunks.append((m.group(), pos, strong))
+        pos += len(m.group()) + 1
+        prev_end = m.end()
+    if not chunks:
+        return ""
+    hit = must.search(" ".join(c for c, _, _ in chunks))
+    j = 0 if hit is None else max(i for i, (_, at, _) in enumerate(chunks) if at <= hit.start())
+    lo, words = j, 0
+    while lo > 0 and words + len(_WORD.findall(chunks[lo - 1][0])) <= _LEAD_WORDS:
+        lo -= 1
+        words += len(_WORD.findall(chunks[lo][0]))
+    start = next((k for k in range(j, lo - 1, -1) if chunks[k][2]), j)  # ближайшее к узлу начало ячейки
+    while start < j and not _WORD.search(chunks[start][0]):  # не с «-» или «*»
+        start += 1
+    out: list[str] = []
+    words = 0
+    for k in range(start, len(chunks)):
+        n = len(_WORD.findall(chunks[k][0]))
+        if out and words + n > limit:
+            break
+        out.append(chunks[k][0])
+        words += n
+        if k >= j and chunks[k][0][-1] in ".!?" and words >= 6:
+            break  # предложение с узлом закончилось
+    return " ".join(out).rstrip(" ,;:-–—")
 
 
 def draft_group(
