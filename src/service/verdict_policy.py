@@ -282,7 +282,7 @@ def _build_card(diag: Diagnosis, fault_titles: dict[str, str], engine: str | Non
                 color="grey",
                 title="Результат не подходит к этому двигателю",
                 action=f"Сервис указал «{title}», но {compat.why} ({engine}). "
-                "Скорее всего, ошибка записи: повторите проверку. Заявку по такому результату не оформляем.",
+                "Скорее всего, ошибка записи: повторите проверку. Заявка по такому результату не оформляется.",
                 banners=banners,
                 ticket_possible=False,
                 compatible=False,
@@ -304,7 +304,7 @@ def _build_card(diag: Diagnosis, fault_titles: dict[str, str], engine: str | Non
         else "Неисправность неизвестного типа",
         action=URGENCY_ACTION[urgency]
         if urgency
-        else "Тип неисправности не распознан. Повторите проверку; заявку по такому результату не оформляем.",
+        else "Тип неисправности не распознан. Повторите проверку; заявка по такому результату не оформляется.",
         urgency=urgency,
         urgency_reason=reason,
         danger_class=danger_class(code) if known and code else None,

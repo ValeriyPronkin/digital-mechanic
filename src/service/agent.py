@@ -2570,7 +2570,7 @@ class Agent:
         if not card.compatible:
             return "Код неисправности не подходит к двигателю этой машины — нужна повторная проверка."
         if not card.ticket_possible or not diag.anomaly_type:
-            return "Тип неисправности не распознан — заявку не оформляем."
+            return "Тип неисправности не распознан — заявка не оформляется."
         return None
 
     def _fleet_summary(self) -> dict[str, Any]:
