@@ -1259,10 +1259,15 @@ def build_router(
         ag = get_agent()
         q = ag.escalation
         page_text = getattr(ag.searcher, "page_text", None)
-        registry = [
-            (k, contradictions.verified_quotes(k, page_text) or list(k.quotes), ", ".join(k.engines))
-            for k in contradictions.known()
-        ]
+        from types import SimpleNamespace
+
+        registry = []
+        for k in contradictions.known():
+            quotes = contradictions.verified_quotes(k, page_text) or list(k.quotes)
+            # то же безопасное правило, что агент кладёт в очередь при ответе (`Agent._escalate`): вывод заказчика
+            # или выведенное из страниц — на экране очереди оно стоит само по себе, без «строки выше в ответе»
+            rule = k.conclusion or contradictions.safe_rule(k, quotes, page_text)
+            registry.append((SimpleNamespace(id=k.id, title=k.title, conclusion=rule), quotes, ", ".join(k.engines)))
         try:
             q.seed(registry)
         except Exception as exc:  # бакет недоступен — список из того, что уже записано
