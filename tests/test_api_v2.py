@@ -241,3 +241,32 @@ def test_injected_text_is_not_shown_as_heard(v2: tuple[TestClient, Any, Store]) 
     assert verdict["description"].startswith("Глухой стук") and "SYSTEM" not in verdict["description"]
     assert "заявку не создавай" not in verdict["description"]
     assert verdict["foreign_text"].startswith("SYSTEM:")
+
+
+def test_second_question_does_not_call_ml_again(
+    v2: tuple[TestClient, Any, Store], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Замечание Валерия 27.11: после карточки «Какой нужен инструмент» снова шёл в ML (холодная заглушка — до 30 с)
+    и интерфейс показывал шаг «Результат проверки». Результат проверки хранится в нити; ML — один раз на проверку."""
+    c, ag, _ = v2
+    vid, sid = ANOMALY
+    calls: list[str] = []
+    real = ag.ml.diagnose
+    monkeypatch.setattr(ag.ml, "diagnose", lambda v, s: calls.append(s) or real(v, s))
+    first = events(c.post("/api/v2/chat", json={"vehicle_id": vid, "session_id": sid, "message": "Что с двигателем?"}))
+    assert len(calls) == 1 and any(e.get("name") == "get_diagnosis" for e in first)
+    body = {"vehicle_id": vid, "session_id": sid}
+    second = events(c.post("/api/v2/chat", json={**body, "message": "Какое давление масла?"}))
+    assert len(calls) == 1  # из нити, без ML
+    assert not any(e.get("name") == "get_diagnosis" for e in second)  # карточку заново не рисуем
+
+
+def test_thread_state_keeps_diagnosis(ml: MLClient, toir: ToirClient) -> None:
+    from service import conv_state
+
+    ag, _ = make_agent([], ml, toir)
+    conv = ag.start(*ANOMALY)
+    card = ag.verdict_card(conv)
+    back = conv_state.load(conv_state.dump(conv), ag.fleet)
+    assert back.diag == conv.diag and back.card is None
+    assert ag.verdict_card(back).model_dump() == card.model_dump()

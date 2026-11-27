@@ -26,7 +26,16 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from service import absent_parts, clean_refusal, contradictions, glossary, language, other_engine, row_check
+from service import (
+    absent_parts,
+    clean_refusal,
+    contradictions,
+    glossary,
+    language,
+    other_engine,
+    parts_tools,
+    row_check,
+)
 from service.clients import (
     Diagnosis,
     MLClient,
@@ -82,6 +91,7 @@ FINAL_NOTE = (
     "[Код сервиса: шаги поиска кончились. Ответь сейчас по уже найденным фрагментам, без новых вызовов "
     "инструментов; чего в них нет — так и скажи.]"
 )
+_MODEL_NEED = re.compile(r"^\s*\**Понадобится\**\s*:[^\n]*\n?", re.I | re.M)  # строка модели — заменит реестр
 NO_TIME = "Не успел собрать ответ. Переформулируйте вопрос короче."
 
 SEARCH_PLAN_PROMPT = """Ты готовишь поиск по руководству по эксплуатации и ремонту двигателя. Вопрос механика может \
@@ -183,6 +193,8 @@ operations и spare_parts — они подставятся из матрицы)
 последствиях в руководстве нет», а своё — только в разделе «Предположения, не из руководства» (без чисел и порядка \
 работ). Статус normal или check_failed и вопрос «что с двигателем» — без разделов, 2–3 предложения.
 Длина — до 150 слов. В «Источниках» — только ссылки [R…]. После черновика заявки — одно-два предложения.
+Список инструмента и запчастей («Понадобится: …», «Запчасти: …») не пиши: его добавляет код из реестра \
+руководства, когда механик о нём спрашивает. Инструмент в шаге — только если он назван в этом фрагменте.
 К механику — на «вы», спокойно и безлично: не «ничего не ремонтируй», а «ремонт по этой проверке не нужен». \
 Пиши без «я», «не нашёл», «подготовлю», «отвечаю»; заявку предлагай строкой \
 «Черновик заявки — кнопкой «Создать заявку».». Коды неисправностей (F01…), статусы проверки (anomaly, normal, \
@@ -200,15 +212,15 @@ LEGACY_LEVEL: dict[str, Level] = {"steps": "novice", "expert": "master"}  # «П
 LEVEL_WORD: dict[Level, str] = {"novice": "Новичок", "mechanic": "Механик", "master": "Мастер"}
 LEVEL_PROMPT: dict[Level, str] = {
     "master": "Уровень механика: МАСТЕР — это указание важнее общих правил длины и шагов. Дай только прямой ответ "
-    "(первую часть обычного ответа): 1–3 предложения — значение с единицами, нужный инструмент, ссылка [R…]. "
+    "(первую часть обычного ответа): 1–3 предложения — значение с единицами, ссылка [R…]. "
     "Без нумерованных шагов, списков и пояснения терминов, до 60 слов. "
     "Статус check_failed или normal — одно предложение.",
     "mechanic": "Уровень механика: МЕХАНИК (знает двигатель, нужен порядок работ). Ответ: прямой ответ со значением "
     "и единицами, затем порядок — короткими нумерованными шагами «1. …» без пояснения общих терминов, в каждом шаге "
-    "ссылка [R…]; инструмент — одной строкой «Понадобится: …», если он есть во фрагменте. До 140 слов.",
+    "ссылка [R…]. До 140 слов.",
     "novice": "Уровень механика: НОВИЧОК (механик начинающий или неуверенный). Этот ответ — нумерованными шагами "
-    "«1. …», «2. …», в каждом шаге одно действие и ссылка [R…]. Перед шагами строка «Понадобится: …» (инструмент "
-    "из фрагмента). Если во фрагментах есть условия и меры безопасности (например, двигатель заглушён или "
+    "«1. …», «2. …», в каждом шаге одно действие и ссылка [R…]. Если во фрагментах есть условия и меры "
+    "безопасности (например, двигатель заглушён или "
     "холодный) — отдельной строкой «Безопасность: …» со ссылкой [R…]; если их нет — строку не пиши. "
     "Последним шагом — как проверить результат (по фрагменту). Термины поясняй простыми словами в скобках. "
     "До 220 слов.",
@@ -293,6 +305,20 @@ TOOLS: list[ToolSpec] = [
         },
     ),
     ToolSpec(
+        "find_parts_tools",
+        "Запчасти (с обозначениями, как в руководстве) и инструмент (с размером: «щуп 0,25 мм», «ключ S=13», "
+        "приспособление с обозначением) из реестра руководств двигателя этой машины — по узлу или операции. "
+        "Возвращает записи со ссылками R…. Для вопросов «какой инструмент», «какие запчасти», «что заменить на новое».",
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Узел или операция словами механика"},
+                "kind": {"type": "string", "enum": ["part", "tool", "both"]},
+            },
+            "required": ["query"],
+        },
+    ),
+    ToolSpec(
         "fleet_summary",
         "Сводка по парку для главного механика: карантин / требует внимания / нужна перезапись / норма, "
         "приоритетный список машин с причинами.",
@@ -351,6 +377,9 @@ class Source:
     pdf_page: int
     section: str
     text: str
+    # почему страница попала в контекст модели — для паспорта ответа: «по неисправности из карточки», «поиск по
+    # словам: …», «противоречие в руководствах», «ограничения эксплуатации», «модель открыла страницу». Первая причина.
+    why: str = ""
 
     def public(self) -> dict[str, Any]:
         return {
@@ -399,6 +428,7 @@ class Conversation:
     fact_numbers: set[str] = field(default_factory=set)  # цифры из ответов кода (сводка парка) — факты, не выдумка
     # Паспорт запроса (#31): данные текущего вопроса — план поиска, итоги guard. Не сериализуется в состояние.
     passport: dict[str, Any] = field(default_factory=dict)
+    level_reason: str = ""  # почему такой уровень у текущего вопроса; passport пересоздаётся на каждом вопросе
     contradiction: Any = None  # известное противоречие в руководствах для текущего вопроса: (Known, [Quote])
     # снятые guard утверждения последнего ответа (см. `Agent.guard`): {text, state, missing, reason, handles}
     withdrawn: list[dict[str, Any]] = field(default_factory=list)
@@ -814,6 +844,21 @@ _LIMIT_WORDS = re.compile(
 )
 _BAN_RULE = re.compile(r"не эксплуатир|запрещ|не допуска|немедленно|заглушить|остановить двигатель", re.I)
 _OPERATION_RULE = re.compile(r"эксплуатац|допускается работ", re.I)  # предел для работы, а не норма проверки
+# фраза о езде и работе двигателя, а не о действии при обслуживании: «запрещается промывать коробку керосином» —
+# не вердикт на «можно ли ехать» (K961TH198, 27.11)
+_DRIVE_CONTEXT = re.compile(
+    r"эксплуат|работ\w*\s+двигател|двигател\w*\s+(?:не\s+)?работ|езд|движени|в пути|заглуш|остановить|пуск|"
+    r"режим|нагрузк|температур|давлени",
+    re.I,
+)
+_SERVICE_ONLY = re.compile(r"промыва|промыть|заправля|хранени|транспортир|консервац|упаковк|буксир", re.I)
+# прямой запрет работы двигателя — при равном совпадении слов важнее: «немедленно заглушить… не заводить»
+# (ЗМЗ-5234, стр. 23)
+# против «остановить двигатель и через 10 минут проверить уровень масла» (стр. 30) — Q24, 27.11
+_STRONG_BAN = re.compile(r"немедленно|не эксплуатир|не заводить|не запускать|запрещ|не допуска", re.I)
+_RULE_LEAD = re.compile(
+    r"^(?:но|однако|при этом|а)?[\s,]*(?:в\s+)?руководств\w*\s+(?:требует|сказано|указано|говорит\w*)\s*:?\s*", re.I
+)  # «но руководство требует: …» — вводные слова модели перед правилом
 _LEMMA_ALIAS = {"стучать": "стук", "стучит": "стук", "шуметь": "шум", "низкий": "давление"}
 _DRIVE_STOP = {"можно", "пока", "ездить", "ехать", "машина", "двигатель", "база", "свой", "ход", "перегнать",
                "дальше", "ещё", "еще", "доехать", "работа", "время"}  # fmt: skip
@@ -1117,6 +1162,7 @@ class Agent:
         """`level` — выбор механика (novice | mechanic | master, прежние expert | steps) или auto — по вопросу,
         на каждый вопрос заново; за механиком не запоминается."""
         used, why = resolve_level(question, level)
+        conv.level_reason = why  # до ответа: «можно ли ехать» коротко, если уровень не выбран механиком
         reply = self._ask_in_time(conv, question, used, lang, back_translate)
         reply.level_used, reply.level_reason = used, why
         conv.passport["level_reason"] = why
@@ -1154,7 +1200,8 @@ class Agent:
         request_id = uuid.uuid4().hex
         steps: list[dict[str, Any]] = []
         chosen = language.normalize(lang)
-        target = chosen or language.detect(question)
+        # «скажи по-узбекски» — язык из просьбы, а не из букв вопроса (сессия 1, 27.11: событие language было «Русский»)
+        target = chosen or language.requested(question) or language.detect(question)
         conv.passport.update({"refs_before": set(conv.sources), "level": level, "answer_lang": target})
         if chosen:
             conv.passport["lang_chosen"] = chosen
@@ -1195,7 +1242,9 @@ class Agent:
                 break
             t0 = time.monotonic()
             try:
-                reply = self.provider.chat(conv.messages, self._tools_for(conv), max_tokens=LEVEL_MAX_TOKENS[level])
+                tools_now = self._tools_for(conv)
+                parts = input_parts(conv.messages, tools_now)  # из чего вход: для паспорта, до вызова
+                reply = self.provider.chat(conv.messages, tools_now, max_tokens=LEVEL_MAX_TOKENS[level])
             except LLMError:
                 if step == 1 or not self._out_of_time(conv):
                     raise
@@ -1215,6 +1264,7 @@ class Agent:
                     "tokens_cached": reply.tokens_cached,
                     "cost_rub": round(cost, 4),
                     "ms": ms,
+                    "parts": parts,
                 }
             )
             if not reply.tool_calls:
@@ -1273,11 +1323,13 @@ class Agent:
         final, bans = unsourced_bans(
             final, conv.card.urgency if conv.card else None, replace=not conv.passport.get("drive_rule")
         )  # запрет — только со страницей
+        final, cited = self._registry_lines(conv, question, final, cited)  # инструмент и запчасти — из реестра
         final, cited = self._absent_head(conv, final, cited)  # «У <двигателя> нет <узла>» — первой строкой
         final = self._mismatch_steps(conv, final)  # узла у двигателя нет — оба пути: повторить проверку и дефектовка
         if bans:
             notes.append("Запрет эксплуатации без страницы руководства заменён рекомендацией по срочности.")
         final, cited = self._complete_refusal(conv, question, final, cited)
+        final = self._drive_short(conv, question, final)  # «можно ли ехать»: вердикт кода и одно действие
         if conv.card is not None and conv.card.trend and _CARD_ASK.search(question) and conv.card.trend not in final:
             final = f"{final.rstrip()}\n\n📈 {conv.card.trend}"  # тенденция по истории ТС — кодом (#40 п. 4)
         cited = [c for c in cited if f"[{c.ref}]" in final]  # источник — только страница, на которую ссылается текст
@@ -1313,6 +1365,8 @@ class Agent:
             "deadline": bool(conv.passport.get("deadline")),
             **self._passport_trace(conv, cited),
         }
+        if (target or "ru") == "ru" and not chosen:  # ответ по факту на другом языке — так и сообщить интерфейсу
+            target = language.actual(final) or target
         return AgentReply(
             text=final,
             grounded=grounded,
@@ -1466,8 +1520,8 @@ class Agent:
         card = conv.card
         if card is None or card.status != "anomaly" or not card.compatible or not card.fault_code or not cited:
             return text, None
-        if _CARD_ASK.search(question) or _TICKET_ASK.search(question):
-            return text, None
+        if _CARD_ASK.search(question) or _TICKET_ASK.search(question) or _DRIVE_ASK.search(question):
+            return text, None  # «можно ли ехать» — вердикт по проверке строит код (`_drive_verdict`), его не снимаем
         cell = cell_for(card.fault_code, conv.vehicle.engine_model)
         if cell is None or cell.status != "confirmed":
             return text, None
@@ -1506,7 +1560,7 @@ class Agent:
         if not quotes:
             return text, cited
         q = quotes[0]
-        src = self._source_for(conv, q.doc, q.page, a.part, q.quote)
+        src = self._source_for(conv, q.doc, q.page, a.part, q.quote, f"узла нет у этого двигателя: {a.part}")
         if src not in cited:
             cited = [*cited, src]
         conv.passport["absent_head"] = a.id
@@ -1600,6 +1654,7 @@ class Agent:
                     pdf_page=s["pdf_page"],
                     section=s["section"],
                     text=s["text"],
+                    why="из сохранённого ответа на тот же вопрос (кэш)",
                 )
                 conv.sources[src.ref] = src
             renumber[s["ref"]] = src.ref
@@ -1653,7 +1708,8 @@ class Agent:
         cost = self._spend(request_id, MAX_STEPS + 1, reply, ms)
         steps.append({"step": MAX_STEPS + 1, "kind": "llm", "name": reply.model + " (ответ по найденному)",
                       "tokens_in": reply.tokens_in, "tokens_out": reply.tokens_out,
-                      "tokens_cached": reply.tokens_cached, "cost_rub": round(cost, 4), "ms": ms})  # fmt: skip
+                      "tokens_cached": reply.tokens_cached, "cost_rub": round(cost, 4), "ms": ms,
+                      "parts": input_parts(msgs, [])})  # fmt: skip
         conv.passport["final_without_tools"] = True
         return reply.content.strip() if reply.content.strip() and not reply.tool_calls else NO_TIME
 
@@ -1700,6 +1756,7 @@ class Agent:
                 "tokens": approx_tokens(s.text),
                 "used": s.ref in used,
                 "new": s.ref not in before,
+                "why": s.why,
             }
             for s in sent
         ]
@@ -1710,7 +1767,12 @@ class Agent:
             "card_status": card.status if card else None,
             "code_compatible": card.compatible if card else None,
         }
-        return {"fragments": fragments, "rules": rules, "plan": conv.passport.get("plan")}
+        # снятые утверждения по страницам: почему ссылка на страницу не дошла до ответа (паспорт, «не пошло в ответ»)
+        withdrawn = [
+            {"handles": w.get("handles") or [], "state": w.get("state"), "reason": w.get("reason")}
+            for w in conv.withdrawn
+        ]
+        return {"fragments": fragments, "rules": rules, "plan": conv.passport.get("plan"), "withdrawn": withdrawn}
 
     def guard(self, conv: Conversation, text: str) -> tuple[str, bool, list[str], list[Source]]:
         notes: list[str] = []
@@ -1913,6 +1975,9 @@ class Agent:
                     return {"refused": TICKET_NOT_ASKED}, False
                 res = self._draft_ticket_or_matrix(conv, args)
                 return res, "refused" not in res
+            if name == "find_parts_tools":
+                res = self._find_parts_tools(conv, args)
+                return res, bool(res.get("found"))
             if name == "fleet_summary":
                 result = self._fleet_summary()
                 conv.fact_numbers |= numbers(json.dumps(result, ensure_ascii=False))
@@ -1966,6 +2031,10 @@ class Agent:
             if lang not in ("ru", "rus"):
                 query["answer_language"] = lang
             calls.append(ToolCall(f"pre-search-{len(conv.messages)}", "search_manual", query))
+            # почему страницы поиска в контексте (паспорт): по неисправности из карточки или по словам вопроса
+            conv.passport["search_why"] = (
+                f"по неисправности из карточки ({card.fault_code} {card.fault_title})" if fault else "по словам вопроса"
+            )
         if not calls:
             return
         for call in calls:  # по ходу на вызов: GigaChat принимает одну функцию за ход
@@ -1983,10 +2052,13 @@ class Agent:
                     "content": json.dumps(result, ensure_ascii=False),
                 }
             )
+        conv.passport.pop("search_why", None)  # дальше ищет модель — её поиск подписан её запросом
 
     def _ensure_diag(self, conv: Conversation) -> tuple[Diagnosis, VerdictCard]:
-        if conv.diag is None or conv.card is None:
+        if conv.diag is None or conv.diag.session_id != conv.session_id:
             conv.diag = self.ml.diagnose(conv.vehicle.vehicle_id, conv.session_id)
+            conv.card = None
+        if conv.card is None:  # из нити пришёл результат проверки — карточку собирает код, без ML
             conv.card = build_card(conv.diag, self.fleet.fault_titles, conv.vehicle.engine_model, conv.vehicle.sessions)
         return conv.diag, conv.card
 
@@ -2036,7 +2108,7 @@ class Agent:
 
         def ref(manual: str, page: int, why: str, attach: bool) -> dict[str, Any]:
             text = (page_text(manual, page) if page_text else None) or why
-            src = self._source_for(conv, manual, page, why, text)
+            src = self._source_for(conv, manual, page, why, text, f"ограничения эксплуатации (реестр покрытия): {why}")
             return {"ref": src.ref, "why": why, **({"text": text} if attach else {})}
 
         on_card = bool(_CARD_ASK.search(question))
@@ -2095,7 +2167,7 @@ class Agent:
             return None
         cited: list[Source] = []
         for q in quotes:
-            src = self._source_for(conv, q.doc, q.page, a.part, q.quote)
+            src = self._source_for(conv, q.doc, q.page, a.part, q.quote, f"узла нет у этого двигателя: {a.part}")
             if src not in cited:
                 cited.append(src)
         refs = {(s.manual_id, s.pdf_page): s.ref for s in cited}
@@ -2180,7 +2252,7 @@ class Agent:
         if len(quotes) < 2:  # без двух подтверждённых цитат противоречие не заявляем
             return
         for q in quotes:  # страницы цитат — источники R…, на них можно ссылаться
-            self._source_for(conv, q.doc, q.page, k.title, q.quote)
+            self._source_for(conv, q.doc, q.page, k.title, q.quote, f"противоречие в руководствах: {k.title}")
         conv.contradiction = (k, quotes)
 
     def _contradiction_text(
@@ -2191,7 +2263,12 @@ class Agent:
         if conv.contradiction is None:
             # блок — только под ответом на вопрос о спорной теме (зазоры), а не под диагнозом или «можно ли ехать»
             k = contradictions.match_answer(conv.vehicle.engine_model, text)
-            if k is not None and not k.topic.search(_last_question(conv)):
+            question = _last_question(conv)
+            # ответ не о спорной теме: объяснение карточки и прочие вопросы — полный блок с формулировками и эскалацией
+            # (снимок Валерия 27.11: в «Что проверить» было «Безопасное правило» простым текстом, без блока и «№ N»);
+            # «можно ли ехать» и просьба о заявке — только правило вместо одной формулировки, без блока
+            off_topic = _DRIVE_ASK.search(question) or _TICKET_REQUEST.search(question)
+            if k is not None and not k.topic.search(question) and off_topic:
                 # ответ не о спорной теме, но называет спорный срок или значение (B418HK98, текст к черновику заявки:
                 # «не позднее 15 минут после остановки [S2]») — без блока, но вместо одной формулировки — правило
                 page_text = getattr(self.searcher, "page_text", None)
@@ -2204,7 +2281,9 @@ class Agent:
                 quotes = contradictions.verified_quotes(k, getattr(self.searcher, "page_text", None))
                 if len(quotes) >= 2:
                     for q in quotes:
-                        self._source_for(conv, q.doc, q.page, k.title, q.quote)
+                        self._source_for(
+                            conv, q.doc, q.page, k.title, q.quote, f"противоречие в руководствах: {k.title}"
+                        )
                     conv.contradiction = (k, quotes)
         if conv.contradiction is None:
             checked, notes = contradictions.check_model_blocks(
@@ -2270,12 +2349,76 @@ class Agent:
         line = self._escalate(conv, k, quotes)
         return contradictions.ESCALATION.sub(lambda _m: line, text, count=1)
 
-    def _source_for(self, conv: Conversation, manual_id: str, pdf_page: int, section: str, text: str) -> Source:
-        """Источник R… для страницы руководства; одна страница — один R, текст дополняется."""
+    def _find_parts_tools(self, conv: Conversation, args: dict[str, Any]) -> dict[str, Any]:
+        """Реестр запчастей и инструмента (`parts_tools`): записи двигателя этой машины со ссылками R…."""
+        kind = str(args.get("kind") or "both")
+        kinds = None if kind not in ("part", "tool") else {kind}
+        recs = parts_tools.find(conv.vehicle.engine_model, mask_pii(str(args.get("query") or "")), kinds)
+        found = []
+        for r in recs:
+            src = self._source_for(conv, r.doc, r.page, r.node, r.quote)
+            found.append({"kind": r.kind, "name": r.label(), "ref": src.ref, "page": r.page,
+                          "operation": r.operation[:160], "one_time": r.source == "одноразовая"})  # fmt: skip
+        if not found:
+            return {"found": [], "note": "В реестре руководств этого двигателя записей по запросу нет."}
+        return {"engine": conv.vehicle.engine_model, "found": found}
+
+    def _registry_lines(
+        self, conv: Conversation, question: str, text: str, cited: list[Source]
+    ) -> tuple[str, list[Source]]:
+        """«Какой инструмент / какие запчасти»: строки «Понадобится» и «Запчасти» пишет код из реестра — записи со
+        страниц ответа и по словам вопроса, у каждой ссылка [R…]. Строка «Понадобится» модели заменяется. Нет
+        записей — ответ как есть. Только в русском ответе (названия в реестре — по-русски, как в руководстве)."""
+        # «Понадобится: …» модели не отличить от строки реестра, а страницы в ней модель путала (#162, класс (д)):
+        # такую строку пишет только код, из реестра
+        text = _MODEL_NEED.sub("", text)
+        kinds = parts_tools.asks(question)
+        if not kinds or (conv.passport.get("answer_lang") or "ru") != "ru":
+            return text, cited
+        card = conv.card
+        query = question
+        if card is not None and card.status == "anomaly" and card.compatible and card.fault_title:
+            if not parts_tools.node_words(question):  # кнопка «Какой нужен инструмент» — к неисправности карточки
+                query = f"{question} {card.fault_title}"
+        pages = {(s.manual_id, s.pdf_page) for s in cited}
+        recs = parts_tools.find(conv.vehicle.engine_model, query, kinds, pages=pages, limit=6)
+        if not recs:
+            return text, cited
+        lines: list[str] = []
+        # одна деталь — одна строка: «прокладка головки цилиндров» из перечня (с обозначением) и она же из фразы
+        # «заменять новой» — строка с обозначением и пометкой «одноразовые» (P07, 27.11)
+        coded = {(r.kind, r.name.lower()) for r in recs if r.code}
+        once_names = {(r.kind, r.name.lower()) for r in recs if r.source == "одноразовая"}
+        recs = [r for r in recs if r.code or (r.kind, r.name.lower()) not in coded]
+        for kind, head in (("tool", "Понадобится (по руководству)"), ("part", "Запчасти (по руководству)")):
+            items = []
+            for r in recs:
+                if r.kind != kind:
+                    continue
+                src = self._source_for(conv, r.doc, r.page, r.node, r.quote)
+                if src not in cited:
+                    cited = [*cited, src]
+                once = " — одноразовые, только новые" if (r.kind, r.name.lower()) in once_names else ""
+                items.append(f"{r.label()}{once} [{src.ref}]")
+            if items:
+                lines.append(f"**{head}:** " + "; ".join(items) + ".")
+        if not lines:
+            return text, cited
+        conv.passport["registry_lines"] = [r.label() for r in recs]
+        paras = [p for p in text.split("\n\n") if p.strip()]
+        at = 1 if paras else 0
+        return "\n\n".join([*paras[:at], "\n".join(lines), *paras[at:]]).strip(), cited
+
+    def _source_for(
+        self, conv: Conversation, manual_id: str, pdf_page: int, section: str, text: str, why: str = ""
+    ) -> Source:
+        """Источник R… для страницы руководства; одна страница — один R, текст дополняется. `why` — почему страница
+        в контексте (паспорт): у уже известной страницы остаётся первая причина."""
         existing = next((s for s in conv.sources.values() if s.manual_id == manual_id and s.pdf_page == pdf_page), None)
         if existing is not None:
             if text and text not in existing.text:
                 existing.text = f"{existing.text}\n{text}"[:3000]
+            existing.why = existing.why or why
             return existing
         doc = DOCS_BY_ID[manual_id]
         src = Source(
@@ -2285,6 +2428,7 @@ class Agent:
             pdf_page=pdf_page,
             section=section,
             text=text[:3000],
+            why=why,
         )
         conv.sources[src.ref] = src
         return src
@@ -2310,7 +2454,9 @@ class Agent:
             key = (p.doc, p.page)
             if key not in refs:
                 what = next((x.what for x in cell.pages if (x.doc, x.page) == key), "")
-                refs[key] = self._source_for(conv, p.doc, p.page, what, "\n".join(by_page[key])).ref
+                fault = " ".join(x for x in (card.fault_code, card.fault_title) if x)
+                why = f"по неисправности из карточки ({fault}): проверенная ячейка матрицы"
+                refs[key] = self._source_for(conv, p.doc, p.page, what, "\n".join(by_page[key]), why).ref
         return {
             "status": "confirmed",
             # цитаты страниц модели не нужны — работы и ссылки есть ниже; текст страниц остаётся в Source (#16)
@@ -2363,6 +2509,7 @@ class Agent:
                 (s for s in conv.sources.values() if s.manual_id == h.manual_id and s.pdf_page == h.pdf_page), None
             )
             if existing is None:
+                by = conv.passport.get("search_why")
                 existing = Source(
                     ref=next_ref(conv),
                     manual_id=h.manual_id,
@@ -2370,6 +2517,7 @@ class Agent:
                     pdf_page=h.pdf_page,
                     section=h.section,
                     text=h.text[:1500],
+                    why=f"поиск {by}: «{query[:60]}»" if by else f"модель искала: «{query[:60]}»",
                 )
                 conv.sources[existing.ref] = existing
             elif h.text[:1500] not in existing.text:
@@ -2409,7 +2557,7 @@ class Agent:
         engine = canonical_engine(conv.vehicle.engine_model) or conv.vehicle.engine_model
 
         def handle_for(manual_id: str, page: int) -> str:
-            return self._source_for(conv, manual_id, page, "", "").ref
+            return self._source_for(conv, manual_id, page, "", "", "модель открыла страницу целиком").ref
 
         res = nk_read.read_pages(engine, handle_for, str(args.get("manual", "")), args.get("pages"))
         for p in res["pages"]:
@@ -2552,12 +2700,75 @@ class Agent:
             line += " " + RECOMMEND.get(card.urgency or "", RECOMMEND["medium"])
             tail = ""
             conv.passport["drive_rule"] = rule[0].ref
-        elif card.urgency == "high":
-            line = f"**{NO_BAN_LINE}** Срочность по проверке высокая: {RECOMMEND['high'].split(': ', 1)[1]}"
+        elif card.urgency in ("high", "medium", "low"):
+            word = {"high": "высокая", "medium": "средняя", "low": "низкая"}[card.urgency]
+            basis = (card.urgency_reason or "").split(". ")[0].rstrip(".")  # правило срочности, без «чем грозит»
+            why = f" ({basis[:1].lower()}{basis[1:]})" if basis else ""
+            line = f"**{NO_BAN_LINE}** Срочность по проверке — {word}{why}."  # что делать — строкой ниже
         else:
             line = f"**{NO_BAN_LINE}** По проверке нужна дефектовка в ближайшее время."
         conv.passport["drive_verdict_by_code"] = True
         return f"{line}{tail}\n\n{text}".strip(), cited
+
+    def _drive_short(self, conv: Conversation, question: str, text: str) -> str:
+        """«Можно ли ехать / своим ходом / перегнать» — первым абзацем вердикт (`_drive_verdict`: запрет словами
+        руководства со страницей или «прямого запрета нет» и срочность), затем одно действие «Что сделать: …». Повтор
+        вердикта моделью, порядок регулировки, «Понадобится», блоки противоречий о другом — не к вопросу (снимок
+        Валерия, стенд a664351, B418HK98 / S-0009). Полный ответ — по «Подробнее» (уровень выбран механиком)."""
+        if not _DRIVE_ASK.search(question) or (conv.passport.get("answer_lang") or "ru") != "ru":
+            return text
+        if conv.level_reason == "выбран механиком":
+            return text  # «Подробнее» — полный ответ
+        paras = [p for p in text.split("\n\n") if p.strip()]
+        if not paras:
+            return text
+        head = re.sub(r"\s*Рекомендация по проверке:[^.]*\.", "", paras[0]).strip()  # что делать — строкой ниже
+        has_rule = bool(_REF.search(head) and (_BAN_RULE.search(head) or _OPERATION_RULE.search(head)))
+        if not (has_rule and _STRONG_BAN.search(head)):
+            # прямой запрет руководства со страницей, который модель написала ниже (Q24: стр. 23, «немедленно
+            # заглушить… не заводить») — после вердикта; при уже найденном кодом пределе — только прямой запрет
+            rule = self._drive_rule_sentence("\n\n".join(paras[1:]), strong=has_rule)
+            if rule and rule not in head:
+                head = f"{head} По руководству: {rule[:1].lower()}{rule[1:]}"
+        action = self._drive_action(conv)
+        failed = conv.card is None or conv.card.status == "check_failed"
+        out = [head] if failed and re.search(r"повтор", head, re.I) else [head, action]
+        conv.passport["drive_short"] = True
+        return "\n\n".join(out)
+
+    @staticmethod
+    def _drive_rule_sentence(text: str, strong: bool = False) -> str | None:
+        """Первая фраза со ссылкой [R…] — запрет или предел работы двигателя; не «Понадобится», не «Безопасное
+        правило» (вывод кода о другом), не проверка результата."""
+        for ln in text.split("\n"):
+            ln = re.sub(r"^\s*(?:\d+\.|[-•])\s*", "", ln).strip()
+            if not ln or re.match(r"\**(?:Понадобится|Безопасное правило|Проверка результата|Безопасность)", ln, re.I):
+                continue
+            for sent in _SENTENCE.split(ln):
+                if _REF.search(sent) and (_BAN_RULE.search(sent) or _OPERATION_RULE.search(sent)):
+                    if strong and not _STRONG_BAN.search(sent):
+                        continue
+                    if _DRIVE_CONTEXT.search(sent) and not _SERVICE_ONLY.search(sent):
+                        return _RULE_LEAD.sub("", sent.strip())
+        return None
+
+    @staticmethod
+    def _drive_action(conv: Conversation) -> str:
+        """Одно действие по результату проверки — код, не модель."""
+        card = conv.card
+        if card is None or card.status == "check_failed":
+            return f"{clean_refusal.ACTION_LABEL}повторите запись проверки; до неё следите за приборами."
+        if card.status == "normal":
+            if BANNER_EARLY_RECHECK in card.banners:
+                return f"{clean_refusal.ACTION_LABEL}повторите проверку раньше срока."
+            return f"{clean_refusal.ACTION_LABEL}следующая проверка — в обычный срок."
+        if not card.compatible:
+            return (f"{clean_refusal.ACTION_LABEL}повторите проверку: результат не подходит к этому двигателю, "
+                    "заявку по нему не оформляют.")  # fmt: skip
+        what = {"high": "дефектовка до выпуска в рейс", "medium": "дефектовка в ближайшее время"}.get(
+            card.urgency or "", "уточнить дефектовкой или повторной записью"
+        )
+        return f"{clean_refusal.ACTION_LABEL}{what} — черновик заявки кнопкой «Создать заявку»."
 
     def _limit_rule(self, conv: Conversation, question: str) -> tuple[Source, str] | None:
         """Фраза-запрет или предел со страниц ограничений эксплуатации этого двигателя (реестр Никиты), где есть слово
@@ -2569,23 +2780,25 @@ class Agent:
         engine = canonical_engine(conv.vehicle.engine_model) or conv.vehicle.engine_model
         title = conv.card.fault_title if conv.card is not None and conv.card.status == "anomaly" else ""
         want = {_LEMMA_ALIAS.get(t, t) for t in tokenize(f"{question} {title or ''}")} - _DRIVE_STOP
-        best: tuple[int, int, int, Any, str] | None = None
+        best: tuple[int, int, int, int, Any, str] | None = None
         for n, limit in enumerate(nk_coverage.limits_for(engine)):
             full = str(page_text(limit.manual, limit.page) or "")
             sents = _RULE_SENT.split(re.sub(r"\s+", " ", full))
             for i, sent in enumerate(sents):
                 if not _LIMIT_WORDS.search(sent) or not 30 <= len(sent) <= 320:
                     continue
+                if not _DRIVE_CONTEXT.search(sent) or _SERVICE_ONLY.search(sent):
+                    continue  # не о езде и работе двигателя
                 around = f"{sents[i - 1] if i else ''} {sent}"  # о чём фраза — бывает сказано в предыдущей
                 hit = len(want & {_LEMMA_ALIAS.get(t, t) for t in tokenize(around)})
                 if hit:
                     tier = 2 if _BAN_RULE.search(sent) else 1 if _OPERATION_RULE.search(sent) else 0
-                    key = (hit, tier, -n)
-                    if best is None or key > best[:3]:
+                    key = (hit, int(bool(_STRONG_BAN.search(sent))), tier, -n)  # при равных словах — прямой запрет
+                    if best is None or key > best[:4]:
                         best = (*key, limit, sent.strip())
         if best is None:
             return None
-        limit, sent = best[3], re.sub(r"^\d+\.\s+", "", best[4])
+        limit, sent = best[4], re.sub(r"^\d+\.\s+", "", best[5])
         src = next((s for s in conv.sources.values() if s.manual_id == limit.manual and s.pdf_page == limit.page), None)
         if src is None:
             doc = DOCS_BY_ID.get(limit.manual)
@@ -2683,6 +2896,14 @@ class Agent:
         )
         matrix_ops = (confirmed or {}).get("operations", [])
         tools = list(dict.fromkeys(t for o in matrix_ops if o["text"] in operations for t in o.get("tools", [])))
+        # детали и инструмент к работам — из реестра руководств: записи со страниц работ этой заявки
+        work_pages = {(c.manual_id, c.pdf_page) for c in cited}
+        reg = [r for r in parts_tools.records(conv.vehicle.engine_model) if (r.doc, r.page) in work_pages]
+        tools = list(dict.fromkeys([*tools, *(r.label() for r in reg if r.kind == "tool")]))[:8]
+        if not body.spare_parts:
+            reg_parts = [f"{r.label()}, стр. {r.page}" for r in reg if r.kind == "part"][:6]
+            if reg_parts:
+                body = body.model_copy(update={"spare_parts": reg_parts})
         conv.draft = TicketDraft(
             body=body, urgency_reason=why, fingerprint=fingerprint(body), tools=tools, op_pages=op_pages
         )
@@ -2829,6 +3050,22 @@ def _operation(op: Any) -> tuple[str, str | None]:
     if ref is None and marks:
         ref = marks[0]
     return _strip_refs(text), ref
+
+
+def input_parts(messages: list[Message], tools: Any) -> dict[str, int]:
+    """Из чего вход вызова модели (оценка ≈ 4 символа на токен, для паспорта): инструкция агента (system и описания
+    инструментов — одинаковы от вызова к вызову, их провайдер берёт из кэша), результаты инструментов (страницы
+    руководства, карточка проверки) и разговор (вопросы, ответы, вызовы инструментов моделью)."""
+    out = {"instructions": 0, "tool_results": 0, "dialog": 0}
+    for m in messages:
+        role = m.get("role")
+        size = approx_tokens(str(m.get("content") or "")) + (
+            approx_tokens(json.dumps(m["tool_calls"], ensure_ascii=False, default=str)) if m.get("tool_calls") else 0
+        )
+        out["instructions" if role == "system" else "tool_results" if role == "tool" else "dialog"] += size
+    if tools:
+        out["instructions"] += approx_tokens(json.dumps(tools, ensure_ascii=False, default=lambda o: o.__dict__))
+    return out
 
 
 def approx_tokens(text: str) -> int:

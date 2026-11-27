@@ -16,6 +16,7 @@ import {
 import { copy } from '../copy'
 import { checkLook, ticketFits } from '../lib/checks'
 import { dateShortRu, dateTimeRu } from '../lib/format'
+import { shownBefore, verdictAnchor } from '../lib/verdict'
 import { mergeTickets, withTicket } from '../lib/tickets'
 import { CHECKED, scrollsFurther, scrollStep } from '../lib/ui'
 import { useThread, type AssistantTurn, type Turn } from '../useThread'
@@ -35,6 +36,7 @@ import { TicketCard } from './TicketCard'
 import { TicketSheet } from './TicketSheet'
 import { VerdictCard } from './VerdictCard'
 import { queueHref } from '../lib/contradictions'
+import { Explain } from './Explain'
 
 function SessionPicker({
   sessions,
@@ -79,14 +81,50 @@ function SessionPicker({
 const answerLevel = (turn: AssistantTurn): Level | null =>
   levelOf(turn.level_used) ?? levelOf(turn.passport?.question?.level)
 
+/** «По проверке S-0009 от 17 ноя: клапанный механизм ›» — the card of this check is already above in the
+ *  conversation (Валерий, 27.11: the whole card again under every answer). A tap scrolls back to it. */
+function VerdictAgain({ verdict: v }: { verdict: VerdictBlock }) {
+  const what = v.fault_title ?? copy.verdict.word[v.case]
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        document.getElementById(verdictAnchor(v.session_id))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+      title={copy.verdict.againHint}
+      className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg border border-line px-3 py-1.5 text-left text-[13px] text-dim hover:text-text"
+    >
+      <span className="min-w-0">
+        {copy.verdict.again(v.session_id, dateShortRu(v.checked_at), what.charAt(0).toLowerCase() + what.slice(1))}
+      </span>
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 20 20"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="shrink-0 -rotate-90 text-accent"
+        aria-hidden
+      >
+        <path d="M8 4l6 6-6 6" />
+      </svg>
+    </button>
+  )
+}
+
 function AssistantBlock({
   turn,
   sources,
   onOpenSource,
   manualNames,
   onRedo,
+  seenChecks,
 }: {
   onRedo?: (level: Level) => void // the last answer only: «Подробнее / Короче» for this answer
+  seenChecks: Set<string> // checks whose card an earlier turn shows: here they are one line (lib/verdict.ts)
   turn: AssistantTurn
   sources: Record<string, SourceItem>
   onOpenSource: (s: SourceItem, quote?: string, scanned?: boolean) => void
@@ -104,7 +142,13 @@ function AssistantBlock({
   const isGuide = (block: Block) => block.kind === 'guide'
   const show = (block: Block, key: number) =>
     block.kind === 'verdict' ? (
-      <VerdictCard key={key} verdict={block as VerdictBlock} />
+      seenChecks.has((block as VerdictBlock).session_id) ? (
+        <VerdictAgain key={key} verdict={block as VerdictBlock} />
+      ) : (
+        <div key={key} id={verdictAnchor((block as VerdictBlock).session_id)} className="scroll-mt-4">
+          <VerdictCard verdict={block as VerdictBlock} />
+        </div>
+      )
     ) : block.kind === 'guide' ? (
       <GuideCard
         key={key}
@@ -118,11 +162,30 @@ function AssistantBlock({
         {String((block as { message: string }).message)}
       </p>
     ) : null
+  // manuals disagree: right under the direct answer («Коротко»), as the code put it there (D-20), and never
+  // folded: Валерий did not see it at the end of a long answer (27.11)
+  const found = turn.blocks.filter((b) => b.kind === 'contradiction')
+  const contradictions = found.length > 0 && (
+    <div className="space-y-3">
+      {found.map((b, i) => (
+        <ContradictionCard
+          key={`c${i}`}
+          block={b as ContradictionBlock}
+          sources={sources}
+          onOpen={(s, quote) => onOpenSource(s, quote)}
+          onQueue={(n) => {
+            window.location.hash = queueHref({ view: 'item', number: n })
+          }}
+        />
+      ))}
+    </div>
+  )
   return (
     <div className="space-y-3">
       {turn.blocks.map((block, i) => (noModel && isGuide(block) ? null : show(block, i)))}
       {turn.text && (
         <Answer
+          afterLead={contradictions || undefined}
           text={turn.text}
           sources={sources}
           verified={new Set(turn.verification?.verified)}
@@ -180,25 +243,16 @@ function AssistantBlock({
                 {copy.level.shorter}
               </button>
             )}
+            <Explain label={copy.level.explain} icon>
+              <p>{copy.level.explainText}</p>
+            </Explain>
           </div>
         )
       })()}
       {/* the short spoken version: value, document, page — for busy hands (#14) */}
       {!turn.live && turn.speech && <SpeakButton speech={turn.speech} />}
-      {/* manuals disagree: under the direct answer, as the code put it there (D-20) */}
-      {turn.blocks
-        .filter((b) => b.kind === 'contradiction')
-        .map((b, i) => (
-          <ContradictionCard
-            key={`c${i}`}
-            block={b as ContradictionBlock}
-            sources={sources}
-            onOpen={(s, quote) => onOpenSource(s, quote)}
-            onQueue={(n) => {
-              window.location.hash = queueHref({ view: 'item', number: n })
-            }}
-          />
-        ))}
+      {/* no answer text to stand under: the contradiction stands here, as before */}
+      {!turn.text && contradictions}
       {turn.progress && (
         <p className="text-dim" role="status" aria-live="polite">
           {turn.progress}
@@ -491,6 +545,8 @@ export function VehicleScreen({
   const ticketOpen = thread.pending !== null && thread.pending.pending_id !== dismissed
   const typing = draft.trim() !== '' // a stray space or an empty dictation is not a question being typed
 
+  // the check's card is drawn whole once; a later turn about the same check carries one line back to it
+  const seenBefore = shownBefore(thread.turns.map((t) => (t.role === 'assistant' ? t.blocks : [])))
   const showTurn = (turn: Turn, i: number) =>
     turn.role === 'user' ? (
       <p
@@ -515,6 +571,7 @@ export function VehicleScreen({
         sources={thread.sources}
         onOpenSource={openSource}
         manualNames={manualNames}
+        seenChecks={seenBefore[i] ?? new Set()}
         onRedo={i === thread.turns.length - 1 && !thread.busy ? (l) => send(copy.level.ask[l], false, l) : undefined}
       />
     )

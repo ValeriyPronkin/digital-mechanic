@@ -173,8 +173,11 @@ jobs:
           TOIR_URL=$(STAND_MIN_INSTANCES=0 deploy_container "$TOIR_NAME" "$MOCK_IMAGE" 256MB 30s \
             --environment MOCK_APP=mock_toir.app:app)
           ML_URL=$(deploy_container "$ML_NAME" "$MOCK_IMAGE" 256MB 30s --environment MOCK_APP=mock_ml.app:app)
-          wait_health "$ML_URL"
-          wait_health "$TOIR_URL"
+          # Ревизии задеплоены (yc ответил «ок»). /health заглушек с раннера GitHub — предупреждение, не провал:
+          # раннер их иногда не дожидается, а основной контейнер ходит к ним изнутри облака; строгий смоук сценариев
+          # (С1, С3 через заглушки) — в шаге проверки основного (решение — ДЛЯ ВАЛЕРИЯ, PR о терпеливых проверках).
+          wait_health "$ML_URL" || echo "::warning::заглушка ML: /health не ответил с раннера за ${STAND_HEALTH_BUDGET:-300} с — ревизия задеплоена, проверка сценариев — ниже"
+          wait_health "$TOIR_URL" || echo "::warning::заглушка ТОиР: /health не ответил с раннера за ${STAND_HEALTH_BUDGET:-300} с — ревизия задеплоена, проверка сценариев — ниже"
           echo "ML_URL=$ML_URL" >> "$GITHUB_ENV"
           echo "TOIR_URL=$TOIR_URL" >> "$GITHUB_ENV"
 
@@ -243,11 +246,13 @@ jobs:
         run: |
           set -eu
           . scripts/stand_lib.sh
+          # строгая проверка: не дождались /health основного за STAND_HEALTH_BUDGET (300 с) — шаг красный
           wait_health "$STAND_URL"
-          N=$(curl -fsS --max-time 30 "${STAND_URL}api/vehicles" | jq length)
+          # запросы ниже только читают (парк, карточка, здоровье) — повтор при обрыве с раннера безопасен
+          N=$(curl -fsS --max-time 60 --retry 4 --retry-delay 10 --retry-all-errors "${STAND_URL}api/vehicles" | jq length)
           [ "$N" = 50 ] || { echo "stand: /api/vehicles вернул $N машин, ждали 50" >&2; exit 1; }
           diag() {
-            curl -fsS --max-time 60 -X POST "${STAND_URL}api/diagnose" -H 'Content-Type: application/json' \
+            curl -fsS --max-time 90 --retry 4 --retry-delay 10 --retry-all-errors -X POST "${STAND_URL}api/diagnose" -H 'Content-Type: application/json' \
               -d "{\"vehicle_id\":\"$1\",\"session_id\":\"$2\"}"
           }
           C3=$(diag H142OX78 S-0113 | jq -r '[.status, .ticket_possible] | join(" ")')
@@ -255,9 +260,9 @@ jobs:
           echo "С3: $C3 · С1: $C1"
           [ "$C3" = "check_failed false" ] || { echo "stand: С3 — ждали check_failed без заявки" >&2; exit 1; }
           [ "$C1" = "anomaly true" ] || { echo "stand: С1 — ждали anomaly с возможной заявкой" >&2; exit 1; }
-          KB=$(curl -fsS --max-time 30 "${STAND_URL}health" | jq -c '.manuals_index')
+          KB=$(curl -fsS --max-time 60 --retry 4 --retry-delay 10 --retry-all-errors "${STAND_URL}health" | jq -c '.manuals_index')
           echo "Индекс руководств: $KB"
-          VOICE=$(curl -fsS --max-time 30 "${STAND_URL}health" | jq -r '.voice_key_present')
+          VOICE=$(curl -fsS --max-time 60 --retry 4 --retry-delay 10 --retry-all-errors "${STAND_URL}health" | jq -r '.voice_key_present')
           [ "$VOICE" = true ] || echo "::warning::голос на стенде недоступен: нет YANDEX_TTS_API_KEY / YANDEX_API_KEY"
           FORGED=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X POST "${STAND_URL}api/voice/speak" \
             -H 'Content-Type: application/json' -d "{\"text\":\"проверка\",\"sig\":\"$(printf '0%.0s' $(seq 64))\"}")

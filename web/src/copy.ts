@@ -66,8 +66,13 @@ export const copy = {
     export: 'Скачать выгрузку',
     openRegister: 'Открыть заявки',
     legendTitle: 'Что значат статусы',
-    legend:
-      'Карантин: приоритет высокий, машину ставят на дефектовку до выпуска в рейс. Требует внимания: приоритет средний или низкий. Это рекомендации по результату проверки, а не запрет на эксплуатацию',
+    legend: [
+      'Карантин — приоритет высокий: на дефектовку до выпуска в рейс',
+      'Требует внимания — приоритет средний или низкий',
+      'Норма — по последней пригодной проверке отклонения нет',
+      'Нет пригодной записи — по записи выводов нет, нужна новая проверка',
+    ],
+    legendNote: 'Это рекомендации по результату проверки, а не запрет на эксплуатацию',
   },
   verdict: {
     word: {
@@ -94,7 +99,20 @@ export const copy = {
     // the confidence against the server's threshold, as numbers: «Уверенность 0,58 — ниже порога 0,60: вывод предварительный»
     belowThreshold: (confidence: string, threshold: string) =>
       `Уверенность ${confidence} — ниже порога ${threshold}: вывод предварительный`,
+    // a later answer about a check whose card is above: one line back to it
+    again: (session: string, date: string, what: string) => `По проверке ${session} от ${date}: ${what}`,
+    againHint: 'Показать карточку проверки выше',
     atThreshold: (confidence: string, threshold: string) => `Уверенность ${confidence} — не ниже порога ${threshold}`,
+    // «понятно с листа» (Валерий, 27.11): one line for each figure of the card, behind one link
+    explain: 'Что значат цифры',
+    explainLines: {
+      score:
+        'Оценка — насколько звук отличается от звука исправного двигателя: 0 — не отличается, 1 — сильно. Норма с оценкой от 0,30 — повторить проверку раньше срока',
+      confidence:
+        'Уверенность — насколько акустическая модель уверена в своём выводе. Ниже порога вывод предварительный',
+      recording: 'Запись: с помехами — уверенность снижена; непригодна — выводов о двигателе нет, нужна новая запись',
+    },
+    urgencyHint: 'Приоритет — насколько срочно машине нужна дефектовка. Основания:',
   },
   guide: {
     word: {
@@ -172,15 +190,19 @@ export const copy = {
     answered: { novice: 'Объяснено для новичка', mechanic: 'Объяснено для механика', master: 'Объяснено для мастера' },
     more: 'Подробнее',
     shorter: 'Короче',
+    explain: 'Что значат «Подробнее» и «Короче»',
+    explainText:
+      'Уровень объяснения сервер выбирает по вопросу. «Подробнее» — то же по шагам, для новичка; «Короче» — только значение, инструмент и страница',
     ask: {
       novice: 'Объясни подробнее, по шагам',
       mechanic: 'Объясни ещё раз: ответ и порядок работ',
       master: 'Короче: только значение, инструмент и страница',
     },
   },
-  // the compact answer: «Коротко» first, the rest under «Подробнее», one list of pages under it
+  // the compact answer: «Коротко» first, the rest under «Весь ответ», one list of pages under it
   answer: {
-    more: 'Подробнее',
+    // not «Подробнее»: under the answer that word is the level's, the same question again in more steps
+    more: 'Весь ответ',
     less: 'Свернуть',
     pages: 'Страницы руководства',
     footnote: (n: number, label: string) => `Сноска ${n}: ${label}`,
@@ -346,24 +368,35 @@ export const copy = {
   queue: {
     title: 'Противоречия в руководствах',
     open: 'Противоречия в руководствах',
-    openHint: (open: number, sent: number, resolved: number) =>
-      `открыто: ${open} · отправлено: ${sent} · решено: ${resolved}`,
+    openHint: (known: number, open: number, sent: number, resolved: number) =>
+      [known > 0 && `найдено: ${known}`, `открыто: ${open}`, `отправлено: ${sent}`, `решено: ${resolved}`]
+        .filter(Boolean)
+        .join(' · '),
     loading: 'Загружаем противоречия…',
     loadFailed: 'Не получилось загрузить противоречия',
     empty: 'Противоречий пока нет. Они появляются здесь, когда руководства расходятся в ответе механику',
     show: 'Какие противоречия показать',
-    filter: { open: 'открыты', sent: 'отправлены', resolved: 'решены' },
+    filter: { known: 'найдены', open: 'открыты', sent: 'посланы', resolved: 'решены' }, // four in a 390 px row
+    shown: 'Показаны',
+    reset: 'Показать все',
     emptyFilter: {
+      known: 'Все найденные уже встречались в ответах',
       open: 'Открытых противоречий нет',
       sent: 'Отправленных и ещё не решённых нет',
       resolved: 'Решённых пока нет',
     },
-    state: { open: 'открыто', sent: 'отправлено, ждёт ответа', resolved: 'решено' },
+    state: {
+      known: 'найдено, механики ещё не спрашивали',
+      open: 'открыто',
+      sent: 'отправлено, ждёт ответа',
+      resolved: 'решено',
+    },
     number: (n: number) => `№ ${n}`,
     itemTitle: (n: number) => `Противоречие № ${n}`,
     back: 'К очереди',
     notFound: (n: number) => `Противоречия № ${n} нет в очереди`,
     seen: (count: number, times: string) => `в ответах: ${count} ${times}`,
+    notSeen: 'в ответах ещё не было',
     times: ['раз', 'раза', 'раз'] as const,
     vehicles: 'машины',
     lastSeen: 'последний раз',

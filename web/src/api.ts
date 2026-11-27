@@ -554,7 +554,8 @@ export async function streamChat(
 
 // ---------- the chief mechanic's queue of contradictions between manuals (#93, docs/api-v2-web.md §6) ----------
 
-export type ContradictionStatus = 'open' | 'sent' | 'resolved'
+// known: in the registry of the manuals' contradictions, not yet met in an answer (needs the server's list)
+export type ContradictionStatus = 'known' | 'open' | 'sent' | 'resolved'
 export type LetterTo = 'manufacturer' | 'support'
 export type ResolutionSource = LetterTo | 'chief_mechanic'
 
@@ -586,8 +587,8 @@ export interface ContradictionItem {
   safe_rule: string
   count: number // how many answers it came up in
   vehicles: string[]
-  first_seen: string
-  last_seen?: string
+  first_seen: string | null // null while known: no answer has met it yet
+  last_seen?: string | null
   sent?: ContradictionSent[]
   resolution?: ContradictionResolution | null
 }
