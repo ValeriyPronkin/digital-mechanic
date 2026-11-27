@@ -14,6 +14,7 @@ import { Sheet } from './Sheet'
 import { SourceChip } from './SourceChip'
 import { PartsOffers } from './PartsOffers'
 import { shownOffers } from '../lib/offers'
+import { itemSource } from '../lib/sheet'
 
 type Sources = Record<string, SourceItem>
 const urgencyTone = { high: 'text-stop', medium: 'text-warn', low: 'text-text' } as const
@@ -96,7 +97,7 @@ function Items({
             )}
             <div className="flex min-h-9 items-center justify-between gap-2">
               <span className="-ml-0.5 min-w-0">
-                {!gone && <SourceChip source={sources[item.source]} onOpen={onOpen} />}
+                {!gone && <SourceChip source={itemSource(item, sources)} onOpen={onOpen} />}
               </span>
               <button
                 type="button"
