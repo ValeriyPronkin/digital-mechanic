@@ -9,6 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from matrix_fixture import needs_matrix
 from service.clients import MLClient, ToirClient
 from service.fault_matrix import Ref, all_cells, cell_for, ref_problem
 from service.parts_supplier import NOT_CONNECTED, CsvSupplier, HttpSupplier, NoSupplier, from_env
@@ -41,6 +42,7 @@ def test_designation_must_be_in_quote_and_tools_on_page() -> None:
     assert good.part_name == "Втулка коромысла"
 
 
+@needs_matrix
 def test_matrix_has_designations_and_tools() -> None:
     conf = [c for c in all_cells() if c.status == "confirmed"]
     assert any(p.designation for c in conf for p in c.spare_parts)
@@ -50,6 +52,7 @@ def test_matrix_has_designations_and_tools() -> None:
             assert not p.designation or p.designation in p.quote
 
 
+@needs_matrix
 def test_draft_lists_parts_with_designation_and_tools(ml: MLClient, toir: ToirClient) -> None:
     vid, sid = _cell_with(lambda c: any(p.designation for p in c.spare_parts) or any(o.tools for o in c.operations))
     ag, _ = make_agent([call("draft_ticket", conclusion="Отклонение по проверке"), say("Черновик готов.")], ml, toir)

@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from matrix_fixture import needs_matrix
 from service import main
 from service.clients import MLClient, ToirClient
 
@@ -143,6 +144,7 @@ def test_manual_pdf_missing() -> None:
     assert client.get("/manuals/doc-1").status_code == 404
 
 
+@needs_matrix
 def test_anomaly_card_explains_from_matrix_without_model() -> None:
     """Пояснение к отклонению — из матрицы по руководству этого двигателя, без вызова модели (#16)."""
     from service.fault_matrix import cell_for

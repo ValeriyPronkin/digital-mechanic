@@ -31,7 +31,7 @@ from service import (
 from service import parts_supplier as parts_supplier_mod
 from service.agent import Agent, Level
 from service.clients import MLClient, ServiceError, ToirClient
-from service.fault_matrix import card_explanation
+from service.fault_matrix import card_explanation, matrix_status
 from service.fleet import fleet
 from service.fleet_api import build_router as build_fleet_router
 from service.llm import provider_from_env
@@ -229,6 +229,7 @@ def health() -> dict[str, Any]:
         "llm_key_present": any(os.environ.get(k) for k in ("DEEPSEEK_API_KEY", "GIGACHAT_CREDENTIALS", "LLM_API_KEY")),
         "llm_provider": os.environ.get("LLM_PROVIDER", "deepseek"),
         "manuals_index": manuals_index_status(),
+        "fault_matrix": matrix_status(),
         "voice_key_present": any(os.environ.get(k) for k in ("YANDEX_TTS_API_KEY", "YANDEX_API_KEY")),
         "tts_voice": os.environ.get("TTS_VOICE", DEFAULT_VOICE),
         "instance": {

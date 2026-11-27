@@ -34,8 +34,10 @@ DEFAULT_ENDPOINT = "https://storage.yandexcloud.net"
 REGION = "ru-central1"
 METADATA_TOKEN_URL = "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token"  # noqa: S105
 # Только эти файлы индекса уходят в бакет и только их стенд согласится записать (имена из манифеста — не пути).
-FILES = ("passport.json", "fragments.jsonl", "vectors.npy", "cache/embeddings.jsonl")
-REQUIRED = ("passport.json", "fragments.jsonl")
+# fault_matrix.json — матрица «код × двигатель» с цитатами руководств: в git её нет, стенд берёт её отсюда (#96).
+FILES = ("passport.json", "fragments.jsonl", "vectors.npy", "cache/embeddings.jsonl", "fault_matrix.json")
+REQUIRED = ("passport.json", "fragments.jsonl")  # для скачивания: версии до #96 матрицы не содержат
+PUBLISH_REQUIRED = (*REQUIRED, "fault_matrix.json")  # новая версия без матрицы оставила бы стенд без неё
 VERSION_FILE = ".kb-version"
 _VERSION_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -226,9 +228,10 @@ def build_manifest(src: Path) -> dict[str, Any]:
         if p.is_file():
             data = p.read_bytes()
             files[name] = {"sha256": _sha256(data), "size": len(data)}
-    missing = set(REQUIRED) - set(files)
+    missing = set(PUBLISH_REQUIRED) - set(files)
     if missing:
-        raise KbError(f"в {src} нет {sorted(missing)} — сначала make index")
+        hint = "make index; матрица — scripts/build_fault_matrix.py или копия data/fault_matrix.json"
+        raise KbError(f"в {src} нет {sorted(missing)} — сначала {hint}")
     return {"files": files}
 
 

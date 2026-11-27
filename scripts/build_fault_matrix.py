@@ -8,7 +8,7 @@
 Всё — дословные цитаты. Затем каждая ячейка проверяется (`verify_cell`): документ этого двигателя, страница
 существует, цитата на странице. Не прошло — выбрасывается; не прошло основание — ячейка `unknown`.
 
-  uv run --env-file .env python scripts/build_fault_matrix.py      → data/fault_matrix.json + отчёт
+  uv run --env-file .env python scripts/build_fault_matrix.py      → fault_matrix.json (data/ и INDEX_DIR) + отчёт
 Нужен собранный индекс (`make index`). Код возврата 1 — ячейка без статуса или основание не прошло проверку.
 """
 
@@ -26,14 +26,13 @@ from typing import Any
 from matrix_enrich import REPORT as PARTS_REPORT
 from matrix_enrich import enrich, load_pages
 from matrix_enrich import report as parts_report
-from service.fault_matrix import Cell, Ref, verify_cell
+from service.fault_matrix import Cell, Ref, save_matrix, verify_cell
 from service.manuals.catalog import ENGINES
 from service.manuals.index import Fragment, index_dir, load_fragments
 from service.manuals.search import ManualIndex
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "data" / "fault_matrix.src.json"
-OUT = ROOT / "data" / "fault_matrix.json"
 MAX_PAGES, MAX_OPS, MAX_PARTS, MAX_SAFETY = 4, 6, 5, 2
 
 _WS = re.compile(r"\s+")
@@ -232,7 +231,7 @@ def report(cells: list[Cell], problems: list[str]) -> str:
         "# Матрица «код неисправности × двигатель» (issue #10)",
         "",
         f"{datetime.now():%Y-%m-%d %H:%M}. Источник: `data/fault_matrix.src.json` → `scripts/build_fault_matrix.py` → "
-        "`data/fault_matrix.json`.",
+        "`fault_matrix.json` (data/ и INDEX_DIR, в git не входит).",
         "",
         "✅ подтверждено (узел есть, страницы и работы из руководства) · ⛔ узла нет (заявка невозможна) · "
         "📭 руководство молчит (агент: «в руководстве нет → дефектовка») · "
@@ -291,25 +290,19 @@ def main() -> int:
     cells, more = enrich(cells, load_pages())  # запчасти с обозначениями и инструмент (issue #10, п. 2)
     problems += more
     passport = json.loads((path / "passport.json").read_text(encoding="utf-8"))
-    OUT.write_text(
-        json.dumps(
-            {
-                "_comment": "Собрано scripts/build_fault_matrix.py из data/fault_matrix.src.json и индекса. "
-                "Руками не править.",
-                "index": passport.get("meta", {}),
-                "cells": [c.to_json() for c in cells],
-            },
-            ensure_ascii=False,
-            indent=1,
-        )
-        + "\n",
-        encoding="utf-8",
+    out = save_matrix(
+        {
+            "_comment": "Собрано scripts/build_fault_matrix.py из data/fault_matrix.src.json и индекса. "
+            "Руками не править.",
+            "index": passport.get("meta", {}),
+            "cells": [c.to_json() for c in cells],
+        }
     )
     PARTS_REPORT.write_text(parts_report(cells), encoding="utf-8")
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(report(cells, problems), encoding="utf-8")
     rep = args.report.relative_to(ROOT)
-    print(f"{OUT.relative_to(ROOT)}: {len(cells)} ячеек; отчёт {rep}; выброшено {len(problems)}")
+    print(f"{', '.join(map(str, out))}: {len(cells)} ячеек; отчёт {rep}; выброшено {len(problems)}")
     fatal = [p for p in problems if "основание" in p or "ячейки нет" in p or "без основания" in p]
     for p in fatal:
         print("ОШИБКА:", p, file=sys.stderr)

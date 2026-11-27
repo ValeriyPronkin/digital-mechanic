@@ -11,6 +11,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from matrix_fixture import write_synthetic
 from service import kb_store
 from service.kb_store import Bucket, KbError, fetch_index, iam_auth, publish_index, sigv4_auth
 
@@ -52,6 +53,7 @@ def make_index(path: Path) -> Path:
     (path / "cache" / "embeddings.jsonl").write_text("{}\n", encoding="utf-8")
     (path / "cache" / "extract").mkdir()
     (path / "cache" / "extract" / "big.json").write_text("не выкладывается", encoding="utf-8")
+    write_synthetic(path / "fault_matrix.json")  # матрица — вне git, выкладывается с индексом (#96)
     return path
 
 
@@ -88,6 +90,7 @@ def test_publish_then_fetch_by_iam(tmp_path: Path) -> None:
         assert fetch_index(Bucket("kb", iam_auth(token), http), dest) == version
     assert (dest / "fragments.jsonl").read_text(encoding="utf-8").count("\n") == 2
     assert (dest / "cache" / "embeddings.jsonl").is_file()
+    assert (dest / "fault_matrix.json").read_bytes() == (tmp_path / "src" / "fault_matrix.json").read_bytes()
     assert kb_store.installed_version(dest) == version
     gets = [r for r in s3.requests if r.url.host != "169.254.169.254"]
     assert all(r.headers["X-YaCloud-SubjectToken"] == TOKEN and "authorization" not in r.headers for r in gets)
@@ -178,3 +181,43 @@ def test_stand_never_passes_static_key_to_container() -> None:
     assert "S3_ACCESS_KEY_ID=*|S3_SECRET_ACCESS_KEY=*" in wf, "строки статического ключа из APP_ENV отбрасываются"
     assert "secrets.S3_" not in wf
     assert '"S3_BUCKET=${S3_BUCKET}"' in wf
+
+
+def test_publish_refuses_index_without_matrix(tmp_path: Path) -> None:
+    """Новая версия без матрицы оставила бы стенд без работ и пояснений из руководства (#96)."""
+    src = make_index(tmp_path / "src")
+    (src / "fault_matrix.json").unlink()
+    s3 = FakeS3()
+    with s3.client() as http, pytest.raises(KbError, match=r"fault_matrix\.json"):
+        publish_index(Bucket("kb", sigv4_auth("AKID", "secret"), http), src)
+    assert s3.objects == {}
+
+
+def test_fetch_accepts_version_published_before_matrix(tmp_path: Path) -> None:
+    """Версия в бакете до #96 матрицы не содержит: стенд с новым кодом её скачивает и работает без матрицы."""
+    s3 = FakeS3()
+    src = make_index(tmp_path / "src")
+    files = {}
+    for name in ("passport.json", "fragments.jsonl"):
+        data = (src / name).read_bytes()
+        s3.objects[f"index/old/{name}"] = data
+        files[name] = {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+    s3.objects["index/old/MANIFEST.json"] = json.dumps({"files": files}).encode()
+    s3.objects["index/LATEST"] = b"old"
+    with s3.client() as http:
+        assert fetch_index(Bucket("kb", iam_auth(TOKEN), http), tmp_path / "index") == "old"
+    assert not (tmp_path / "index" / "fault_matrix.json").exists()
+
+
+def test_health_reports_matrix_from_index(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from service import fault_matrix
+
+    monkeypatch.setattr(fault_matrix, "DATA_MATRIX_PATH", tmp_path / "нет.json")
+    monkeypatch.setenv("INDEX_DIR", str(tmp_path / "index"))
+    monkeypatch.delenv("S3_BUCKET", raising=False)
+    from service.main import app
+
+    assert TestClient(app).get("/health").json()["fault_matrix"] == {"present": False}
+    make_index(tmp_path / "index")
+    body = TestClient(app).get("/health").json()
+    assert body["fault_matrix"] == {"present": True, "source": "index", "cells": 2, "confirmed": 1}
