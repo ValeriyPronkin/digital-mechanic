@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Passport, SourceItem, ToolTrace, UsageEvent } from '../api'
 import { copy } from '../copy'
 import { logTotals, stepDetail } from '../lib/log'
@@ -76,9 +77,13 @@ export function ActionLog({
   )
 }
 
-/** The request passport inside the open log: plain rows, no JSON on the screen; the JSON is a download. */
+/** The request passport inside the open log, in the order the mechanic reads it (Валерий, 27.11): first «Откуда
+ *  ответ» — each page with why it went to the model and, when the answer did not use it, why not; then «Сколько
+ *  стоило» in one line; the details (tokens by part, the cache, the unused share, the model calls, the rules) are
+ *  folded behind a button — not a <details>, so the log stays one fold. The JSON is a download. */
 function PassportSection({ passport }: { passport: Passport }) {
   const rows = passportRows(passport)
+  const [open, setOpen] = useState(false)
   const download = () => {
     const a = document.createElement('a')
     a.href = URL.createObjectURL(passportFile(passport))
@@ -87,49 +92,78 @@ function PassportSection({ passport }: { passport: Passport }) {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000)
   }
   return (
-    <li className="space-y-2 pt-2">
+    <li className="space-y-3 pt-2" data-passport>
       <span className="block font-semibold text-text">{copy.passport.title}</span>
       {rows.fragments.length > 0 && (
         <div>
-          <span className="block">{copy.passport.fragments}</span>
-          <ul className="mt-0.5 space-y-0.5">
+          <span className="block text-text">{copy.passport.from}</span>
+          <ul className="mt-1 space-y-1.5">
             {rows.fragments.map((f, i) => (
               <li key={i} className={f.used ? 'text-text' : 'text-mute'}>
-                {f.used ? '✓ ' : '— '}
-                {f.label} · {f.tokens} · {f.used ? copy.passport.used : copy.passport.unused}
+                <span className="block">
+                  {f.used ? '✓ ' : '— '}
+                  {f.label} · {f.tokens}
+                  {!f.why && <> · {f.used ? copy.passport.used : copy.passport.unused}</>}
+                </span>
+                {f.why && <span className="block text-dim">{f.why}</span>}
+                {f.why && !f.used && (
+                  <span className="block text-warn">{copy.passport.notUsedWhy(f.whyOut ?? copy.passport.unused)}</span>
+                )}
               </li>
             ))}
           </ul>
         </div>
       )}
-      {rows.calls.length > 0 && (
-        <div>
-          <span className="block">{copy.passport.calls}</span>
-          <ul className="mt-0.5 space-y-0.5">
-            {rows.calls.map((c, i) => (
-              <li key={i}>
-                {c.label} · {c.tokens} · {c.time} · <span className="text-text">{c.price}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <div>
-        <span className="block">{copy.passport.rules}</span>
-        <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
-          {rows.rules.map((r, i) => (
-            <li key={i}>{r}</li>
-          ))}
-        </ul>
-      </div>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-        {rows.total.map(([k, v]) => (
-          <div key={k} className="contents">
-            <dt>{k}</dt>
-            <dd className="text-text">{v}</dd>
+      <p>
+        <span className="text-text">{copy.passport.cost}:</span> <span className="text-text">{rows.cost}</span>
+      </p>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="min-h-12 text-accent underline-offset-2 hover:underline"
+      >
+        {open ? copy.passport.less : copy.passport.more}
+      </button>
+      {open && (
+        <div className="space-y-2">
+          {rows.details.length > 0 && (
+            <ul className="space-y-0.5">
+              {rows.details.map((d, i) => (
+                <li key={i}>{d}</li>
+              ))}
+            </ul>
+          )}
+          {rows.calls.length > 0 && (
+            <div>
+              <span className="block">{copy.passport.calls}</span>
+              <ul className="mt-0.5 space-y-0.5">
+                {rows.calls.map((c, i) => (
+                  <li key={i}>
+                    {c.label} · {c.tokens} · {c.time} · <span className="text-text">{c.price}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div>
+            <span className="block">{copy.passport.rules}</span>
+            <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+              {rows.rules.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
           </div>
-        ))}
-      </dl>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+            {rows.total.map(([k, v]) => (
+              <div key={k} className="contents">
+                <dt>{k}</dt>
+                <dd className="text-text">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
       <button type="button" onClick={download} className="min-h-12 text-accent underline-offset-2 hover:underline">
         {copy.passport.download}
       </button>

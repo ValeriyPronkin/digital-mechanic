@@ -410,6 +410,11 @@ export const copy = {
   // The passport of an answer (#31), at the end of the action log.
   passport: {
     title: 'Паспорт ответа',
+    from: 'Откуда ответ',
+    cost: 'Сколько стоило',
+    more: 'Подробнее: токены, вызовы модели, правила',
+    less: 'Скрыть подробности',
+    notUsedWhy: (why: string) => `не пошло в ответ: ${why}`,
     fragments: 'Что ушло в модель из руководства',
     used: 'в ответе',
     unused: 'не пошло в ответ',

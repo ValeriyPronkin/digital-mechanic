@@ -13,6 +13,8 @@ export function passportRows(p: Passport) {
       label: `${f.manual}, стр.${NBSP}${f.pdf_page}`,
       tokens: `≈${f.tokens}${NBSP}${plural(f.tokens, ['токен', 'токена', 'токенов'])}`,
       used: f.used,
+      why: f.why_in ?? null, // why the page is in the context; null in older passports
+      whyOut: f.used ? null : (f.why_out ?? null), // why it did not go into the answer
     })),
   )
   const calls = p.llm.map((c) => ({
@@ -34,7 +36,14 @@ export function passportRows(p: Passport) {
         : '—',
     ],
   ] as const
-  return { fragments, calls, total, rules: p.rules }
+  // In plain words (PR #177): «Сколько стоило» — one line; the details — tokens by part, the cache, the unused share.
+  // An older passport without them keeps its total line.
+  const e = p.explain ?? {}
+  const cost = e.cost ?? `${rub(t.total_rub)} · ${num(t.ms / 1000)}${NBSP}с`
+  const details = [e.tokens, e.cached, e.unused].filter((x): x is string => !!x)
+  // the unused share is said in words above: the older row would repeat it
+  const shown = e.unused ? total.filter(([k]) => k !== 'Лишний контекст') : total
+  return { fragments, calls, total: shown, rules: p.rules, cost, details }
 }
 
 export const passportFile = (p: Passport) => new Blob([JSON.stringify(p, null, 1)], { type: 'application/json' })
