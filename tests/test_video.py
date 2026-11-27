@@ -38,3 +38,12 @@ def test_video_starts_when_fleet_is_on_screen() -> None:
     _, pieces = plan(100.0, [(30.0, 40.0)], start=12.0)
     assert pieces[0][0] == 12.0 and pieces[-1][1] == 100.0
     assert remap(12.0, pieces) == 0.0
+
+
+def test_caption_hides_stress_marks() -> None:
+    """Ударения SpeechKit («строк+ах») — только для синтеза; в подписи их нет."""
+    from video import NARRATION, caption
+
+    assert caption("в двух строк+ах") == "в двух строках"
+    assert all("+" not in caption(t) for t in NARRATION.values())
+    assert "строк+ах" in NARRATION["drive"]
