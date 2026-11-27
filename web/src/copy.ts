@@ -44,6 +44,11 @@ export const copy = {
     mechanic: 'Механик',
     chief: 'Главный механик',
   },
+  // the theme of the screen: kept on the device (lib/theme.ts)
+  theme: {
+    label: 'Тема экрана',
+    choice: { dark: 'Тёмная', light: 'Светлая', system: 'Как в системе' },
+  },
   chief: {
     first: 'Сначала проверить',
     shown: 'Показаны', // «Показаны: требует внимания», while a status counter filters the list
@@ -56,8 +61,13 @@ export const copy = {
     export: 'Скачать выгрузку',
     openRegister: 'Открыть заявки',
     legendTitle: 'Что значат статусы',
-    legend:
-      'Карантин: приоритет высокий, машину ставят на дефектовку до выпуска в рейс. Требует внимания: приоритет средний или низкий. Это рекомендации по результату проверки, а не запрет на эксплуатацию',
+    legend: [
+      'Карантин — приоритет высокий: на дефектовку до выпуска в рейс',
+      'Требует внимания — приоритет средний или низкий',
+      'Норма — по последней пригодной проверке отклонения нет',
+      'Нет пригодной записи — по записи выводов нет, нужна новая проверка',
+    ],
+    legendNote: 'Это рекомендации по результату проверки, а не запрет на эксплуатацию',
   },
   verdict: {
     word: {
@@ -84,7 +94,20 @@ export const copy = {
     // the confidence against the server's threshold, as numbers: «Уверенность 0,58 — ниже порога 0,60: вывод предварительный»
     belowThreshold: (confidence: string, threshold: string) =>
       `Уверенность ${confidence} — ниже порога ${threshold}: вывод предварительный`,
+    // a later answer about a check whose card is above: one line back to it
+    again: (session: string, date: string, what: string) => `По проверке ${session} от ${date}: ${what}`,
+    againHint: 'Показать карточку проверки выше',
     atThreshold: (confidence: string, threshold: string) => `Уверенность ${confidence} — не ниже порога ${threshold}`,
+    // «понятно с листа» (Валерий, 27.11): one line for each figure of the card, behind one link
+    explain: 'Что значат цифры',
+    explainLines: {
+      score:
+        'Оценка — насколько звук отличается от звука исправного двигателя: 0 — не отличается, 1 — сильно. Норма с оценкой от 0,30 — повторить проверку раньше срока',
+      confidence:
+        'Уверенность — насколько акустическая модель уверена в своём выводе. Ниже порога вывод предварительный',
+      recording: 'Запись: с помехами — уверенность снижена; непригодна — выводов о двигателе нет, нужна новая запись',
+    },
+    urgencyHint: 'Приоритет — насколько срочно машине нужна дефектовка. Основания:',
   },
   guide: {
     word: {
@@ -115,6 +138,8 @@ export const copy = {
       'Какой нужен инструмент',
     ],
     createTicket: 'Создать заявку',
+    quickNext: 'Ещё вопросы',
+    quickPrev: 'К началу вопросов',
     createTicketMessage: 'Создать заявку на дефектовку',
     working: 'Готовим ответ…',
     withdrawn: 'Утверждение снято:',
@@ -160,11 +185,22 @@ export const copy = {
     answered: { novice: 'Объяснено для новичка', mechanic: 'Объяснено для механика', master: 'Объяснено для мастера' },
     more: 'Подробнее',
     shorter: 'Короче',
+    explain: 'Что значат «Подробнее» и «Короче»',
+    explainText:
+      'Уровень объяснения сервер выбирает по вопросу. «Подробнее» — то же по шагам, для новичка; «Короче» — только значение, инструмент и страница',
     ask: {
       novice: 'Объясни подробнее, по шагам',
       mechanic: 'Объясни ещё раз: ответ и порядок работ',
       master: 'Короче: только значение, инструмент и страница',
     },
+  },
+  // the compact answer: «Коротко» first, the rest under «Весь ответ», one list of pages under it
+  answer: {
+    // not «Подробнее»: under the answer that word is the level's, the same question again in more steps
+    more: 'Весь ответ',
+    less: 'Свернуть',
+    pages: 'Страницы руководства',
+    footnote: (n: number, label: string) => `Сноска ${n}: ${label}`,
   },
   sections: [
     'Что слышно',
@@ -295,9 +331,100 @@ export const copy = {
   } as Record<string, string>,
   // Manuals disagree (D-20): both wordings verbatim, each with its page; the line under them is the server's
   // hand-over to the chief mechanic (#93), shown as it comes.
+  // The vehicle's earlier conversations (#92): continue one, or print it for a warranty claim.
+  history: {
+    title: 'Обращения по машине',
+    count: (n: number) => `${n}`,
+    status: {
+      open: 'разговор',
+      ticket_pending: 'заявка ждёт подтверждения',
+      ticket_sent: 'заявка отправлена',
+    } as Record<string, string>,
+    noTopic: 'без вопроса',
+    records: (n: number) => `записей: ${n}`,
+    current: 'Открыто сейчас',
+    resume: 'Продолжить',
+    resuming: 'Открываем…',
+    claim: 'Для рекламации',
+    claimHint: 'Все ответы со страницами руководства, модель и проверка, что записи не правили. Откроется для печати',
+    json: 'JSON',
+    loadFailed: 'Не получилось загрузить обращения',
+    resumeFailed: 'Не получилось открыть обращение. Попробуйте ещё раз',
+  },
   contradiction: {
     title: (what: string) => `Противоречие в документации — ${what}`,
     label: 'Противоречие в документации',
+    // #93: the hand-over to the chief mechanic, by its number in his queue
+    open: (n: number | null) => (n === null ? 'У главного механика' : `№ ${n} · у главного механика`),
+    resolved: (n: number | null) => (n === null ? 'Решено' : `№ ${n} · решено`),
+    openQueue: 'Открыть очередь противоречий',
+  },
+  // the chief mechanic's queue of contradictions between manuals (#93): letter, «Отправить», «Решение», journal
+  queue: {
+    title: 'Противоречия в руководствах',
+    open: 'Противоречия в руководствах',
+    openHint: (open: number, sent: number, resolved: number) =>
+      `открыто: ${open} · отправлено: ${sent} · решено: ${resolved}`,
+    loading: 'Загружаем противоречия…',
+    loadFailed: 'Не получилось загрузить противоречия',
+    empty: 'Противоречий пока нет. Они появляются здесь, когда руководства расходятся в ответе механику',
+    show: 'Какие противоречия показать',
+    filter: { open: 'открыты', sent: 'отправлены', resolved: 'решены' },
+    emptyFilter: {
+      open: 'Открытых противоречий нет',
+      sent: 'Отправленных и ещё не решённых нет',
+      resolved: 'Решённых пока нет',
+    },
+    state: { open: 'открыто', sent: 'отправлено, ждёт ответа', resolved: 'решено' },
+    number: (n: number) => `№ ${n}`,
+    itemTitle: (n: number) => `Противоречие № ${n}`,
+    back: 'К очереди',
+    notFound: (n: number) => `Противоречия № ${n} нет в очереди`,
+    seen: (count: number, times: string) => `в ответах: ${count} ${times}`,
+    times: ['раз', 'раза', 'раз'] as const,
+    vehicles: 'машины',
+    lastSeen: 'последний раз',
+    engine: 'двигатель',
+    formulations: 'Как написано в руководствах',
+    safeRule: 'Пока нет решения, механики работают по безопасному правилу',
+    safeRuleBefore: 'До решения механики работали по безопасному правилу',
+    resolution: 'Решение',
+    resolutionMeta: (source: string, at: string, by: string) => `источник: ${source} · ${at} · записал: ${by}`,
+    basis: 'Основание',
+    sentTitle: 'Отправлено',
+    sentLine: (to: string, at: string, by: string) => `${to} · ${at} · ${by}`,
+    showText: 'Текст письма',
+    to: { manufacturer: 'завод-изготовитель', support: 'поддержка', chief_mechanic: 'главный механик' },
+    letter: 'Письмо',
+    letterTo: 'Кому',
+    letterToChoice: { manufacturer: 'Заводу', support: 'В поддержку' },
+    letterLoading: 'Готовим черновик…',
+    letterFailed: 'Не получилось получить черновик письма',
+    letterNone:
+      'Само письмо не уходит: скопируйте текст и отправьте почтой. «Отправить» записывает в журнал, кому и когда',
+    copy: 'Скопировать',
+    copied: 'Скопировано',
+    send: 'Отправить',
+    sending: 'Записываем…',
+    sendFailed: 'Не получилось записать отправку. Попробуйте ещё раз',
+    by: 'Кто',
+    byDefault: 'Главный механик',
+    decide: 'Записать решение',
+    decideHint: 'Ответ завода или поддержки. Механики увидят его рядом с обеими формулировками',
+    decideText: 'Что решено',
+    decideSource: 'Чьё решение',
+    decideDocument: 'Документ-основание: письмо, извещение, редакция руководства',
+    decideSave: 'Записать',
+    decideFailed: 'Не получилось записать решение. Попробуйте ещё раз',
+    journal: 'Журнал решений',
+    journalHint: 'Каждая отправка и каждое решение по порядку. Записи только добавляются',
+    journalEmpty: 'В журнале пока нет записей',
+    journalLoading: 'Загружаем журнал…',
+    journalFailed: 'Не получилось загрузить журнал',
+    event: {
+      sent: (n: number, to: string) => `№ ${n}: отправлено, кому: ${to}`,
+      resolved: (n: number, source: string) => `№ ${n}: решение, источник: ${source}`,
+    },
   },
   // parts and tools in the answer, each in its colour (§8): the word opens its hint
   spans: {

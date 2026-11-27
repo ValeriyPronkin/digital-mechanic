@@ -29,7 +29,7 @@ def test_level_sets_format_and_max_tokens(ml: MLClient, toir: ToirClient, level:
 def test_levels_differ_in_length_and_content() -> None:
     assert LEVEL_MAX_TOKENS["master"] < LEVEL_MAX_TOKENS["mechanic"] < LEVEL_MAX_TOKENS["novice"]
     novice = LEVEL_PROMPT["novice"]
-    assert "Безопасность" in novice and "Понадобится" in novice and "проверить результат" in novice
+    assert "Безопасность" in novice and "Понадобится" not in novice and "проверить результат" in novice
     assert "только прямой ответ" in LEVEL_PROMPT["master"] and "[R…]" in LEVEL_PROMPT["master"]
 
 

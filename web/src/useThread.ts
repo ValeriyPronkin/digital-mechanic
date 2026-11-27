@@ -48,9 +48,18 @@ interface State {
   busy: boolean
   loaded: boolean
   sessionId: string | null // the check the restored conversation is about
+  threadId: string | null // the conversation on the screen: the history marks it «открыто сейчас»
 }
 
-const EMPTY: State = { turns: [], sources: {}, pending: null, busy: false, loaded: false, sessionId: null }
+const EMPTY: State = {
+  turns: [],
+  sources: {},
+  pending: null,
+  busy: false,
+  loaded: false,
+  sessionId: null,
+  threadId: null,
+}
 const bySource = (items: SourceItem[]) => Object.fromEntries(items.map((s) => [s.handle, s]))
 
 function apply(turn: AssistantTurn, e: ChatEvent): AssistantTurn {
@@ -147,6 +156,7 @@ export function useThread(vehicleId: string, attempt = 0) {
           busy: false,
           loaded: true,
           sessionId: view?.session_id ?? null,
+          threadId: view?.thread_id ?? null,
         })
       })
       .catch(() => !stale && setState({ ...EMPTY, loaded: true }))
@@ -200,6 +210,7 @@ export function useThread(vehicleId: string, attempt = 0) {
       }))
       const onEvent = (e: ChatEvent) =>
         setState((s) => {
+          if (e.type === 'thread') return { ...s, threadId: e.thread_id }
           if (e.type === 'sources') return { ...s, sources: { ...s.sources, ...bySource(e.items) } }
           if (e.type === 'ticket_pending') return { ...s, pending: e }
           const last = s.turns[s.turns.length - 1]

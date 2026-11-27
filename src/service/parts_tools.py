@@ -27,7 +27,8 @@ TOOL_ASK = re.compile(
 )
 PART_ASK = re.compile(
     r"запчаст|запасн\w+\s+част|какие\s+(?:нужны\s+)?детал|что\s+(?:заменить|поменять|менять|ставить)\s+(?:на\s+)?нов|"
-    r"(?:заменить|поменять)\s+на\s+нов|одноразов|повторно\s+(?:ставить|использ)|каталожн|обозначени",
+    r"(?:заменить|поменять)\s+на\s+нов|одноразов|повторно\s+(?:ставить|использ|устанавл)|"
+    r"(?:ставить|использовать|устанавливать)\s+повторно|можно\s+ограниченно|разового\s+монтажа|каталожн|обозначени",
     re.I,
 )
 _STOP = {"какой", "какие", "нужный", "нужен", "нужно", "нужны", "инструмент", "запчасть", "деталь", "что", "для",
@@ -95,6 +96,36 @@ def asks(question: str) -> set[str]:
     return kinds
 
 
+# Слова, которые узла не называют: по ним запись чужой строки таблицы («болты крепления форсунок») попадала к вопросу
+# о другом узле («чем затянуть болты крышек шатуна») — #162, приёмка 27.11, класс (а).
+_GENERIC = {"затянуть", "затяжка", "момент", "крепление", "крепить", "снять", "снимать", "установить", "ставить",
+            "проверить", "проверять", "мерить", "измерить", "замерить", "откручивать", "открутить", "отвернуть",
+            "выставить", "тянуть", "использовать", "повторно", "нельзя", "одноразовый", "разовый", "монтаж",
+            "оснастка", "приспособа", "приспособ", "приспособление", "ключ", "щуп", "прибор", "съёмник", "съемник",
+            "сколько", "какая", "каким", "размер", "нужно", "делать", "работа", "ремонт", "сборка", "разборка",
+            "менять", "поменять", "заменять", "замена", "меняю", "запчасть", "деталь", "нужный", "снятие",
+            "мой", "перебирать", "перебрать", "мотор", "ограниченно", "ограниченный", "раз"}  # fmt: skip
+# крепёж — узел называет только вместе с деталью; без неё — лишь если и в названии записи
+_FASTENER = {"болт", "гайка", "винт", "шпилька", "шайба"}
+
+
+_CANON = {b: a for a, b in _SAME}  # «инжектор» → «форсунка»: синонимы — одно слово узла
+
+
+def _canon(words: set[str]) -> set[str]:
+    return {_CANON.get(w, w) for w in words}
+
+
+def _local(r: Record) -> set[str]:
+    """Слова самой записи — название, цитата, операция и раздел страницы; не окружение страницы (keywords)."""
+    return _canon(set(tokenize(f"{r.name} {r.quote} {r.operation} {r.node}")))
+
+
+def node_words(question: str) -> set[str]:
+    """Слова вопроса, которые называют узел или операцию («шкив», «коленчатый», «вал»), без общих слов."""
+    return _canon({w for w in tokenize(question) if w not in _STOP and len(w) >= 3} - _GENERIC - _FASTENER)
+
+
 def find(
     engine: str,
     query: str,
@@ -102,32 +133,57 @@ def find(
     pages: set[tuple[str, int]] | None = None,
     limit: int = 8,
 ) -> list[Record]:
-    """Записи двигателя по словам запроса и (или) со страниц `pages`. Порядок: страница ответа, затем больше
-    общих слов; одно и то же название с тем же размером — один раз."""
+    """Записи двигателя, у которых узел или операция вопроса есть в их собственной строке (название, цитата).
+    Страница ответа (`pages`) — только порядок, не повод взять запись: со страницы таблицы моментов иначе шли ключи
+    других узлов (#162). Вопрос без узла («что заменить на новое?») — одноразовые и заменяемые детали со страниц
+    ответа. Одно и то же название с тем же размером — один раз."""
     from service import glossary
 
     text = " ".join([query, *glossary.expand(query)])  # цеховые слова → термины руководства («форсунка»)
     want = {w for w in tokenize(text) if w not in _STOP and len(w) >= 3}
+    own = {w for w in tokenize(query) if w not in _STOP and len(w) >= 3}  # слова механика, без глоссария
     for a, b in _SAME:
         if a in want or b in want:
             want |= {a, b}
+            if a in own or b in own:
+                own |= {a, b}
+    specific = _canon(want - _GENERIC - _FASTENER)
+    own_specific = _canon(own - _GENERIC - _FASTENER)
+    fasteners = want & _FASTENER
     scored: list[tuple[int, int, int, Record]] = []
     for n, r in enumerate(records(engine)):
         if kinds and r.kind not in kinds:
             continue
         on_page = bool(pages and (r.doc, r.page) in pages)
-        hit = len(want & r.words())
-        named = len(want & set(tokenize(r.name)))  # слово вопроса в самом названии — сильнее слов окружения
-        if not on_page and (not hit or (not named and hit < min(2, len(want)))):
-            continue
-        hit += 2 * named
+        local = _local(r)
+        named = _canon(set(tokenize(r.name)))
+        if specific:
+            hit = len(specific & local)
+            need = min(3, len(own_specific))  # все слова узла («шкив коленчатого вала»), не больше трёх
+            if need and len(own_specific & local) < need:
+                continue  # узел вопроса (словами механика) не назван в записи — не к месту
+            if not need and not hit:
+                continue
+            if r.kind == "part" and r.source == "замена" and not (own_specific & named):
+                continue  # «заменить жгут» на странице об инжекторах — не запчасть к форсунке
+            if fasteners and (local & _FASTENER) and not (fasteners & local):
+                continue  # спрашивали про болты, а строка — про гайки другого соединения
+            score = hit + 2 * len(specific & named)
+        elif fasteners:
+            if not (fasteners & named):
+                continue
+            score = 1
+        else:
+            if not (on_page and r.kind == "part" and r.source in ("одноразовая", "замена")):
+                continue
+            score = 1
         once = int(r.source == "одноразовая" and "part" in (kinds or set()))  # «что заменить на новое»
-        scored.append((int(on_page), hit + once, -n, r))
-    scored.sort(reverse=True)
+        scored.append((int(on_page), score + once, -n, r))
+    scored.sort(key=lambda t: (t[1], t[0], t[2]), reverse=True)
     seen: set[tuple[str, str, str]] = set()
     out = []
     for *_, r in scored:
-        key = (r.kind, r.name.lower(), r.code.lower())
+        key = (r.kind, r.name.lower(), _norm_code(r.code))
         if key in seen:
             continue
         seen.add(key)
@@ -135,6 +191,11 @@ def find(
         if len(out) >= limit:
             break
     return out
+
+
+def _norm_code(code: str) -> str:
+    """«S =5», «S=5», «Sвн=5» — один ключ (#162, класс (б))."""
+    return re.sub(r"\s+", "", code.lower()).replace("sвн", "s")
 
 
 # ---------- разметка ответа для /api/v2: запчасти и инструмент отдельным цветом (Валерий и Никита, 27.11) ----------
@@ -169,7 +230,11 @@ def spans(engine: str, text: str, cited: dict[tuple[str, int], str] | None = Non
         if any(_VERB.search(w) or _NOT_NAME.match(w) for w in words):
             continue  # «заменить», «допускается» — не деталь (обрывки разбора)
         pats: list[tuple[re.Pattern[str], bool]] = []
-        if r.code and re.search(r"\d", r.code) and len(r.code) >= 4:
+        key = re.fullmatch(r"S(вн)?\s*=\s*(\d+)", r.code or "", re.I)
+        if key:  # размер ключа «S=6» — при любой длине, вместе со словом «ключ» перед ним («ключ S=6», web-2 27.11)
+            inner = r"\s*вн" if key.group(1) else ""
+            pats.append((re.compile(rf"(?:ключ\w*\s+(?:на\s+)?)?\(?\bS{inner}\s*=\s*{key.group(2)}(?!\d)", re.I), True))
+        elif r.code and re.search(r"\d", r.code) and len(r.code) >= 4:
             pats.append((re.compile(r"(?<![\w.\-])" + re.escape(r.code) + r"(?![\w\-])", re.I), True))
         # запчасть по одному названию — только из двух слов и больше («уплотнительные кольца инжектора»): одно слово
         # («кольцо», «вал») встречается в ответе на каждом шагу и красило бы всё подряд

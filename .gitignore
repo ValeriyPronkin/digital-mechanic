@@ -25,3 +25,7 @@ web/dist/
 /data/fault_types.json
 # Пакет для инженера — в нём ответы заглушек (описания диагностики): локально, не в git
 /reports/*engineer-pack*.html
+# e2e (make e2e): прогоны и снимки — локально; в git — README и отобранные снимки evidence/
+/reports/e2e/*
+!/reports/e2e/README.md
+!/reports/e2e/evidence/

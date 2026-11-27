@@ -25,7 +25,7 @@ import secrets
 import threading
 import time
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -383,7 +383,7 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
     return block, rest
 
 
-_ESC_NUMBER = re.compile(r"\(№ (\d+)\)")
+_ESC_NUMBER = re.compile(r"\(№ (\d+)[);]")  # «(№ 3)» — передано, «(№ 3; источник: …)» — решено
 
 
 def escalation_view(line: str) -> dict[str, Any]:
@@ -507,7 +507,9 @@ def tool_events(reply: AgentReply, conv: Conversation, verdict_sent: bool) -> tu
         name = s.get("tool") or s.get("name", "")
         tid = f"t{n}"
         block = None
-        if name == "get_diagnosis" and not verdict_sent:
+        if name == "get_diagnosis" and verdict_sent:
+            continue  # карточка уже на экране — второй раз шаг «Результат проверки» не показываем
+        if name == "get_diagnosis":
             block = verdict_block(conv)
             verdict_sent = block is not None
         events.append(
@@ -688,6 +690,24 @@ def topic_of(question: str) -> str:
     return q if len(q) <= 80 else q[:79].rstrip() + "…"
 
 
+DIAG_TOPIC = "Результат проверки"
+
+
+def thread_topic(current: str | None, question: str, session_id: str) -> str:
+    """Тема обращения в истории машины — первый настоящий вопрос нити. Кнопка «Получить результат диагностики»
+    своих слов не несёт: пока других вопросов нет, тема — «Результат проверки S-…», а первый вопрос механика её
+    заменяет (и в нитях, где темой уже стоит текст кнопки)."""
+    from service.agent import _DIAG_ASK
+
+    diag = bool(_DIAG_ASK.match(question))
+    placeholder = not current or current.startswith(DIAG_TOPIC) or bool(_DIAG_ASK.match(current))
+    if not placeholder:
+        return current or ""
+    if diag:
+        return current if current and current.startswith(DIAG_TOPIC) else f"{DIAG_TOPIC} {session_id}".strip()
+    return topic_of(question)
+
+
 def answer_record(conv: Conversation, reply: AgentReply, question: str, text: str) -> dict[str, Any]:
     """Запись для рекламации об ответе: что спросили, что ответили, по каким страницам, чем и какой версией."""
     from service.agent import mask_pii
@@ -715,6 +735,19 @@ def answer_record(conv: Conversation, reply: AgentReply, question: str, text: st
     }
 
 
+def msk(iso: str | None) -> str:
+    """Время выгрузки для рекламации — по Москве, как на экране: «27.11.2026 19:28». Нет или не разобрать — как есть."""
+    if not iso:
+        return ""
+    try:
+        t = datetime.fromisoformat(iso)
+    except ValueError:
+        return iso
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=UTC)
+    return t.astimezone(timezone(timedelta(hours=3))).strftime("%d.%m.%Y %H:%M")
+
+
 def export_html(vehicle: Any, row: dict[str, Any], records: list[dict[str, Any]], check: tuple[bool, str]) -> str:
     """Выгрузка нити для печати (рекламация): шапка, проверка цепочки, записи по порядку."""
     E = html.escape
@@ -728,12 +761,12 @@ def export_html(vehicle: Any, row: dict[str, Any], records: list[dict[str, Any]]
         "@media print{a{color:inherit}}</style>",
         f"<h1>Обращение по машине {E(vehicle.vehicle_id)} · {E(vehicle.engine_model)}</h1>",
         f"<p>Нить {E(row['thread_id'])} · проверка {E(str(row.get('session_id') or '—'))} · "
-        f"с {E(row.get('started_at', ''))} по {E(row.get('updated_at', ''))} (UTC) · "
+        f"с {E(msk(row.get('started_at')))} по {E(msk(row.get('updated_at')))} (Москва) · "
         f"тема: {E(row.get('topic', ''))}</p>",
         f'<p class="{"" if ok else "bad"}"><b>Целостность записи:</b> {"✓" if ok else "✗"} {E(why)}</p>',
     ]
     for r in records:
-        head = f"№{r['seq']} · {r.get('at', '')} UTC"
+        head = f"№{r['seq']} · {msk(r.get('at'))} (Москва)"
         if r.get("kind") == "ticket":
             out.append(f'<div class="rec"><b>{E(head)} · заявка {E(str(r.get("ticket_id")))}</b>')
             out.append(f"<p>{E(str(r.get('conclusion', '')))}</p>")
@@ -1112,7 +1145,7 @@ def build_router(
             ]
             thread["pending"] = {k: pending[k] for k in pending if k != "type"} if pending else None
             thread["state"] = conv_state.dump(conv)
-            thread.setdefault("topic", topic_of(req.message))  # тема обращения — первый вопрос нити
+            thread["topic"] = thread_topic(thread.get("topic"), req.message, thread.get("session_id") or "")
             threads.put(b, v.vehicle_id, thread)
             remember(
                 v.vehicle_id,
@@ -1220,7 +1253,21 @@ def build_router(
     # ---------- противоречия: очередь главного механика (эскалация) ----------
 
     def queue() -> Any:
-        return get_agent().escalation
+        """Очередь противоречий; в ней всегда весь реестр известных (`known`) — главный механик видит всё сразу."""
+        from service import contradictions
+
+        ag = get_agent()
+        q = ag.escalation
+        page_text = getattr(ag.searcher, "page_text", None)
+        registry = [
+            (k, contradictions.verified_quotes(k, page_text) or list(k.quotes), ", ".join(k.engines))
+            for k in contradictions.known()
+        ]
+        try:
+            q.seed(registry)
+        except Exception as exc:  # бакет недоступен — список из того, что уже записано
+            log.warning("реестр противоречий не внесён в очередь: %s", type(exc).__name__)
+        return q
 
     def item_or_404(number: int) -> dict[str, Any]:
         item = queue().get(number)
@@ -1229,8 +1276,11 @@ def build_router(
         return dict(item)
 
     @router.get("/contradictions")
-    def contradictions_queue(status: Literal["open", "sent", "resolved", "all"] = "open") -> list[dict[str, Any]]:
-        """Очередь главного механика: что, двигатель, обе формулировки со страницами, сколько раз всплывало."""
+    def contradictions_queue(
+        status: Literal["known", "open", "sent", "resolved", "all"] = "open",
+    ) -> list[dict[str, Any]]:
+        """Очередь главного механика: что, двигатель, обе формулировки со страницами, сколько раз всплывало
+        (`count` — «в ответах N»). `all` — весь список, включая известные из реестра, о которых ещё не спрашивали."""
         return [dict(i) for i in queue().items(status)]
 
     @router.get("/contradictions/journal")
