@@ -400,12 +400,27 @@ export interface PageView {
   focus: PageMark | null // the first number of that line
 }
 
+/** A part or a tool in the answer (docs/api-v2-web.md §8): the server marks it by the registry of the manuals.
+ *  `start`/`end` are code points in the text of the event; `text` is the piece to colour. `page`, `manual_id`
+ *  and `ref` only when the page is certain; `designation` only when it is in the manual. */
+export interface AnswerSpan {
+  type: 'part' | 'tool'
+  text: string
+  start: number
+  end: number
+  name: string
+  designation: string | null
+  page: number | null
+  manual_id: string | null
+  ref: string | null
+}
+
 export type ChatEvent =
   | { type: 'thread'; thread_id: string }
   | { type: 'tool_started'; id: string; name: string; label: string; input?: Record<string, unknown> }
   | { type: 'tool_result'; id: string; name: string; ok: boolean; block: Block | null }
   | { type: 'sources'; items: SourceItem[] }
-  | { type: 'text'; text: string; round: number; level_used?: string }
+  | { type: 'text'; text: string; round: number; level_used?: string; spans?: AnswerSpan[] }
   | ({ type: 'verification'; text: string } & Verification)
   | ({ type: 'ticket_pending' } & TicketPending)
   | ({ type: 'usage' } & UsageEvent)

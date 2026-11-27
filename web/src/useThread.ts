@@ -3,6 +3,7 @@ import {
   getThread,
   getVerdict,
   streamChat,
+  type AnswerSpan,
   type Block,
   type ChatEvent,
   type SourceItem,
@@ -36,6 +37,7 @@ export interface AssistantTurn {
   reason?: string
   live?: boolean
   level_used?: string // the level the server answered at (#91); also in a restored transcript
+  spans?: AnswerSpan[] // parts and tools in the answer, for their colours (§8); not in a restored transcript yet
 }
 export type Turn = { role: 'user'; text: string } | AssistantTurn | { role: 'ticket'; ticket: TicketView }
 
@@ -66,6 +68,7 @@ function apply(turn: AssistantTurn, e: ChatEvent): AssistantTurn {
       return {
         ...turn,
         text: '',
+        spans: undefined,
         progress: e.label,
         tools: [...turn.tools, { id: e.id, name: e.name, label: e.label, input: e.input }],
       }
@@ -83,7 +86,13 @@ function apply(turn: AssistantTurn, e: ChatEvent): AssistantTurn {
       }
     }
     case 'text':
-      return { ...turn, text: turn.text + e.text, progress: undefined, level_used: e.level_used ?? turn.level_used }
+      return {
+        ...turn,
+        text: turn.text + e.text,
+        spans: e.spans ? [...(turn.spans ?? []), ...e.spans] : turn.spans,
+        progress: undefined,
+        level_used: e.level_used ?? turn.level_used,
+      }
     case 'verification': // the checked text replaces the streamed one: failed claims are withdrawn
       return {
         ...turn,

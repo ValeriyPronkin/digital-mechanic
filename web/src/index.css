@@ -16,6 +16,10 @@
   --color-ok: #22c55e;
   --color-warn: #f59e0b;
   --color-stop: #ef4444;
+  /* parts and tools in the answer (docs/api-v2-web.md §8): two hues apart from the statuses and the accent;
+     parts are underlined solid, tools dashed, so the two differ without the colour too */
+  --color-part: #c4b5fd;
+  --color-tool: #d9f99d;
   /* Lighter than the first #71717a, which measured 3,45–4,05:1 as text: this one is at least 4,5:1
      on the page, on a card and on an input (issue #72). */
   --color-mute: #8b8b94;
