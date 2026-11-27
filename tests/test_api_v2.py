@@ -13,6 +13,8 @@ from service.clients import MLClient, ToirClient
 from service.store import Store
 from test_agent import ANOMALY, DRAFT, call, make_agent, say
 
+pytestmark = pytest.mark.usefixtures("without_matrix")  # сценарий C1 — как в CI, без матрицы (conftest)
+
 
 def events(resp: Any) -> list[dict[str, Any]]:
     return [json.loads(line[6:]) for line in resp.text.split("\n") if line.startswith("data: ")]

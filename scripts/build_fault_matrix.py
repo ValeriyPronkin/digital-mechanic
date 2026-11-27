@@ -1,6 +1,7 @@
 """Сборка матрицы «код × двигатель» (issue #10) из `data/fault_matrix.src.json` и индекса руководств.
 
-Ручное в источнике — только решение о применимости и его основание. Остальное собирается из индекса:
+Ручное в источнике — решение о применимости и его основание; для ячеек, подписанных инженером в реестре покрытия
+(`pages` в источнике), — ещё страницы и работы (`pinned_group`). Остальное собирается из индекса:
   страницы — поиск по запросам кода в руководствах ЭТОГО двигателя, фрагмент обязан называть узел (`must`);
   работы — фразы-указания («Заменить…», «Отрегулировать…») с этих страниц;
   запчасти — что именно «заменить» в этих работах;
@@ -149,6 +150,39 @@ def draft_group(
     return pages, ops, parts[:MAX_PARTS], safety[:MAX_SAFETY]
 
 
+_NOT_PINNED_PART = re.compile(r"исправн|комплект", re.I)  # «заменить исправным», «заменить комплектом»
+
+
+def pinned_group(
+    by_page: dict[tuple[str, int], list[Fragment]],
+    spec: dict[str, Any],
+    decision: dict[str, Any],
+    drafted_safety: list[Ref],
+) -> tuple[list[Ref], list[Ref], list[Ref], list[Ref]]:
+    """Ячейка из реестра покрытия, подписанного инженером (`pages` в источнике): страницы и работы — оттуда, а не из
+    поиска. Цитата страницы — из индекса, как у найденных страниц; работы — дословные строки таблиц неисправностей
+    и процедур, проверяет `verify_cell`. Запчасти — что «заменить» в этих работах."""
+    must = re.compile(spec["must"], re.I)
+    pages: list[Ref] = []
+    for p in decision["pages"]:
+        frags = by_page.get((p["doc"], int(p["page"])))
+        if not frags:
+            continue  # страницы нет в индексе — проверка ячейки не найдёт и работ с неё
+        hit = next((f for f in frags if must.search(f.text)), frags[0])
+        pages.append(Ref(doc=p["doc"], page=int(p["page"]), quote=window(hit.text, must), what=p.get("what", "")))
+    ops = [Ref.from_json(o) for o in decision.get("operations") or []]
+    keys = {(p.doc, p.page) for p in pages}
+    safety = [Ref.from_json(x) for x in decision.get("safety") or []]
+    safety += [x for x in drafted_safety if (x.doc, x.page) in keys and all(x.quote != y.quote for y in safety)]
+    parts: list[Ref] = []
+    for o in ops:
+        for m in _REPLACE.finditer(o.quote):
+            part = m.group(1).strip()
+            if len(part) >= 5 and not _NOT_PINNED_PART.search(part) and all(part != x.quote for x in parts):
+                parts.append(Ref(doc=o.doc, page=o.page, quote=part))
+    return pages, ops, parts[:MAX_PARTS], safety[:MAX_SAFETY]
+
+
 def build(index_path: Path) -> tuple[list[Cell], list[str]]:
     src = json.loads(SRC.read_text(encoding="utf-8"))
     frags = load_fragments(index_path / "fragments.jsonl")
@@ -173,6 +207,8 @@ def build(index_path: Path) -> tuple[list[Cell], list[str]]:
             safety: list[Ref] = []
             if applicable != "false":
                 pages, ops, parts, safety = draft_group(index, by_page, engines[0], spec)
+            if applicable == "true" and decision.get("pages"):  # подписано инженером: страницы и работы из реестра
+                pages, ops, parts, safety = pinned_group(by_page, spec, decision, safety)
             basis = Ref.from_json(decision["basis"]) if decision.get("basis") else None
             if applicable == "true" and basis is None and pages:
                 basis = Ref(doc=pages[0].doc, page=pages[0].page, quote=pages[0].quote)
