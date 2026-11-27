@@ -2,19 +2,20 @@ import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type Tou
 import { ApiError, getPage, type PageMark, type PageView, type SourceItem } from '../api'
 import { copy } from '../copy'
 import { sourceLabel } from '../lib/format'
+import { MAX_ZOOM, nextScale, openingScale, wholeScale } from '../lib/pageZoom'
 import { Sheet } from './Sheet'
 
 /** `view` null: the page could not be opened, and `why` says so in the server's words when it gave any. */
 type Loaded = { page: number; view: PageView | null; why?: string }
 
 const LINE_PX = 18 // the marked line on screen: text of about 16 px
-const TAP_ZOOM = 2.2 // a tap on a page that has no marked line
-const MAX_ZOOM = 4
+/** From 900 px the sheet is a panel beside the thread (index.css), and the page is sized for it. */
+const widePanel = () => window.matchMedia('(min-width: 900px)').matches
 const MARGIN = 24 // kept around the marked line when it is longer than the screen
 
 /** A point of the page (fractions of its sides) and where in the scrolled area it goes (px from its corner). */
 type Anchor = { fx: number; fy: number; vx: number; vy: number }
-/** How the page is shown: its width in widths of the sheet, and what to bring into view. */
+/** How the page is shown: its width in widths of the sheet (lib/pageZoom.ts), and what to bring into view. */
 type Zoom = { scale: number; to: 'mark' | 'start' | Anchor }
 
 /** The sheet's own scrolling area: the page scrolls inside it in both directions. */
@@ -124,16 +125,24 @@ export function PageSheet({
     }
   }
 
-  /** A tap: the whole page, or back to reading size at the point tapped. */
+  /** A tap or a click: the whole page, or enlarged at the point (lib/pageZoom.ts). */
   const toggle = (e: MouseEvent<HTMLButtonElement>) => {
     const img = e.currentTarget.querySelector('img')
     const scroller = scrollerOf(e.currentTarget)
     if (!zoom || !img || !scroller || Date.now() - pinchedAt.current < 400) return
-    const reading = lineScale(img, scroller.clientWidth) ?? TAP_ZOOM
+    const wide = widePanel()
+    const covered = strip.current?.offsetHeight ?? 0 // the strip stays over the top of the page
+    const whole = wholeScale(
+      wide,
+      scroller.clientWidth,
+      scroller.clientHeight - covered,
+      img.naturalHeight / img.naturalWidth,
+    )
+    const scale = nextScale(wide, zoom.scale, lineScale(img, scroller.clientWidth), whole)
     const byKeyboard = e.detail === 0 // no point was tapped
     const at = byKeyboard ? null : anchorAt(e.clientX, e.clientY)
-    if (zoom.scale > 1) setZoom({ scale: 1, to: at ?? 'start' })
-    else setZoom({ scale: reading, to: at ?? (mark ? 'mark' : 'start') })
+    if (zoom.scale > 1) setZoom({ scale, to: at ?? 'start' })
+    else setZoom({ scale, to: at ?? (mark ? 'mark' : 'start') })
   }
 
   const pinchStart = (e: TouchEvent) => {
@@ -179,7 +188,7 @@ export function PageSheet({
             type="button"
             disabled={page <= 1}
             onClick={() => turn(page - 1)}
-            className="min-h-12 flex-1 rounded-lg border border-line disabled:opacity-40"
+            className="min-h-12 flex-1 rounded-lg border border-line enabled:hover:bg-surface-2 disabled:opacity-40"
           >
             {copy.page.previous}
           </button>
@@ -187,7 +196,7 @@ export function PageSheet({
             type="button"
             disabled={!view || page >= view.pages}
             onClick={() => turn(page + 1)}
-            className="min-h-12 flex-1 rounded-lg border border-line disabled:opacity-40"
+            className="min-h-12 flex-1 rounded-lg border border-line enabled:hover:bg-surface-2 disabled:opacity-40"
           >
             {copy.page.next}
           </button>
@@ -219,7 +228,7 @@ export function PageSheet({
             onTouchCancel={pinchEnd}
             aria-label={zoom && zoom.scale > 1 ? copy.page.zoomOut : copy.page.zoomIn}
             style={{ width: `${(zoom?.scale ?? 1) * 100}%` }}
-            className={`relative block touch-pan-x touch-pan-y bg-white ${zoom ? '' : 'invisible'} ${zoom && zoom.scale > 1 ? 'cursor-zoom-out' : 'cursor-zoom-in'}`}
+            className={`relative mx-auto block touch-pan-x touch-pan-y bg-white ${zoom ? '' : 'invisible'} ${zoom && zoom.scale > 1 ? 'cursor-zoom-out' : 'cursor-zoom-in'}`}
           >
             <img
               key={view.image}
@@ -228,7 +237,7 @@ export function PageSheet({
               onLoad={(e) => {
                 const scroller = scrollerOf(e.currentTarget)
                 const reading = scroller && lineScale(e.currentTarget, scroller.clientWidth)
-                setZoom(reading ? { scale: reading, to: 'mark' } : { scale: 1, to: 'start' })
+                setZoom({ scale: openingScale(widePanel(), reading), to: reading ? 'mark' : 'start' })
               }}
               onError={() => setZoom({ scale: 1, to: 'start' })}
               className="block w-full"

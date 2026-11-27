@@ -70,3 +70,31 @@ export function rowBadges(badges: { code: string; label: string }[]): {
     withReason: badges.some((b) => b.code === 'result_mismatch'),
   }
 }
+
+/** The confidence against the server's threshold, in numbers: below it the result is preliminary. Null when
+ *  the server did not send the threshold or the check has no confidence (a failed recording). */
+export function confidenceLine(
+  v: Pick<VerdictBlock, 'confidence' | 'confidence_threshold'>,
+): { text: string; below: boolean } | null {
+  const t = v.confidence_threshold
+  if (v.confidence === null || t === null || t === undefined) return null
+  const below = v.confidence < t
+  return {
+    text: (below ? copy.verdict.belowThreshold : copy.verdict.atThreshold)(num(v.confidence), num(t)),
+    below,
+  }
+}
+
+/** Whether «Создать заявку» may be offered for a verdict: only an anomaly the engine can have. Not for a
+ *  result that does not fit the engine (the card's `case: 'mismatch'`, or the check's `fits_engine: false`
+ *  in the vehicle's list: C808CM178, a turbo on a carburettor engine), and not when the guide says the
+ *  engine has no such unit. The server refuses a ticket for either, so the chip would only lead to a
+ *  refusal in front of the mechanic. */
+export function ticketFits(
+  verdict: Pick<VerdictBlock, 'status' | 'case'> | undefined,
+  check: Pick<SessionBrief, 'fits_engine'> | undefined,
+  coverage: string | undefined,
+): boolean {
+  if (verdict?.status !== 'anomaly') return false
+  return verdict.case !== 'mismatch' && check?.fits_engine !== false && coverage !== 'not_covered'
+}

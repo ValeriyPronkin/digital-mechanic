@@ -14,9 +14,10 @@ import {
   type VerdictBlock,
 } from '../api'
 import { copy } from '../copy'
-import { checkLook } from '../lib/checks'
+import { checkLook, ticketFits } from '../lib/checks'
 import { dateShortRu, dateTimeRu } from '../lib/format'
 import { mergeTickets, withTicket } from '../lib/tickets'
+import { CHECKED, scrollsFurther } from '../lib/ui'
 import { useThread, type AssistantTurn, type Turn } from '../useThread'
 import { ActionLog } from './ActionLog'
 import { Answer } from './Answer'
@@ -24,8 +25,11 @@ import { ContradictionCard } from './ContradictionCard'
 import { GuideCard } from './GuideCard'
 import { PageSheet } from './PageSheet'
 import { SpeakButton } from './SpeakButton'
-import { LEVEL_EVENT, REDO, getLevel, otherLevel, redoLevel, setLevel, type Level } from '../lib/level'
+import { levelOf, moreDetail, redoLevel, shorter, type Level } from '../lib/level'
+import { anchoringWhile } from '../lib/scroll'
 import { ScoreChart } from './ScoreChart'
+import { LanguageSwitch } from './LanguageSwitch'
+import { offersRussian } from '../lib/lang'
 import { TicketCard } from './TicketCard'
 import { TicketSheet } from './TicketSheet'
 import { VerdictCard } from './VerdictCard'
@@ -41,7 +45,8 @@ function SessionPicker({
 }) {
   return (
     <div
-      className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4"
+      // on a wide screen the checks wrap: a mouse wheel cannot scroll a row sideways
+      className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 min-[900px]:flex-wrap"
       role="radiogroup"
       aria-label={copy.vehicle.checks}
     >
@@ -54,7 +59,7 @@ function SessionPicker({
             role="radio"
             aria-checked={selected === s.session_id}
             onClick={() => onSelect(s.session_id)}
-            className="flex min-h-12 shrink-0 items-center gap-2 rounded-lg border border-line px-3 text-[13px] text-dim aria-checked:border-accent aria-checked:bg-surface-2 aria-checked:text-text"
+            className={`flex min-h-12 shrink-0 items-center gap-2 rounded-lg border border-line px-3 text-[13px] text-dim hover:text-text ${CHECKED}`}
           >
             <span className={`size-2 rounded-full ${look.dot}`} aria-hidden />
             <span>
@@ -66,6 +71,11 @@ function SessionPicker({
     </div>
   )
 }
+
+/** The level an answer was given at: the text event's `level_used`, or the passport's for an answer stored
+ *  before the event carried it. */
+const answerLevel = (turn: AssistantTurn): Level | null =>
+  levelOf(turn.level_used) ?? levelOf(turn.passport?.question?.level)
 
 function AssistantBlock({
   turn,
@@ -119,21 +129,59 @@ function AssistantBlock({
           onOpen={onOpenSource}
         />
       )}
-      {/* the short spoken version: value, document, page — for busy hands (#14) */}
+      {/* An answer in another language, in Russian: for the one who checks it (PR #86). Its numbers were
+          checked by the server; the chips are the same pages. */}
+      {!turn.live && turn.back_translation && offersRussian(turn) && (
+        <details className="group">
+          <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 text-[13px] text-accent [&::-webkit-details-marker]:hidden">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              className="shrink-0 transition-transform group-open:rotate-90"
+              aria-hidden
+            >
+              <path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            {copy.lang.showRu}
+          </summary>
+          <div className="border-l-2 border-line pl-3">
+            <Answer
+              text={turn.back_translation}
+              sources={sources}
+              verified={new Set(turn.verification?.verified)}
+              scanned={new Set(turn.verification?.scanned)}
+              onOpen={onOpenSource}
+            />
+          </div>
+        </details>
+      )}
+      {/* the level the server chose for this question, and the same question again a level down or up (#91);
+          quiet, like the quick replies: «Создать заявку» stays the one accent action under an answer */}
       {(() => {
-        const answered = turn.passport?.question?.level
-        if (!onRedo || turn.live || !turn.text || (answered !== 'expert' && answered !== 'steps')) return null
-        const next = otherLevel(answered)
+        const level = answerLevel(turn)
+        if (!onRedo || turn.live || !turn.text || !level) return null
+        const down = moreDetail(level)
+        const up = shorter(level)
+        const quiet =
+          'min-h-12 rounded-lg border border-line px-3 text-dim hover:text-text min-[900px]:pointer-fine:min-h-9'
         return (
-          <button
-            type="button"
-            onClick={() => onRedo(next)}
-            className="min-h-12 rounded-lg border border-accent px-3 text-[13px] font-semibold text-accent"
-          >
-            {REDO[next].label}
-          </button>
+          <div className="flex flex-wrap items-center gap-2 text-[13px]">
+            <span className="mr-1 text-mute">{copy.level.answered[level]}</span>
+            {down && (
+              <button type="button" onClick={() => onRedo(down)} className={quiet}>
+                {copy.level.more}
+              </button>
+            )}
+            {up && (
+              <button type="button" onClick={() => onRedo(up)} className={quiet}>
+                {copy.level.shorter}
+              </button>
+            )}
+          </div>
         )
       })()}
+      {/* the short spoken version: value, document, page — for busy hands (#14) */}
       {!turn.live && turn.speech && <SpeakButton speech={turn.speech} />}
       {/* manuals disagree: under the direct answer, as the code put it there (D-20) */}
       {turn.blocks
@@ -172,8 +220,10 @@ function AssistantBlock({
  *  depends on a request. */
 function Header({ title, onBack, children }: { title: ReactNode; onBack: () => void; children?: ReactNode }) {
   return (
-    <header className="border-b border-line px-4">
-      <div className="mx-auto flex min-h-14 max-w-3xl items-center gap-1">
+    // the 16 px at the sides belong to the centred column, as they do in the thread under the bar: on a
+    // wide screen the title starts on the thread's left edge, not 16 px before it
+    <header className="border-b border-line">
+      <div className="mx-auto flex min-h-14 max-w-3xl items-center gap-1 px-4">
         <button
           type="button"
           onClick={onBack}
@@ -233,6 +283,25 @@ export function VehicleScreen({
     el.style.height = `${el.scrollHeight + 2}px`
   }, [draft])
   const micShown = voiceSupported && !draft.trim()
+  // The quick replies scroll sideways on a phone. While there is more to the right the row fades at its
+  // right edge; at its end, and when it fits or wraps (a wide screen), it does not.
+  const quickRow = useRef<HTMLDivElement>(null)
+  const [quickMore, setQuickMore] = useState(false)
+  const measureQuick = () => {
+    const row = quickRow.current
+    setQuickMore(row !== null && scrollsFurther(row.scrollLeft, row.scrollWidth, row.clientWidth))
+  }
+  useLayoutEffect(measureQuick) // after every render: «Создать заявку» comes and goes, the row hides while typing
+  useEffect(() => {
+    window.addEventListener('resize', measureQuick)
+    return () => window.removeEventListener('resize', measureQuick)
+  }, [])
+  // Where focus goes when the ticket sheet is gone and the button that opened it is gone too: «Открыть
+  // заявку» when the draft still waits, else the question field. Not the field on a touch screen: the
+  // keyboard would come up over the ticket.
+  const openTicket = useRef<HTMLButtonElement>(null)
+  const afterTicket = () =>
+    openTicket.current ?? (window.matchMedia('(pointer: coarse)').matches ? null : input.current)
   // Tickets of this vehicle as the server has them now: made in any thread, with their outcomes.
   const [tickets, setTickets] = useState<TicketView[]>([])
   // Tickets saved or sent on this screen since the list was asked for: newer than their copies in it.
@@ -278,6 +347,9 @@ export function VehicleScreen({
 
   // A new question goes to the top of the view, so the verdict and the start of the answer stay in
   // sight while the rest streams in below. The view never chases the stream.
+  // The browser would chase it for us: once the thread has been scrolled, its scroll anchoring moves the
+  // view down with every piece of the answer, and the question ends far above the view. So anchoring
+  // is off for the thread while an answer runs (`anchoringWhile` on the scroll area below), and only then.
   const turnCount = thread.turns.length
   useEffect(() => {
     lastUser.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
@@ -323,8 +395,15 @@ export function VehicleScreen({
     // On a phone the keyboard would cover the answer, so the field lets go of it. With a real keyboard
     // the field stays ready for the next question.
     if (window.matchMedia('(pointer: coarse)').matches) input.current?.blur()
-    // «подробнее» / «короче» — словами или голосом — меняют уровень только для этого ответа (#17)
-    void thread.send(message.trim(), { sessionId, newThread, level: level ?? redoLevel(message) ?? undefined })
+    const lastAnswer = thread.turns.findLast((t): t is AssistantTurn => t.role === 'assistant')
+    const lastLevel = lastAnswer ? answerLevel(lastAnswer) : null
+    // «подробнее» / «короче», typed or said, move from the level of the last answer, for this question only;
+    // any other question goes without a level, and the server picks it (#91)
+    void thread.send(message.trim(), {
+      sessionId,
+      newThread,
+      level: level ?? redoLevel(message, lastLevel) ?? undefined,
+    })
   }
   const manualNames = Object.fromEntries(vehicle.manuals.map((m) => [m.id, m.short]))
   const session = vehicle.sessions.find((s) => s.session_id === sessionId)
@@ -342,8 +421,9 @@ export function VehicleScreen({
   const inThread = new Set(thread.turns.flatMap((t) => (t.role === 'ticket' ? [t.ticket.id] : [])))
   const earlier = tickets.filter((t) => !inThread.has(t.id)) // made in another conversation
   const ticketed = tickets.some((t) => t.session_id === lastVerdict?.session_id)
-  const canTicket =
-    lastVerdict?.status === 'anomaly' && guide?.coverage !== 'not_covered' && !thread.pending && !ticketed
+  const verdictCheck = vehicle.sessions.find((s) => s.session_id === lastVerdict?.session_id)
+  // not for a result that does not fit the engine, nor for a unit the engine has not (lib/checks.ts)
+  const canTicket = ticketFits(lastVerdict, verdictCheck, guide?.coverage) && !thread.pending && !ticketed
   const ticketOpen = thread.pending !== null && thread.pending.pending_id !== dismissed
   const typing = draft.trim() !== '' // a stray space or an empty dictation is not a question being typed
 
@@ -361,6 +441,8 @@ export function VehicleScreen({
         key={i}
         ticket={tickets.find((t) => t.id === turn.ticket.id) ?? turn.ticket}
         onChange={upsertTicket}
+        onOpenSource={openSource}
+        vehicle={vehicle}
       />
     ) : (
       <AssistantBlock
@@ -369,7 +451,7 @@ export function VehicleScreen({
         sources={thread.sources}
         onOpenSource={openSource}
         manualNames={manualNames}
-        onRedo={i === thread.turns.length - 1 && !thread.busy ? (l) => send(REDO[l].message, false, l) : undefined}
+        onRedo={i === thread.turns.length - 1 && !thread.busy ? (l) => send(copy.level.ask[l], false, l) : undefined}
       />
     )
   const earlierTurns = lastUserIndex < 0 ? thread.turns : thread.turns.slice(0, lastUserIndex)
@@ -377,7 +459,12 @@ export function VehicleScreen({
   const pendingBar = thread.pending && !ticketOpen && (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-accent/50 bg-surface px-4 py-3">
       <p>{copy.ticket.pending}</p>
-      <button type="button" onClick={() => setDismissed(null)} className="min-h-12 shrink-0 font-semibold text-accent">
+      <button
+        ref={openTicket}
+        type="button"
+        onClick={() => setDismissed(null)}
+        className="min-h-12 shrink-0 font-semibold text-accent"
+      >
         {copy.ticket.open}
       </button>
     </div>
@@ -397,9 +484,10 @@ export function VehicleScreen({
         {thread.turns.length > 0 && (
           <button
             type="button"
+            data-waits
             disabled={thread.busy}
             onClick={() => send(copy.vehicle.diagnose, true)}
-            className="min-h-12 shrink-0 pl-2 text-[13px] text-accent disabled:opacity-50"
+            className="min-h-12 shrink-0 pl-2 text-[13px] text-accent enabled:hover:underline disabled:opacity-50"
           >
             {copy.vehicle.newThread}
           </button>
@@ -407,7 +495,12 @@ export function VehicleScreen({
       </Header>
 
       {/* A size container: the last exchange below takes its height from this view (.last-exchange). */}
-      <div className="min-h-0 flex-1 overflow-y-auto [container-type:size]">
+      {/* `data-thread`: a sheet beside the thread passes the wheel and a press on a chip on to it (Sheet.tsx).
+          `data-waits`, on the controls around the thread: they are drawn quieter meanwhile (index.css). */}
+      <div
+        data-thread
+        className={`min-h-0 flex-1 overflow-y-auto [container-type:size] ${anchoringWhile(thread.busy)}`}
+      >
         <div className="mx-auto max-w-3xl space-y-5 p-4">
           <section className="space-y-3">
             <p className="text-[13px] text-dim">
@@ -416,11 +509,13 @@ export function VehicleScreen({
             </p>
             <ScoreChart sessions={vehicle.sessions} selected={sessionId} onSelect={pick} trend={vehicle.trend} />
             <SessionPicker sessions={vehicle.sessions} selected={sessionId} onSelect={pick} />
+            {/* set once on the device, so it scrolls away with the vehicle details */}
+            <LanguageSwitch />
             <button
               type="button"
               disabled={thread.busy}
               onClick={() => send(copy.vehicle.diagnose)}
-              className="min-h-12 w-full rounded-lg bg-accent px-4 font-semibold text-bg disabled:opacity-50"
+              className="min-h-12 w-full rounded-lg bg-accent px-4 font-semibold text-bg enabled:hover:bg-accent/90 disabled:opacity-50 min-[900px]:w-auto min-[900px]:px-8"
             >
               {copy.vehicle.diagnose}
             </button>
@@ -429,7 +524,7 @@ export function VehicleScreen({
             <section className="space-y-3">
               <p className="text-[13px] text-dim">{copy.ticket.earlier}</p>
               {earlier.map((t) => (
-                <TicketCard key={t.id} ticket={t} onChange={upsertTicket} />
+                <TicketCard key={t.id} ticket={t} onChange={upsertTicket} onOpenSource={openSource} vehicle={vehicle} />
               ))}
             </section>
           )}
@@ -447,44 +542,59 @@ export function VehicleScreen({
         </div>
       </div>
 
-      <footer className="border-t border-line bg-bg px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))]">
-        <div className="mx-auto max-w-3xl space-y-2">
+      <footer className="border-t border-line bg-bg pt-3 pb-[max(12px,env(safe-area-inset-bottom))]">
+        {/* the sides' 16 px are the column's, as in the thread: the field and the chips keep its edges */}
+        <div className="mx-auto max-w-3xl space-y-2 px-4">
           {/* While the mechanic types, the ready-made questions step aside: the keyboard has taken half
               the screen, and the answer above needs the room. «Создать заявку» is not one of them: it
               stays whatever is in the field (ТЗ F7). */}
-          {(canTicket || !typing) && (
-            <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 min-[900px]:flex-wrap">
-              {canTicket && (
-                <button
-                  type="button"
-                  disabled={thread.busy}
-                  onClick={() => send(copy.thread.createTicketMessage)}
-                  className="min-h-12 shrink-0 rounded-lg border border-accent px-3 font-semibold text-accent disabled:opacity-50"
-                >
-                  {copy.thread.createTicket}
-                </button>
-              )}
-              {!typing &&
-                copy.thread.quick.map((q) => (
+          {/* On a laptop the ready-made questions are one row of 36 px controls that scrolls sideways (the wheel
+              too) instead of wrapping: four of them in two rows and the field took about 200 of 694 px and
+              covered the card. On a phone — as before. The composer is the questions and the field, nothing
+              else: the level is chosen per question by the server, and changed under the answer (#91). */}
+          <div className="space-y-2 min-[900px]:flex min-[900px]:items-center min-[900px]:gap-3 min-[900px]:space-y-0">
+            {(canTicket || !typing) && (
+              <div
+                ref={quickRow}
+                data-waits
+                onScroll={measureQuick}
+                onWheel={(e) => {
+                  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY
+                }}
+                className={`no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 min-[900px]:mx-0 min-[900px]:min-w-0 min-[900px]:flex-1 min-[900px]:px-0 ${quickMore ? 'fade-right' : ''}`}
+              >
+                {canTicket && (
                   <button
-                    key={q}
                     type="button"
                     disabled={thread.busy}
-                    onClick={() => send(q)}
-                    className="min-h-12 shrink-0 rounded-lg border border-line px-3 text-[13px] text-dim hover:text-text disabled:opacity-50"
+                    onClick={() => send(copy.thread.createTicketMessage)}
+                    className="min-h-12 shrink-0 rounded-lg border border-accent px-3 font-semibold text-accent enabled:hover:bg-accent/10 disabled:opacity-50 min-[900px]:pointer-fine:min-h-9 min-[900px]:pointer-fine:text-[13px]"
                   >
-                    {q}
+                    {copy.thread.createTicket}
                   </button>
-                ))}
-            </div>
-          )}
-          <LevelSwitch />
+                )}
+                {!typing &&
+                  copy.thread.quick.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      disabled={thread.busy}
+                      onClick={() => send(q)}
+                      className="min-h-12 shrink-0 rounded-lg border border-line px-3 text-[13px] text-dim hover:text-text disabled:opacity-50 min-[900px]:pointer-fine:min-h-9"
+                    >
+                      {q}
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
           {voice.error && (
             <p role="status" className="text-[13px] text-warn">
               {voice.error}
             </p>
           )}
           <form
+            data-waits
             className="flex items-end gap-2"
             onSubmit={(e) => {
               e.preventDefault()
@@ -523,7 +633,7 @@ export function VehicleScreen({
                 disabled={voice.state === 'sending'}
                 aria-label={voice.state === 'recording' ? copy.thread.voice.stop : copy.thread.voice.start}
                 aria-pressed={voice.state === 'recording'}
-                className={`grid size-12 shrink-0 place-items-center rounded-lg border disabled:opacity-40 ${
+                className={`grid size-12 shrink-0 place-items-center rounded-lg border enabled:hover:text-accent disabled:opacity-40 ${
                   voice.state === 'recording' ? 'border-stop bg-stop text-bg' : 'border-line bg-surface-2 text-text'
                 }`}
               >
@@ -584,6 +694,7 @@ export function VehicleScreen({
             thread.ticketCreated(ticket)
           }}
           onOpenSource={openSource}
+          focusAfter={afterTicket}
         />
       )}
       {source && (
@@ -596,36 +707,6 @@ export function VehicleScreen({
           onClose={() => setSource(null)}
         />
       )}
-    </div>
-  )
-}
-
-/** «Как объяснять»: коротко (опытный механик) или по шагам — на этом устройстве, для следующих вопросов (#17). */
-function LevelSwitch() {
-  const [level, set] = useState<Level>(getLevel)
-  useEffect(() => {
-    const follow = () => set(getLevel())
-    window.addEventListener(LEVEL_EVENT, follow)
-    return () => window.removeEventListener(LEVEL_EVENT, follow)
-  }, [])
-  const pick = (l: Level) => {
-    setLevel(l)
-    set(l)
-  }
-  return (
-    <div role="group" aria-label="Как объяснять" className="flex items-center gap-2 text-[13px] text-dim">
-      <span className="shrink-0">Как объяснять:</span>
-      {(['expert', 'steps'] as const).map((l) => (
-        <button
-          key={l}
-          type="button"
-          aria-pressed={level === l}
-          onClick={() => pick(l)}
-          className="min-h-12 flex-1 rounded-lg border border-line px-2 aria-pressed:border-accent aria-pressed:bg-surface-2 aria-pressed:text-text"
-        >
-          {l === 'expert' ? 'Коротко' : 'По шагам'}
-        </button>
-      ))}
     </div>
   )
 }

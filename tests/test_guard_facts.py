@@ -11,7 +11,7 @@ from service.clients import MLClient, ToirClient
 from service.fleet import fleet
 from test_agent import ANOMALY, FixtureSearch, call, make_agent, say
 
-CUT_NOTE = "Часть цифр не нашёл в руководстве — убрал их. Точные значения уточнит дефектовка."
+CUT_NOTE = "Часть чисел не подтвердилась на страницах руководства: эти утверждения сняты и отмечены."
 
 
 def _answer(ml: MLClient, toir: ToirClient, text: str, *, search: bool = True) -> tuple[str, list[str]]:
@@ -42,7 +42,8 @@ def test_check_dates_and_history_sessions_survive(ml: MLClient, toir: ToirClient
     day = f"{s.checked_at[8:10]}.{s.checked_at[5:7]}.{s.checked_at[:4]}"
     line = f"Проверка {s.session_id} ({day}): давление масла ниже нормы [R1]. До неё — {other.session_id}."
     text, notes = _answer(ml, toir, line)
-    assert day in text and other.session_id in text
+    assert day in text and "давление масла ниже нормы [R1]" in text  # guard фразу не снял
+    assert other.session_id not in text  # номер проверки — служебный, механику не показывается
     assert CUT_NOTE not in notes
 
 
@@ -83,5 +84,5 @@ def test_numbers_from_ml_description_are_not_facts(ml: MLClient, toir: ToirClien
 
 def test_bare_reference_is_not_a_number(ml: MLClient, toir: ToirClient) -> None:
     text, notes = _answer(ml, toir, "Источник: R1 — Руководство по ремонту [R1].")
-    assert "R1 — Руководство" in text
+    assert "Руководство по ремонту [R1]" in text and "R1 —" not in text  # номер ссылки без скобок не показывается
     assert CUT_NOTE not in notes

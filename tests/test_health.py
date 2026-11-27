@@ -24,7 +24,7 @@ def test_health_hides_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_index_page() -> None:
-    resp = client.get("/")
+    resp = client.get("/v1")
     assert resp.status_code == 200
     assert "Цифровой механик" in resp.text
 

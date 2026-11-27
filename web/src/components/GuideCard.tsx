@@ -33,7 +33,7 @@ function Recommendation({ text }: { text: string }) {
         onClick={() => {
           void navigator.clipboard?.writeText(text).then(() => setCopied(true))
         }}
-        className="mt-1 min-h-12 text-[13px] text-accent"
+        className="mt-1 min-h-12 text-[13px] text-accent hover:underline"
       >
         {copied ? copy.guide.copied : copy.guide.copyText}
       </button>

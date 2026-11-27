@@ -1,38 +1,33 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { LEVEL_KEY, getLevel, setLevel } from '../src/lib/level.ts'
+import { levelOf, moreDetail, redoLevel, shorter } from '../src/lib/level.ts'
 
-const memory = () => {
-  const data = new Map<string, string>()
-  return { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v) }
-}
-
-test('the level is kept on the device, «По шагам» until the mechanic chooses', () => {
-  const store = memory()
-  assert.equal(getLevel(store), 'steps')
-  setLevel('expert', store)
-  assert.equal(getLevel(store), 'expert')
-  store.setItem(LEVEL_KEY, 'short') // the first page stored «short» for «expert»
-  assert.equal(getLevel(store), 'expert')
-  store.setItem(LEVEL_KEY, 'boss')
-  assert.equal(getLevel(store), 'steps')
+test('the level of an answer is read as the server writes it, the first two-level names too', () => {
+  assert.equal(levelOf('novice'), 'novice')
+  assert.equal(levelOf('mechanic'), 'mechanic')
+  assert.equal(levelOf('master'), 'master')
+  assert.equal(levelOf('steps'), 'novice') // «Пошагово» (#17)
+  assert.equal(levelOf('expert'), 'master') // «Опытный» (#17)
+  assert.equal(levelOf('auto'), null)
+  assert.equal(levelOf(null), null)
+  assert.equal(levelOf(undefined), null)
 })
 
-test('the first-visit question is asked until the mechanic answers it', async () => {
-  const { isLevelChosen } = await import('../src/lib/level.ts')
-  const store = memory()
-  assert.equal(isLevelChosen(store), false)
-  setLevel('steps', store)
-  assert.equal(isLevelChosen(store), true)
+test('«Подробнее» is a level down, «Короче» a level up, and neither goes past the end', () => {
+  assert.equal(moreDetail('master'), 'mechanic')
+  assert.equal(moreDetail('mechanic'), 'novice')
+  assert.equal(moreDetail('novice'), null)
+  assert.equal(shorter('novice'), 'mechanic')
+  assert.equal(shorter('mechanic'), 'master')
+  assert.equal(shorter('master'), null)
 })
 
-test('«подробнее» and «короче» — typed or said — change the level of that one answer', async () => {
-  const { REDO, otherLevel, redoLevel } = await import('../src/lib/level.ts')
-  assert.equal(redoLevel('Подробнее, пожалуйста'), 'steps')
-  assert.equal(redoLevel('по шагам'), 'steps')
-  assert.equal(redoLevel('Короче'), 'expert')
-  assert.equal(redoLevel('покороче можно?'), 'expert')
-  assert.equal(redoLevel('Какой зазор клапанов?'), null)
-  assert.equal(otherLevel('expert'), 'steps')
-  assert.equal(REDO.steps.label, 'Подробнее, по шагам')
+test('«подробнее» and «короче» — typed or said — move from the level of the last answer', () => {
+  assert.equal(redoLevel('Подробнее, пожалуйста', 'master'), 'mechanic')
+  assert.equal(redoLevel('по шагам', 'mechanic'), 'novice')
+  assert.equal(redoLevel('Короче', 'novice'), 'mechanic')
+  assert.equal(redoLevel('покороче можно?', 'mechanic'), 'master')
+  assert.equal(redoLevel('подробнее', null), 'novice')
+  assert.equal(redoLevel('короче', null), 'master')
+  assert.equal(redoLevel('Какой зазор клапанов?', 'mechanic'), null) // the server picks
 })

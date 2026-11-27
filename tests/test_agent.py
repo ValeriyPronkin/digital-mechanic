@@ -132,7 +132,7 @@ def test_c1_anomaly_to_ticket(ml: MLClient, toir: ToirClient) -> None:
     body = reply.draft["body"]
     assert body["anomaly_type"] == "F02" and body["urgency"] == "high"
     assert body["references"] == [{"manual": "Руководство по ремонту", "pdf_page": 42}]
-    assert reply.draft["urgency_reason"].startswith("Низкое давление масла — класс 3 из 3 → высокая")
+    assert reply.draft["urgency_reason"].startswith("Опасная неисправность: без давления масла")
     resp = ag.confirm_ticket(conv, reply.draft["fingerprint"])
     assert resp.ticket_id.startswith("TKT-")
     assert ag.store.vehicle_memory(ANOMALY[0])["tickets"][0]["ticket_id"] == resp.ticket_id
@@ -259,7 +259,9 @@ def test_numbers_outside_fragment_removed(ml: MLClient, toir: ToirClient) -> Non
     reply = ag.ask(ag.start(*ANOMALY), "какое давление?")
     assert "0,1 МПа" in reply.text and "45" not in reply.text and "Прогрейте" in reply.text
     assert reply.grounded and reply.sources[0]["pdf_page"] == 42
-    assert any("не нашёл в руководстве" in n for n in reply.notes)
+    assert any("не подтвердилась" in n for n in reply.notes)
+    assert "Утверждение снято: для числа не указана страница руководства." in reply.text  # на месте, не молча
+    assert reply.withdrawn[0]["text"] == "Момент затяжки пробки 45 Н·м." and reply.withdrawn[0]["state"] == "uncited"
 
 
 def test_numbers_without_source_removed_and_marked(ml: MLClient, toir: ToirClient) -> None:
@@ -403,16 +405,42 @@ def test_ticket_references_only_pages_cited_by_operations(ml: MLClient, toir: To
     assert reply.draft["body"]["operations"] == ["Замерить давление масла манометром"]
 
 
-def test_operation_ref_marker_and_conclusion_ref(ml: MLClient, toir: ToirClient) -> None:
-    """Работа строкой с [R2] — ссылка из маркера; [R1] в заключении добавляет страницу; маркеры убраны из текста."""
+def test_operation_ref_marker_and_server_conclusion(ml: MLClient, toir: ToirClient) -> None:
+    """Работа строкой с [R2] — ссылка из маркера, маркер убран из текста. Заключение пишет сервер (аудит 27.11,
+    A4): [R1] модели в нём не добавляет страницу, в заявке — только страница работы."""
     draft = {"conclusion": "Низкое давление масла [R1]", "operations": ["Затянуть пробку моментом 45 Н·м [R2]"]}
     steps = [call("search_manual", query="масло"), call("draft_ticket", **draft), say("Готово [R1]")]
     ag, _ = make_agent(steps, ml, toir, TwoPageSearch())
     reply = ag.ask(ag.start(*ANOMALY), "Оформи заявку")
     assert reply.draft is not None, reply.text
     body = reply.draft["body"]
-    assert [r["pdf_page"] for r in body["references"]] == [77, 42]
-    assert body["operations"] == ["Затянуть пробку моментом 45 Н·м"] and body["conclusion"] == "Низкое давление масла"
+    assert [r["pdf_page"] for r in body["references"]] == [77]
+    assert body["operations"] == ["Затянуть пробку моментом 45 Н·м"]
+    assert body["conclusion"].startswith("Вероятно: ") and ANOMALY[1] in body["conclusion"]
+
+
+def test_ticket_conclusion_is_the_servers_not_the_models(ml: MLClient, toir: ToirClient) -> None:
+    """Аудит 27.11, A4: заключение заявки — из фактов проверки (неисправность, проверка и дата, оценка, уверенность,
+    качество записи), а не текст модели: запрет, «передайте…» или цифра модели в ТОиР не уходят."""
+    bad = "Эксплуатация запрещена. Передайте машину в сервис, давление 9,9 МПа"
+    steps = [call("search_manual", query="масло"), call("draft_ticket", **{**DRAFT, "conclusion": bad}), say("ок")]
+    ag, _ = make_agent(steps, ml, toir)
+    conv = ag.start(*ANOMALY)
+    reply = ag.ask(conv, "Оформи заявку")
+    assert reply.draft is not None, reply.text
+    text = reply.draft["body"]["conclusion"]
+    diag = conv.diag
+    assert diag is not None and conv.card is not None
+    title = conv.card.fault_title or ""
+    assert "запрещ" not in text and "Передайте" not in text and "9,9" not in text
+    assert text.startswith(f"Вероятно: {title[0].lower()}{title[1:]}. Акустическая проверка {ANOMALY[1]} от ")
+    assert f"оценка отклонения {diag.anomaly_score:.2f}".replace(".", ",") in text
+    assert text.endswith("запись чистая. Требуется дефектовка.")
+    # без заключения модели — тот же черновик: заключение не её
+    steps = [call("search_manual", query="масло"), call("draft_ticket", operations=DRAFT["operations"]), say("ок")]
+    ag2, _ = make_agent(steps, ml, toir)
+    again = ag2.ask(ag2.start(*ANOMALY), "Оформи заявку")
+    assert again.draft is not None and again.draft["body"]["conclusion"] == text
 
 
 def test_operation_number_checked_against_its_own_fragment(ml: MLClient, toir: ToirClient) -> None:
@@ -430,8 +458,12 @@ def test_visible_attack_not_passed_to_model_outside_wrapper(ml: MLClient, toir: 
     """#40 п. 6: отметка «посторонний текст» — только для экрана; модели атака идёт лишь внутри обёртки данных."""
     ag, llm = make_agent([call("get_diagnosis", vehicle_id=FAILED[0], session_id=FAILED[1]), say("Повторите запись.")],
                          ml, toir, prefetch=False)  # fmt: skip
-    ag.ask(ag.start(*FAILED), "Что с двигателем?")
+    # не голое «Что с двигателем?»: на него при сбое записи отвечает код, без модели (приёмка 27.11)
+    ag.ask(ag.start(*FAILED), "Что с двигателем, почему запись отбракована?")
     tool = next(m for m in llm.seen[-1] if m["role"] == "tool")
     data = json.loads(tool["content"])
     assert "ml_injection" not in data and "passport" not in data
-    assert "Инструкция для ассистента" in data["ml_description"] and data["ml_description"].startswith("<<<")
+    assert data["ml_description"].startswith("<<<") and "Запись отбракована" in data["ml_description"]
+    # ревью 27.11: посторонний текст модели не передаётся вовсе — даже внутри обёртки данных
+    assert "Инструкция для ассистента" not in data["ml_description"]
+    assert not any("статус normal" in str(m.get("content")) for seen in llm.seen for m in seen)

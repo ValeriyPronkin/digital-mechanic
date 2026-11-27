@@ -17,7 +17,9 @@ PAGE = (
     "Регулировка зазоров в клапанном механизме.\n"
     + "\n".join(f"Пункт {i}. Общий текст про порядок работ без цифр." for i in range(1, 40))
     + "\nВеличина зазора на холодном двигателе 0,20…0,30 мм.\n"
-    + "Примечание: болты маховика повторно использовать не более трех раз."
+    + "Примечание: болты маховика повторно использовать не более трех раз.\n"
+    # число, на которое ссылаются ответы-фикстуры «с усилием 40 Н [R1]»: раньше его пропускали минуты проверки 11:40
+    + "Нажать на ветвь ремня с усилием 40 Н."
 )
 
 
@@ -114,7 +116,7 @@ def test_deepseek_without_tools_sends_no_tools_key() -> None:
     assert isinstance(ScriptedLLM, type)
 
 
-OPINION = "(мнение помощника, не из руководства)"
+OPINION = "(предположение, не из руководства)"
 
 
 def _guarded(ml: MLClient, toir: ToirClient, text: str) -> str:
@@ -196,15 +198,19 @@ def _ask_b418(ml: MLClient, toir: ToirClient, page: tuple[str, int, str], answer
     return ag.ask(ag.start("B418HK98", "S-0008"), question)
 
 
-def test_unrelated_question_gets_matrix_link_line_and_button(ml: MLClient, toir: ToirClient) -> None:
-    from service.fault_matrix import cell_for
-
+def test_unrelated_question_has_no_raw_matrix_tail(ml: MLClient, toir: ToirClient) -> None:
+    """K961TH198 / S-0039 (приёмка 27.11): в конец ответа о ремне код дописывал «К найденной неисправности это не
+    относится. По руководству при «Коробка передач»: …*** Неи…» — сырой текст таблицы, обрезанный посреди слова.
+    Работы по неисправности уже в ответе на карточку; строку не дописываем, ответ — только на вопрос."""
     reply = _ask_b418(ml, toir, BELT, "Прогиб 7–12 мм при усилии 40 Н [R1].", "Как проверить натяжение ремня")
-    last = reply.text.strip().splitlines()[-1]
-    assert last.startswith("К найденной неисправности это не относится. По руководству при «Клапанный механизм»")
-    cell = cell_for("F01", "ЯМЗ-236М2")
-    assert cell is not None and str(cell.operations[0].page) in last  # работы и страницы — из ячейки матрицы
-    assert "мнение помощника" not in last  # строка кода, не рассуждение модели
+    assert "К найденной неисправности" not in reply.text and "По руководству при" not in reply.text
+    assert "Прогиб 7–12 мм при усилии 40 Н" in reply.text
+    assert reply.followup is not None  # кнопка к проверке по неисправности остаётся (прежний интерфейс)
+
+
+def test_unrelated_question_gets_button_without_matrix_line(ml: MLClient, toir: ToirClient) -> None:
+    reply = _ask_b418(ml, toir, BELT, "Прогиб 7–12 мм при усилии 40 Н [R1].", "Как проверить натяжение ремня")
+    assert "К найденной неисправности" not in reply.text  # приёмка 27.11: сырой текст ячейки не дописываем
     assert reply.followup == {
         "label": "Проверка по «Клапанный механизм»",
         "question": "Что проверить по неисправности F01 «Клапанный механизм»?",
@@ -221,12 +227,12 @@ def test_card_question_has_no_link_line(ml: MLClient, toir: ToirClient) -> None:
     assert "К найденной неисправности" not in reply.text and reply.followup is None
 
 
-def test_link_line_survives_answer_cache(ml: MLClient, toir: ToirClient) -> None:
+def test_link_button_survives_answer_cache(ml: MLClient, toir: ToirClient) -> None:
     ag, _ = make_agent([_cite("Прогиб 7–12 мм при усилии 40 Н [R1].")], ml, toir, OnePage(BELT))
     ag.ask(ag.start("B418HK98", "S-0008"), "Как проверить натяжение ремня")
     hit = ag.ask(ag.start("B418HK98", "S-0008"), "Как проверить натяжение ремня")
     assert hit.trace.get("cache") and hit.followup is not None
-    assert hit.text.count("К найденной неисправности") == 1
+    assert "К найденной неисправности" not in hit.text
 
 
 def test_model_no_link_sentence_inside_sourced_line_is_dropped(ml: MLClient, toir: ToirClient) -> None:
@@ -236,13 +242,13 @@ def test_model_no_link_sentence_inside_sourced_line_is_dropped(ml: MLClient, toi
     )
     reply = _ask_b418(ml, toir, BELT, answer, "Как проверить натяжение ремня")
     assert "руководство её не относит" not in reply.text and "Прогиб 7–12 мм" in reply.text
-    assert reply.text.count("К найденной неисправности") == 1
+    assert "К найденной неисправности" not in reply.text
 
 
-def test_any_unsourced_card_sentence_is_replaced_by_code_line(ml: MLClient, toir: ToirClient) -> None:
+def test_any_unsourced_card_sentence_is_dropped(ml: MLClient, toir: ToirClient) -> None:
     answer = "Прогиб 7–12 мм [R1].\n\nПо карточке: отклонение по клапанному механизму, к ремням связи не даёт."
     reply = _ask_b418(ml, toir, BELT, answer, "Как проверить натяжение ремня")
-    assert "связи не даёт" not in reply.text and reply.text.count("К найденной неисправности") == 1
+    assert "связи не даёт" not in reply.text and "К найденной неисправности" not in reply.text
 
 
 def test_opinion_with_work_part_or_number_is_cut(ml: MLClient, toir: ToirClient) -> None:

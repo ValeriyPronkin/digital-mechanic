@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Literal
 
 import httpx
@@ -105,8 +106,19 @@ class MLClient:
         url = base_url or os.environ.get("MOCK_ML_URL", "http://127.0.0.1:8001")
         self.http = http or httpx.Client(base_url=url, timeout=default_timeout())
 
+    RETRY_PAUSE_S = 0.3
+
     def diagnose(self, vehicle_id: str, session_id: str) -> Diagnosis:
-        resp = _post(self.http, "/diagnose", {"vehicle_id": vehicle_id, "session_id": session_id}, self.service)
+        """Один повтор при 5xx или таймауте/недоступности (аудит стенда 27.11: холодный сервис отвечал 502).
+        Запрос только читает результат — повтор безопасен (заявки в ТОиР не повторяются никогда)."""
+        body: dict[str, object] = {"vehicle_id": vehicle_id, "session_id": session_id}
+        try:
+            resp = _post(self.http, "/diagnose", body, self.service)
+        except UnavailableError:
+            resp = None
+        if resp is None or resp.status_code >= 500:
+            time.sleep(self.RETRY_PAUSE_S)
+            resp = _post(self.http, "/diagnose", body, self.service)
         if resp.status_code == 404:
             raise NotFoundError(f"Проверка {session_id} для машины {vehicle_id} не найдена в сервисе диагностики.")
         if resp.status_code in (400, 422):
@@ -114,9 +126,15 @@ class MLClient:
         if resp.status_code != 200:
             raise ServiceError(f"{self.service} ответил ошибкой {resp.status_code}.")
         try:
-            return Diagnosis.model_validate(resp.json())
+            diag = Diagnosis.model_validate(resp.json())
         except (ValueError, ValidationError) as exc:
             raise ServiceError(f"{self.service} вернул ответ не по контракту.") from exc
+        if diag.vehicle_id != vehicle_id or diag.session_id != session_id:
+            raise ServiceError(
+                f"{self.service} вернул результат другой проверки ({diag.vehicle_id}, {diag.session_id}) "
+                f"вместо {vehicle_id}, {session_id}. Выводов по нему не делаем — повторите запрос."
+            )
+        return diag
 
 
 class ToirClient:

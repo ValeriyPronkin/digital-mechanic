@@ -1,4 +1,7 @@
 // Shapes mirror app/schemas.py. One place for every call to the backend.
+import { getLang, voiceLang } from './lib/lang'
+
+import type { LevelChoice } from './lib/level'
 
 export type Status = 'normal' | 'anomaly' | 'check_failed'
 export type SignalQuality = 'good' | 'warning' | 'bad'
@@ -85,6 +88,9 @@ export interface VerdictBlock {
   anomaly_score: number | null
   confidence: number | null
   confidence_word: string | null
+  // The confidence below which the result is preliminary (the server's rule; 0,6 in data/danger_classes.json).
+  // Absent from a server that does not send it: then the card says nothing about it.
+  confidence_threshold?: number | null
   signal_quality: SignalQuality
   quality_word: string
   urgency: UrgencyView | null
@@ -126,7 +132,9 @@ export interface ContradictionBlock {
     note?: string | null
   }[]
   conclusion: string
-  advice: string
+  advice: string // since #93 the hand-over to the chief mechanic; before it, advice to ask the maker
+  // since #93: the hand-over, its number on the chief mechanic's screen, and whether it is decided
+  escalation?: { line: string; number: number; resolved: boolean } | null
 }
 
 export type Block =
@@ -146,7 +154,16 @@ export interface TicketItem {
   source: string
   quote: string // the lines of the cited page the work was found in; empty in drafts saved before it existed
   scanned: boolean // the lines come from the machine reading of the page image
+  // The page the work or part was found on: the manual by its id and designation (as in `references`), its
+  // short name and the PDF page. Null when the server does not know the page; absent in older drafts.
+  manual_id?: string | null
+  manual?: string | null
+  short?: string | null
+  pdf_page?: number | null
 }
+
+/** A work or a part of a sent ticket with its page, kept beside the payload; ТОиР never gets it. */
+export type TicketLine = TicketItem
 
 export interface TicketPayload {
   vehicle_id: string
@@ -169,6 +186,39 @@ export interface TicketPending {
   // before the choice existed: that one goes with the proposed priority.
   urgency_choices?: { level: Urgency; word: string; action: string }[]
   warning: string[] // why the result is preliminary; not empty means the mechanic must confirm he has read it
+  // What the connected parts suppliers have for the parts of the draft (PR #84); null without parts, absent
+  // in a draft saved before the field existed. For reference only: it does not go to ТОиР.
+  parts_offers?: PartsOffers | null
+}
+
+/** One supplier's offer for a part, as the supplier gave it; the server sorts them (in stock, lead, price). */
+export interface PartOffer {
+  supplier: string | null
+  name: string | null
+  designation: string | null
+  available: string | null // the supplier's own words: «есть, 12 шт.», «под заказ»
+  in_stock: boolean | null // read from `available` by the server; null — not said
+  price_rub: number | null
+  lead_days: number | null
+  url: string | null
+}
+
+/** The offers for one line of `payload.spare_parts` (by `index`). */
+export interface PartOffersItem {
+  index: number
+  part: string
+  query: string // what was looked for: the designation from the manual, or the name without it
+  by: 'designation' | 'name'
+  check: string // «по названию, проверьте» when looked up by name; empty otherwise
+  note: string // why there is nothing: no supplier has it, or none answered
+  offers: PartOffer[]
+  suppliers: { name: string; status: 'ok' | 'empty' | 'failed'; note: string }[]
+}
+
+export interface PartsOffers {
+  connected: boolean // false: no supplier is connected, `note` says so and `items` is empty
+  note: string
+  items: PartOffersItem[]
 }
 
 export interface TicketView {
@@ -179,6 +229,9 @@ export interface TicketView {
   created_at: string
   payload: TicketPayload // what was sent; its `urgency` is the mechanic's final choice
   urgency_proposed?: Urgency | null // what the server proposed; absent in threads saved before the choice
+  // Each work and part with its own page, as sent. null or absent for a ticket stored before it was kept:
+  // then only `payload.references`, the pages as one list.
+  lines?: { operations: TicketLine[]; spare_parts: TicketLine[] } | null
   outcome: 'confirmed' | 'not_confirmed' | 'other_fault' | null
   outcome_note: string | null
 }
@@ -245,7 +298,7 @@ export interface PassportFragment {
 }
 export interface Passport {
   request_id: string | null
-  question?: { text: string | null; by_voice: boolean; level: 'expert' | 'steps' | null } | null
+  question?: { text: string | null; by_voice: boolean; level: string | null } | null // novice | mechanic | master (#91)
   searches: { by: string; engine: string | null; queries: string[]; found: number; fragments: PassportFragment[] }[]
   llm: {
     name: string
@@ -276,6 +329,15 @@ export interface SpeechInfo {
   text: string
   sig: string
   url: string
+  lang?: string | null // the voice's language (PR #83); goes back to /api/voice/speak with the text
+}
+
+/** A language of the answer and what the voice can do in it (`GET /api/v2/languages`, SSE `language`). */
+export interface LanguageInfo {
+  lang: string // ru, uz, uz-cyrl, tg, kk, ky, en, hi
+  name: string // in that language: «Oʻzbekcha»
+  voice_input: boolean // speech recognition knows it; otherwise a question is said in Russian
+  voice_output: boolean
 }
 
 export type TranscriptEntry =
@@ -289,6 +351,7 @@ export type TranscriptEntry =
       verification?: Verification
       passport?: Passport
       speech?: SpeechInfo
+      back_translation?: string | null // the answer in Russian when it was given in another language
     }
   | { role: 'ticket'; ticket: TicketView }
 
@@ -325,12 +388,14 @@ export type ChatEvent =
   | { type: 'tool_started'; id: string; name: string; label: string; input?: Record<string, unknown> }
   | { type: 'tool_result'; id: string; name: string; ok: boolean; block: Block | null }
   | { type: 'sources'; items: SourceItem[] }
-  | { type: 'text'; text: string; round: number }
+  | { type: 'text'; text: string; round: number; level_used?: string }
   | ({ type: 'verification'; text: string } & Verification)
   | ({ type: 'ticket_pending' } & TicketPending)
   | ({ type: 'usage' } & UsageEvent)
   | ({ type: 'passport' } & Passport)
   | ({ type: 'speech' } & SpeechInfo)
+  | ({ type: 'language' } & LanguageInfo)
+  | { type: 'back_translation'; text: string }
   | { type: 'error'; message: string }
   | { type: 'done'; reason: string }
 
@@ -363,7 +428,14 @@ const post = (body: unknown): RequestInit => ({
 })
 
 export const getFleet = () => json<FleetView>('/api/v2/fleet')
+export const getLanguages = () => json<LanguageInfo[]>('/api/v2/languages')
 export const getVehicle = (id: string) => json<VehicleDetail>(`/api/v2/vehicles/${encodeURIComponent(id)}`)
+/** The check's card alone, from the ML fields and the server's rules, no model: it is ready in a fraction of a
+ *  second, while the stand delivers the chat stream only whole. */
+export const getVerdict = (vehicleId: string, sessionId: string) =>
+  json<VerdictBlock>(
+    `/api/v2/vehicles/${encodeURIComponent(vehicleId)}/verdict?session_id=${encodeURIComponent(sessionId)}`,
+  )
 export const getThread = (vehicleId: string) =>
   json<ThreadView | null>(`/api/v2/threads/current?vehicle_id=${encodeURIComponent(vehicleId)}`)
 /** A manual page; with `quote` (the line found on it) the server also says where that line is printed. */
@@ -373,9 +445,10 @@ export const getPage = (vehicleId: string, manualId: string, page: number, quote
       (quote ? `?quote=${encodeURIComponent(quote)}` : ''),
   )
 
-/** Voice input: the recording as the raw body, its words back. */
-export const transcribe = (audio: Blob) =>
-  json<{ text: string }>('/api/v2/transcribe', {
+/** Voice input: the recording as the raw body, its words back. `lang` is the language it is recognized in
+ *  (the mechanic's choice); the server takes Russian for one it cannot recognize. */
+export const transcribe = (audio: Blob, lang = voiceLang(getLang())) =>
+  json<{ text: string }>(`/api/v2/transcribe?lang=${encodeURIComponent(lang)}`, {
     method: 'POST',
     headers: { 'content-type': audio.type || 'audio/webm' },
     body: audio,
@@ -388,6 +461,17 @@ export const getTickets = (vehicleId: string) =>
 export const setOutcome = (ticketPk: number, outcome: Outcome, note?: string) =>
   json<TicketView>(`/api/v2/tickets/${ticketPk}/outcome`, post({ outcome, note }))
 export const OUTCOMES_EXPORT = '/api/v2/outcomes.csv'
+
+/** A ticket in the chief mechanic's register (`GET /api/v2/tickets`): the ticket and what its row needs. */
+export interface TicketRow extends TicketView {
+  garage_no: string | null // null: the vehicle has left the fleet since
+  vehicle_name: string | null
+  engine_model: string | null
+  checked_at: string | null // when the check the ticket is for was recorded
+  fault_title: string // the name of `payload.anomaly_type`; the code if it has none
+}
+/** Every ticket of the fleet, newest first. */
+export const getAllTickets = () => json<TicketRow[]>('/api/v2/tickets')
 
 export const approveTicket = (
   pendingId: string,
@@ -418,7 +502,8 @@ export async function streamChat(
     message: string
     session_id?: string | null
     new_thread?: boolean
-    level?: 'expert' | 'steps' // the mechanic's level (#17): form and length of the answer
+    level?: LevelChoice // «auto»: the server picks per question (#91); a level only when the mechanic asked for it
+    lang?: string // the language of the answer the mechanic chose; left out, the language of the question
   },
   onEvent: (event: ChatEvent) => void,
   signal?: AbortSignal,

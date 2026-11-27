@@ -35,13 +35,13 @@ from pydantic import BaseModel, Field
 from service import conv_state, escalation, language, passport
 from service.agent import LEVEL_WORD, Agent, AgentReply, Conversation, LevelChoice
 from service.case_log import CaseLog, verify
-from service.clients import ServiceError, TicketRequest
+from service.clients import NotFoundError, ServiceError, TicketRequest
 from service.fleet import Fleet, Vehicle
 from service.fleet_status import STATUS_LABEL, trend, vehicle_status
 from service.manuals.catalog import DOCS_BY_ID, documents_for_engine
 from service.parts_supplier import offers_for_parts
 from service.store import Store
-from service.verdict_policy import URGENCY_ACTION, VerdictCard, urgency_for
+from service.verdict_policy import CONFIDENCE_LOW, URGENCY_ACTION, VerdictCard, heard_text, urgency_for
 from service.voice import speech_for, speech_lang
 
 log = logging.getLogger(__name__)
@@ -59,6 +59,7 @@ def urgency_note(proposed: str, chosen: str, reason: str) -> str:
     return f"Приоритет выбран механиком: «{URGENCY_WORD[chosen]}»; {rule}."
 
 
+STREAM_FAILED = "Ответ не получился из-за сбоя сервиса. Спросите ещё раз."
 QUALITY_WORD = {"good": "запись чистая", "warning": "запись с помехами", "bad": "запись непригодна"}
 _REF = re.compile(r"\[R(\d+)\]")
 
@@ -101,7 +102,33 @@ def _session_brief(fleet: Fleet, v: Vehicle, s: Any) -> dict[str, Any]:
     }
 
 
-def _fleet_view(fleet: Fleet, v: Vehicle) -> dict[str, Any]:
+OUTCOME_BADGE = {
+    "confirmed": "дефектовка: подтвердилось",
+    "not_confirmed": "дефектовка: не подтвердилось",
+    "other_fault": "дефектовка: другая неисправность",
+}
+
+Sent = dict[tuple[str, str], dict[str, Any]]
+
+
+def sent_by_check(rows: list[dict[str, Any]]) -> Sent:
+    """Отправленные заявки по (машина, проверка); у проверки с несколькими заявками — последняя."""
+    out: Sent = {}
+    for r in rows:  # новые сверху: первая встреченная — последняя по времени
+        out.setdefault((r["vehicle_id"], r["session_id"]), r)
+    return out
+
+
+def ticket_badges(v: Vehicle, session_id: str | None, sent: Sent) -> list[dict[str, str]]:
+    """«заявка создана» у машины, по последней проверке которой отправлена заявка; когда механик отметил исход
+    дефектовки — сам исход. Заявка по более старой проверке о том, что машина показывает сейчас, не говорит."""
+    row = sent.get((v.vehicle_id, session_id or ""))
+    if row is None:
+        return []
+    return [{"code": "ticket_created", "label": OUTCOME_BADGE.get(row.get("outcome") or "", "заявка создана")}]
+
+
+def _fleet_view(fleet: Fleet, v: Vehicle, sent: Sent | None = None) -> dict[str, Any]:
     st = vehicle_status(v, fleet.fault_titles)
     last = st.last
     urgency = None
@@ -110,7 +137,7 @@ def _fleet_view(fleet: Fleet, v: Vehicle) -> dict[str, Any]:
     return {
         "status": None if st.status == "rerecord" else st.status,
         "label": STATUS_LABEL[st.status],
-        "badges": [],
+        "badges": ticket_badges(v, last.session_id if last else None, sent or {}),
         "urgency": urgency,
         "session_id": last.session_id if last else None,
         "fault_title": fleet.fault_titles.get(last.anomaly_type or "") if last and last.anomaly_type else None,
@@ -131,17 +158,17 @@ def _vehicle(v: Vehicle) -> dict[str, Any]:
     }
 
 
-def vehicle_brief(fleet: Fleet, v: Vehicle) -> dict[str, Any]:
+def vehicle_brief(fleet: Fleet, v: Vehicle, sent: Sent | None = None) -> dict[str, Any]:
     sessions = sorted(v.sessions, key=lambda s: s.checked_at)
     return {
         **_vehicle(v),
         "sessions_count": len(sessions),
         "last_session": _session_brief(fleet, v, sessions[-1]) if sessions else None,
-        "fleet": _fleet_view(fleet, v),
+        "fleet": _fleet_view(fleet, v, sent),
     }
 
 
-def vehicle_detail(fleet: Fleet, v: Vehicle) -> dict[str, Any]:
+def vehicle_detail(fleet: Fleet, v: Vehicle, sent: Sent | None = None) -> dict[str, Any]:
     sessions = sorted(v.sessions, key=lambda s: s.checked_at)  # от старых к новым: интерфейс берёт последнюю
     manuals = [
         {"id": d.doc_id, "short": short_name(d.doc_id, d.designation), "title": d.designation, "pages": d.pages}
@@ -151,7 +178,7 @@ def vehicle_detail(fleet: Fleet, v: Vehicle) -> dict[str, Any]:
         **_vehicle(v),
         "sessions": [_session_brief(fleet, v, s) for s in sessions],
         "manuals": manuals,
-        "fleet": _fleet_view(fleet, v),
+        "fleet": _fleet_view(fleet, v, sent),
         "trend": trend(v)["trend"],
     }
 
@@ -171,17 +198,20 @@ class ThreadStore:
     def key(browser: str, vehicle_id: str) -> str:
         return hashlib.sha256(f"{browser}|{vehicle_id}".encode()).hexdigest()[:32]
 
-    def get(self, browser: str, vehicle_id: str) -> dict[str, Any] | None:
+    def get(self, browser: str, vehicle_id: str, fresh: bool = False) -> dict[str, Any] | None:
+        """`fresh` — из бакета, а не из памяти экземпляра (подтверждение заявки: нить мог изменить другой
+        экземпляр — ревью 27.11). Бакет недоступен — копия в памяти."""
         k = self.key(browser, vehicle_id)
         with self._lock:
-            if k in self._mem:
+            if k in self._mem and not (fresh and self.bucket is not None):
                 return self._mem[k]
         if self.bucket is None:
             return None
         try:
             data: dict[str, Any] = json.loads(self.bucket.get(f"v2/threads/{k}.json"))
         except Exception:  # нет нити или бакет недоступен
-            return None
+            with self._lock:
+                return self._mem.get(k)
         with self._lock:
             self._mem[k] = data
         return data
@@ -255,13 +285,15 @@ def verdict_block(conv: Conversation) -> dict[str, Any] | None:
         "fault_title": card.fault_title,
         "anomaly_score": diag.anomaly_score,
         "confidence": confidence,
+        # порог правила кода (verdict_policy.CONFIDENCE_LOW): ниже него вывод предварительный
+        "confidence_threshold": CONFIDENCE_LOW,
         "confidence_word": None
         if confidence is None
         else ("высокая" if confidence >= 0.8 else "средняя" if confidence >= 0.6 else "низкая"),
         "signal_quality": diag.signal_quality,
         "quality_word": QUALITY_WORD.get(diag.signal_quality, diag.signal_quality),
         "urgency": urgency_view(card),
-        "description": diag.description,
+        "description": heard_text(diag.description),  # посторонний текст — только в foreign_text
         "foreign_text": getattr(card, "ml_injection", None),
         "model_version": diag.model_version,
     }
@@ -284,17 +316,28 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
         return None, text
     end = start + 1
     item_lines: list[str] = []
-    while end < len(lines) and lines[end].startswith("- "):
-        item_lines.append(lines[end])
+    while end < len(lines) and (lines[end].startswith("- ") or not lines[end].strip()):
+        if lines[end].strip():
+            item_lines.append(lines[end])
         end += 1
-    conclusion_line = end < len(lines) and not contradictions.ESCALATION.match(lines[end])
-    esc_at = end + 1 if conclusion_line else end  # строка вывода (если есть), затем строка эскалации
-    if esc_at >= len(lines) or not contradictions.ESCALATION.match(lines[esc_at]) or len(item_lines) != len(quotes):
+    last = lines[end] if end < len(lines) else ""
+    if not last.startswith(contradictions.RULE) or not item_lines:
         return None, text
+    # формулировок в тексте может быть меньше, чем цитат (guard снял строку): блок — по тем, что есть, а служебная
+    # строка правила уходит из текста в блок (скрытая 27.11: «Безопасное правило: …» оставалось в ответе)
+    by_line = []
+    for line in item_lines:
+        q = next((q for q in quotes if q.quote[:40] in line), None)
+        if q is not None:
+            by_line.append((q, line))
+    if not by_line:
+        return None, text
+    # под правилом — строка эскалации (если очередь её дала)
+    esc_at = end + 1 if end + 1 < len(lines) and contradictions.ESCALATION.match(lines[end + 1]) else None
     pages = {(q.doc, q.page) for q in quotes}
     refs = {(s.manual_id, s.pdf_page): s.ref for s in conv.sources.values() if (s.manual_id, s.pdf_page) in pages}
     items = []
-    for q, line in zip(quotes, item_lines, strict=True):
+    for q, line in by_line:
         ref = refs.get((q.doc, q.page))
         tail = line.split(f"[{ref}]", 1)[1] if ref and f"[{ref}]" in line else line.split("»", 1)[-1]
         items.append(
@@ -307,23 +350,18 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
                 "note": tail.strip().strip("()").strip() or None,
             }
         )
-    conclusion = (
-        f"{k.conclusion} Основание — {k.basis}."
-        if k.conclusion
-        else "Какое значение верно для вашего двигателя, руководства не уточняют."
-    )
-    line = lines[esc_at]
-    rest_lines = lines[:start] + lines[esc_at + 1 :]
+    conclusion = last  # безопасное правило — как в тексте (`contradictions.block`)
+    line = lines[esc_at] if esc_at is not None else ""
+    rest_lines = lines[:start] + lines[(esc_at if esc_at is not None else end) + 1 :]
     rest = "\n\n".join(p for p in (part.strip() for part in "\n".join(rest_lines).split("\n\n")) if p)
     block = {
         "kind": "contradiction",
         "title": k.title,
         "items": items,
         "conclusion": conclusion,
-        # строка эскалации вместо совета (Валерий, 27.11): «Передано главному механику на решение (№ N). Пока — …»
-        # или «Решение по противоречию (источник, дата): …» — рядом с формулировками, не вместо них
+        # строка эскалации (Валерий, 27.11) — рядом с правилом, не вместо него
         "advice": line,  # прежнее поле — для текущего web/
-        "escalation": escalation_view(line),
+        "escalation": escalation_view(line) if line else None,
     }
     return block, rest
 
@@ -361,38 +399,56 @@ _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 
 def quote_line(answer: str, ref: str, source_text: str) -> str:
     """Строка страницы, на которой нашлось число из предложения ответа со ссылкой [ref] — её интерфейс v2
-    показывает «Найдено на странице». Нет числа или строки — начало фрагмента."""
-    from service.agent import numbers
+    показывает «Найдено на странице». Нет числа из ответа на странице — пусто: ни колонтитул с номером страницы,
+    ни первая строка фрагмента за «найденное число» не выдаются (стенд 27.11: ✓ у стр. 57 по колонтитулу «57»)."""
+    from service.agent import numbers, page_body
 
     wanted: set[str] = set()
     for sentence in _SENTENCE.split(answer):
         if f"[{ref}]" in sentence:
             wanted |= numbers(sentence)
-    lines = [ln.strip() for ln in source_text.splitlines() if ln.strip()]
+    lines = [ln.strip() for ln in page_body(source_text).splitlines() if ln.strip()]
     if wanted:
         best = max(lines, key=lambda ln: len(numbers(ln) & wanted), default="")
         if best and numbers(best) & wanted:
             return best[:240]
-    return (lines[0] if lines else "")[:240]
+    return ""
+
+
+# причина снятия guard → ключ `copy.thread.withdrawnWhy` интерфейса; неизвестный ключ интерфейс читает как «other»
+WITHDRAWN_REASON = {"not_on_page": "not_on_page", "no_source": "no_source", "other_row": "other"}
 
 
 def verification(reply: AgentReply, text: str) -> dict[str, Any]:
     """Что проверил код (`agent.guard`): страницы, на которые опирается ответ, и сколько снято. Наш guard не
-    зачёркивает, а убирает предложение с цифрой не из фрагмента — оно считается снятым."""
-    rules = reply.trace.get("rules") or {}
-    verified = [handle(s["ref"]) for s in reply.sources]
-    quotes = {handle(s["ref"]): quote_line(reply.text, s["ref"], s.get("quote") or "") for s in reply.sources}
+    зачёркивает, а убирает предложение с цифрой не из фрагмента — оно считается снятым. `verified` — только
+    страницы, на которых нашлось число из ответа (так их читает интерфейс: ✓ «на странице найдено число»)."""
+    withdrawn = [
+        {
+            "text": to_handles(w["text"]),
+            "state": w["state"],
+            "missing": w.get("missing", []),
+            "reason": WITHDRAWN_REASON.get(w.get("reason") or "", w.get("reason")),
+            "handles": [handle(r) for r in w.get("handles", [])],
+        }
+        for w in reply.withdrawn
+    ]
+    lines = {handle(s["ref"]): quote_line(reply.text, s["ref"], s.get("quote") or "") for s in reply.sources}
+    quotes = {h: line for h, line in lines.items() if line}
+    verified = list(quotes)
     return {
         "type": "verification",
         "text": text,
         "verified": verified,
         "quotes": quotes,
+        # снятые guard утверждения — по одному на пометку «Утверждение снято» в тексте, в том же порядке (как
+        # WithdrawnClaim в web/src/api.ts); ссылки — метками S…, как в тексте
         "counts": {
             "verified": len(verified),
-            "unverified": int(rules.get("numbers_dropped") or 0),
-            "uncited": int(rules.get("opinions_marked") or 0),
+            "unverified": sum(1 for w in withdrawn if w["state"] == "unverified"),
+            "uncited": sum(1 for w in withdrawn if w["state"] == "uncited"),
         },
-        "withdrawn": [],
+        "withdrawn": withdrawn,
         "scanned": [],
     }
 
@@ -463,6 +519,23 @@ def tool_events(reply: AgentReply, conv: Conversation, verdict_sent: bool) -> tu
     return events, verdict_sent
 
 
+def early_verdict(ag: Agent, conv: Conversation) -> dict[str, Any] | None:
+    """Карточка проверки до модели. Сервис диагностики недоступен — None: ошибку покажет ответ агента."""
+    try:
+        ag.verdict_card(conv)
+    except ServiceError:
+        return None
+    return verdict_block(conv)
+
+
+def verdict_events(block: dict[str, Any]) -> list[dict[str, Any]]:
+    """Те же события, что у карточки из tool_events: интерфейс v2 их уже понимает."""
+    return [
+        {"type": "tool_started", "id": "verdict", "name": "get_diagnosis", "label": TOOL_LABEL["get_diagnosis"]},
+        {"type": "tool_result", "id": "verdict", "name": "get_diagnosis", "ok": True, "block": block},
+    ]
+
+
 def manual_designations(conv: Conversation, code: str) -> dict[str, str]:
     """Строка запчасти черновика → обозначение из руководства (матрица, цитата сверена со страницей; D-29)."""
     from service.agent import _part_label
@@ -472,6 +545,61 @@ def manual_designations(conv: Conversation, code: str) -> dict[str, str]:
     if cell is None or cell.status != "confirmed":
         return {}
     return {_part_label(r): r.designation for r in cell.spare_parts if r.designation}
+
+
+def _line(conv: Conversation, text: str, manual_id: str | None, page: int | None) -> dict[str, Any]:
+    """Работа или запчасть со своей страницей: руководство (id и обозначение, как в `references`), стр. PDF и
+    метка S…, если страница есть среди найденного в разговоре. Страница неизвестна — поля пустые, строка есть."""
+    src = next((s for s in conv.sources.values() if s.manual_id == manual_id and s.pdf_page == page), None)
+    doc = DOCS_BY_ID.get(manual_id or "")
+    designation = doc.designation if doc else (src.manual if src else None)
+    if manual_id is None or page is None or designation is None:
+        return {"text": text, "source": "", "manual_id": None, "manual": None, "short": None, "pdf_page": None,
+                "quote": "", "scanned": False}  # fmt: skip
+    return {
+        "text": text,
+        "source": handle(src.ref) if src else "",
+        "manual_id": manual_id,
+        "manual": designation,
+        "short": short_name(manual_id, designation),
+        "pdf_page": page,
+        "quote": "",
+        "scanned": False,
+    }
+
+
+def ticket_lines(conv: Conversation) -> dict[str, list[dict[str, Any]]] | None:
+    """Каждая работа и запчасть черновика — со страницей, откуда она взята. В ТОиР это не уходит: в теле заявки
+    работы — текстом, а страницы — общим списком `references` (контракт ТОиР). Работа — страница её ссылки R…
+    (`TicketDraft.op_pages`); запчасть — строка перечня проверенной ячейки матрицы (`_part_label`) или ссылка [R…]
+    в её тексте."""
+    from service.agent import REF_MARK, _part_label
+    from service.fault_matrix import cell_for
+
+    d = conv.draft
+    if d is None:
+        return None
+    body = d.body
+    cell = cell_for(body.anomaly_type, conv.vehicle.engine_model)
+    matrix = cell if cell is not None and cell.status == "confirmed" else None
+    op_quote = {o.quote: (o.doc, o.page) for o in matrix.operations} if matrix else {}
+    part_label = {_part_label(p): (p.doc, p.page) for p in matrix.spare_parts} if matrix else {}
+
+    def by_ref(text: str) -> tuple[str | None, int | None]:
+        marks = REF_MARK.findall(text)
+        src = conv.sources.get(marks[0]) if marks else None
+        return (src.manual_id, src.pdf_page) if src else (None, None)
+
+    ops = []
+    for i, text in enumerate(body.operations):
+        if len(d.op_pages) == len(body.operations):
+            manual, page = d.op_pages[i]  # обозначение руководства, как в references
+            src = next((s for s in conv.sources.values() if s.manual == manual and s.pdf_page == page), None)
+            ops.append(_line(conv, text, src.manual_id if src else None, page))
+        else:  # черновик из состояния до op_pages: работа из матрицы — её страница
+            ops.append(_line(conv, text, *op_quote.get(text, (None, None))))
+    parts = [_line(conv, t, *(part_label.get(t) or by_ref(t))) for t in body.spare_parts]
+    return {"operations": ops, "spare_parts": parts}
 
 
 def parts_offers(conv: Conversation, body: dict[str, Any], parts: Any | None) -> dict[str, Any] | None:
@@ -501,8 +629,8 @@ def ticket_pending(conv: Conversation, parts: Any | None = None) -> dict[str, An
         "type": "ticket_pending",
         "pending_id": d.fingerprint,
         "payload": body,
-        "operations": [{"text": t, "source": "", "quote": "", "scanned": False} for t in body["operations"]],
-        "spare_parts": [{"text": t, "source": "", "quote": "", "scanned": False} for t in body["spare_parts"]],
+        # каждая работа и запчасть — со своей страницей (руководство, стр. PDF, метка S…); в ТОиР — только payload
+        **(ticket_lines(conv) or {"operations": [], "spare_parts": []}),
         "urgency": {
             "level": level,
             "word": URGENCY_WORD[level],
@@ -618,6 +746,8 @@ def ticket_view(row: dict[str, Any]) -> dict[str, Any]:
         "created_at": datetime.fromtimestamp(row["ts"], UTC).isoformat(),
         "payload": payload,
         "urgency_proposed": row.get("urgency_proposed") or payload.get("urgency"),
+        # работы и запчасти со страницами — как механик их отправил; заявка, сохранённая раньше, — null
+        "lines": json.loads(row["lines"]) if row.get("lines") else None,
         "outcome": row.get("outcome"),
         "outcome_note": row.get("outcome_note"),
     }
@@ -654,8 +784,9 @@ class ChatIn(BaseModel):
 
 class TicketDecision(BaseModel):
     vehicle_id: str = Field(min_length=1)
-    keep_operations: list[int] = Field(default_factory=list)
-    keep_spare_parts: list[int] = Field(default_factory=list)
+    # None (поле не передано) — весь показанный состав; [] — механик снял всё (работы — отказ, запчасти — без них)
+    keep_operations: list[int] | None = None
+    keep_spare_parts: list[int] | None = None
     warning_acknowledged: bool = False
     urgency: Literal["low", "medium", "high"] | None = None
 
@@ -730,18 +861,20 @@ def build_router(
     @router.get("/vehicles")
     def vehicles() -> list[dict[str, Any]]:
         f = get_fleet()
-        return [vehicle_brief(f, v) for v in f.vehicles]
+        sent = sent_by_check(get_store().tickets())
+        return [vehicle_brief(f, v, sent) for v in f.vehicles]
 
     @router.get("/fleet")
     def fleet() -> dict[str, Any]:
         f = get_fleet()
-        briefs = [vehicle_brief(f, v) for v in f.vehicles]
+        rows = get_store().tickets()  # один раз на запрос: на стенде — чтение из бакета
+        sent = sent_by_check(rows)
+        briefs = [vehicle_brief(f, v, sent) for v in f.vehicles]
         order = {"quarantine": 0, "attention": 1, None: 2, "normal": 3}
         briefs.sort(key=lambda b: (order.get(b["fleet"]["status"], 2), -(b["fleet"]["anomaly_score"] or 0)))
         counts: dict[str, int] = {"normal": 0, "attention": 0, "quarantine": 0, "no_valid_check": 0}
         for b in briefs:
             counts[b["fleet"]["status"] or "no_valid_check"] += 1
-        rows = get_store().tickets()
         recorded = [r for r in rows if r.get("outcome")]
         return {
             "counts": counts,
@@ -755,7 +888,28 @@ def build_router(
 
     @router.get("/vehicles/{vehicle_id}")
     def vehicle(vehicle_id: str) -> dict[str, Any]:
-        return vehicle_detail(get_fleet(), vehicle_or_404(vehicle_id))
+        v = vehicle_or_404(vehicle_id)
+        return vehicle_detail(get_fleet(), v, sent_by_check(get_store().tickets(vehicle_id)))
+
+    @router.get("/vehicles/{vehicle_id}/verdict")
+    def verdict(vehicle_id: str, session_id: str) -> dict[str, Any]:
+        """Карточка проверки отдельным быстрым запросом, без модели: стенд отдаёт поток чата только целиком,
+        а карточка из полей ML и правил кода готова за доли секунды. Интерфейс показывает её до ответа."""
+        v = vehicle_or_404(vehicle_id)
+        if not any(s.session_id == session_id for s in v.sessions):
+            raise HTTPException(404, f"Проверка {session_id} машины {v.vehicle_id} не найдена.")
+        ag = get_agent()
+        try:
+            conv = ag.start(v.vehicle_id, session_id)
+            ag.verdict_card(conv)
+        except NotFoundError as exc:
+            raise HTTPException(404, exc.message) from exc
+        except ServiceError as exc:
+            raise HTTPException(502, exc.message) from exc
+        block = verdict_block(conv)
+        if block is None:
+            raise HTTPException(502, "Карточку проверки собрать не удалось.")
+        return block
 
     @router.get("/languages")
     def languages() -> list[dict[str, Any]]:
@@ -792,20 +946,64 @@ def build_router(
         }
 
         def events() -> Iterator[str]:
+            """Любой сбой посреди ответа (ревью 27.11): механик получает понятную ошибку и done, нить сохранена
+            с его вопросом — а не оборванный поток."""
+            finished = False
+            try:
+                for chunk in answer():
+                    finished = finished or chunk.startswith('data: {"type": "done"')
+                    yield chunk
+            except Exception:
+                log.exception("ответ v2 оборвался")
+                if finished:
+                    return
+                thread["transcript"] += [
+                    {"role": "user", "text": req.message},
+                    {"role": "assistant", "text": STREAM_FAILED, "blocks": [], "tools": [], "usage": []},
+                ]
+                try:
+                    threads.put(b, v.vehicle_id, thread)
+                finally:
+                    yield _sse({"type": "error", "message": STREAM_FAILED})
+                    yield _sse({"type": "done", "reason": "error"})
+
+        def answer() -> Iterator[str]:
             yield _sse({"type": "thread", "thread_id": thread["thread_id"]})
+            card: dict[str, Any] | None = None
             try:
                 ag = get_agent()
                 conv = conv_state.load(thread["state"], get_fleet()) if thread["state"] else None
                 if conv is None:
                     conv = ag.start(v.vehicle_id, session_id)
+                if not thread.get("verdict_sent"):
+                    # Карточка — из полей ML и правил кода, до первого вызова модели: приходит первой и
+                    # остаётся на экране, если модель потом упадёт или кончится лимит расходов.
+                    card = early_verdict(ag, conv)
+                    if card is not None:
+                        thread["verdict_sent"] = True
+                        for e in verdict_events(card):
+                            yield _sse(e)
                 reply = ag.ask(conv, req.message, req.level, req.lang, back_translate=False)
             except ServiceError as exc:
+                if card is not None:  # карточка уже на экране — и в нити, с вопросом и ошибкой
+                    thread["transcript"] += [
+                        {"role": "user", "text": req.message},
+                        {"role": "assistant", "text": exc.message, "blocks": [card], "tools": [], "usage": []},
+                    ]
+                    threads.put(b, v.vehicle_id, thread)
                 yield _sse({"type": "error", "message": exc.message})
                 yield _sse({"type": "done", "reason": "error"})
                 return
             tools, thread["verdict_sent"] = tool_events(reply, conv, bool(thread.get("verdict_sent")))
+            if card is not None:  # первый get_diagnosis ответа — та же карточка, что уже ушла: второй строки нет
+                dup = next(
+                    (e["id"] for e in tools if e["type"] == "tool_started" and e["name"] == "get_diagnosis"), None
+                )
+                tools = [e for e in tools if e["id"] != dup]
             for e in tools:
                 yield _sse(e)
+            if card is not None:
+                tools = [*verdict_events(card), *tools]  # в нить — вместе с остальными блоками ответа
             sources = source_items(reply, conv)
             if sources:
                 yield _sse({"type": "sources", "items": sources})
@@ -916,7 +1114,7 @@ def build_router(
 
     def thread_with_pending(request: Request, vehicle_id: str, pending_id: str) -> tuple[str, dict[str, Any]]:
         b = browser(request)
-        data = threads.get(b, vehicle_id) if b else None
+        data = threads.get(b, vehicle_id, fresh=True) if b else None
         if not data or not data.get("pending") or data["pending"]["pending_id"] != pending_id:
             raise HTTPException(409, "Черновик заявки устарел — попросите подготовить заявку заново.")
         return b or "", data
@@ -933,13 +1131,15 @@ def build_router(
         if conv.draft is None or conv.draft.fingerprint != pending_id:
             raise HTTPException(409, "Черновик заявки устарел — попросите подготовить заявку заново.")
         body = conv.draft.body.model_dump()
-        ops = [body["operations"][i] for i in decision.keep_operations if 0 <= i < len(body["operations"])]
-        parts = [body["spare_parts"][i] for i in decision.keep_spare_parts if 0 <= i < len(body["spare_parts"])]
-        if not decision.keep_operations:
-            ops = body["operations"]  # ничего не отмечено — механик подтверждает показанный состав целиком
-            parts = body["spare_parts"] if not decision.keep_spare_parts else parts
+        # поле не передано — показанный состав целиком; пустой список — механик снял всё (ревью 27.11: раньше
+        # пустой список работ отправлял весь состав)
+        keep_ops = range(len(body["operations"])) if decision.keep_operations is None else decision.keep_operations
+        keep_parts = range(len(body["spare_parts"])) if decision.keep_spare_parts is None else decision.keep_spare_parts
+        kept = list(dict.fromkeys(i for i in keep_ops if 0 <= i < len(body["operations"])))  # без повторов
+        ops = [body["operations"][i] for i in kept]
+        parts = [body["spare_parts"][i] for i in keep_parts if 0 <= i < len(body["spare_parts"])]
         if not ops:
-            raise HTTPException(409, "В заявке должна остаться хотя бы одна работа.")
+            raise HTTPException(409, "В заявке должна остаться хотя бы одна работа. Отметьте работы и отправьте снова.")
         proposed = pending["payload"]["urgency"]
         chosen = decision.urgency or proposed
         note = urgency_note(proposed, chosen, conv.draft.urgency_reason)
@@ -950,18 +1150,30 @@ def build_router(
             from service.agent import TicketDraft, fingerprint
 
             conclusion = body["conclusion"] if chosen == proposed else f"{body['conclusion']} {note}"
+            refs = body["references"]
+            op_pages = conv.draft.op_pages
+            if len(op_pages) == len(body["operations"]):  # страница убранной работы — тоже из заявки
+                dropped = {op_pages[i] for i in range(len(op_pages)) if i not in kept} - {op_pages[i] for i in kept}
+                refs = [r for r in refs if (r["manual"], r["pdf_page"]) not in dropped]
             new_body = TicketRequest.model_validate(
-                {**body, "operations": ops, "spare_parts": parts, "urgency": chosen, "conclusion": conclusion}
-            )
+                {**body, "operations": ops, "spare_parts": parts, "urgency": chosen, "conclusion": conclusion,
+                 "references": refs}
+            )  # fmt: skip
             conv.draft = TicketDraft(
-                body=new_body, urgency_reason=conv.draft.urgency_reason, fingerprint=fingerprint(new_body)
+                body=new_body,
+                urgency_reason=conv.draft.urgency_reason,
+                fingerprint=fingerprint(new_body),
+                tools=conv.draft.tools,
+                op_pages=[op_pages[i] for i in kept] if len(op_pages) == len(body["operations"]) else [],
             )
+        lines = ticket_lines(conv)  # до отправки: то, что уйдёт в ТОиР, со страницей каждой работы и запчасти
         try:
             resp = ag.confirm_ticket(conv, conv.draft.fingerprint)
         except ServiceError as exc:
             raise HTTPException(exc.http_status, exc.message) from exc
         store = get_store()
         store.set_urgency_proposed(resp.ticket_id, proposed)
+        store.set_lines(resp.ticket_id, lines)
         row = next(r for r in store.tickets(decision.vehicle_id) if r["ticket_id"] == resp.ticket_id)
         view = ticket_view(row)
         view["urgency_note"] = note
@@ -1155,6 +1367,29 @@ def build_router(
     def tickets(vehicle_id: str) -> list[dict[str, Any]]:
         vehicle_or_404(vehicle_id)
         return [ticket_view(r) for r in get_store().tickets(vehicle_id)]
+
+    @router.get("/tickets")
+    def ticket_register() -> list[dict[str, Any]]:
+        """Реестр главного механика: все заявки парка, новые сверху — машина, проверка, неисправность, приоритет
+        предложенный и выбранный, исход дефектовки, работы и запчасти со страницами. Без вызова модели."""
+        fleet = get_fleet()
+        out = []
+        for row in get_store().tickets():
+            view = ticket_view(row)
+            v = fleet.vehicle(row["vehicle_id"])
+            session = next((s for s in v.sessions if s.session_id == row["session_id"]), None) if v else None
+            code = view["payload"]["anomaly_type"]
+            out.append(
+                {
+                    **view,
+                    "garage_no": v.garage_no if v else None,  # None: машины уже нет в парке
+                    "vehicle_name": v.display_name if v else None,
+                    "engine_model": v.engine_model if v else None,
+                    "checked_at": session.checked_at if session else None,
+                    "fault_title": fleet.fault_titles.get(code) or code,
+                }
+            )
+        return out
 
     @router.post("/tickets/{ticket_pk}/outcome")
     def outcome(ticket_pk: int, body: OutcomeIn) -> dict[str, Any]:

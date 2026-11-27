@@ -157,8 +157,11 @@ def test_startup_without_bucket_or_token_keeps_service_up(monkeypatch: pytest.Mo
     from service.main import app
 
     with TestClient(app) as client:  # lifespan: без метаданных сервис всё равно поднимается
-        body = client.get("/health").json()
-    assert body["status"] == "ok" and body["manuals_index"] == {"present": False}
+        resp = client.get("/health")
+    body = resp.json()
+    assert body["manuals_index"] == {"present": False}
+    # но честно говорит, что ответов по руководствам нет (ревью 27.11): 503 и причина
+    assert resp.status_code == 503 and body["status"] == "no_index" and "IAM" in body["reason"]
 
 
 def test_health_reports_index_version(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

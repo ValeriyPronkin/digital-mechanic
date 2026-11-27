@@ -60,7 +60,9 @@ def test_redacted_copy_has_no_personal_data(ml: MLClient, toir: ToirClient) -> N
     question = "Какое давление масла? Звоните +7 912 345-67-89"
     pp = passport.redact(passport.build(reply.trace, question=question, notes=reply.notes))
     dump = json.dumps(pp, ensure_ascii=False)
-    assert "давление масла" not in dump and "912" not in dump and conv.vehicle.vehicle_id not in dump
+    # телефон ищем целиком: «912» само по себе бывает в случайном request_id (тест падал примерно 1 раз из 14)
+    assert "давление масла" not in dump and "+7 912" not in dump and "345-67-89" not in dump
+    assert conv.vehicle.vehicle_id not in dump
     assert pp["searches"][0]["queries"] >= 1 and pp["total"]["model_rub"] > 0  # только число запросов
 
 

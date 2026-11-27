@@ -15,7 +15,7 @@ from service.escalation import NO_RULE, ContradictionQueue
 from test_agent import make_agent, say
 from test_contradictions import QUESTION, RE31, RK269, RK276, Manual236, TorquePages
 
-PASSED = "Передано главному механику на решение (№ 1). Пока — безопасное правило: по выводу выше."
+PASSED = "Передано главному механику на решение (№ 1). Пока — по безопасному правилу выше."
 
 
 def _agent(ml: MLClient, toir: ToirClient, n: int = 1, search: Any = None, queue: Any = None) -> Any:
@@ -40,10 +40,11 @@ def test_contradiction_goes_to_queue_instead_of_advice(ml: MLClient, toir: ToirC
     assert [f["pdf_page"] for f in item["formulations"]] == [31, 269, 276] and item["vehicles"] == ["B418HK98"]
 
 
-def test_no_customer_rule_means_no_value_chosen(ml: MLClient, toir: ToirClient) -> None:
+def test_no_customer_rule_means_rule_from_pages(ml: MLClient, toir: ToirClient) -> None:
     ag, _ = make_agent([say("Затянуть 430-470 Н·м [R1].")], ml, toir, TorquePages())
     text = ag.ask(ag.start("B418HK98", "S-0007"), "С каким моментом тянуть болты крышек коренных подшипников?").text
-    assert f"Пока — безопасное правило: {NO_RULE}." in text and "Вывод:" not in text
+    # правило заказчика не нужно: безопасное правило выведено из страниц, эскалация — рядом с ним (ответ 27.11)
+    assert "Безопасное правило:" in text and "Пока — по безопасному правилу выше." in text and NO_RULE not in text
 
 
 def test_letter_send_resolve_and_decision_next_to_both_formulations(ml: MLClient, toir: ToirClient) -> None:
@@ -90,10 +91,11 @@ def test_model_noticed_contradiction_is_queued_and_its_advice_dropped(ml: MLClie
     r1 = ag._source_for(conv, "yamz-236-re", 31, "Регулировка", RE31).ref
     r2 = ag._source_for(conv, "yamz-236-rk", 269, "Регулировка", RK269).ref
     line = ag._escalate_model(conv, [(RE31, r1), (RK269, r2)])
-    assert line.startswith("Передано главному механику на решение (№ 1)") and NO_RULE in line
+    assert line == "Передано главному механику на решение (№ 1). Пока — по безопасному правилу выше."
     assert ag._escalate_model(conv, [(RK269, r2), (RE31, r1)]).startswith("Передано главному механику на решение (№ 1)")
     item = ag.escalation.items("open")[0]
-    assert item["id"].startswith("model-") and item["count"] == 2 and item["rule"] is None
+    assert item["id"].startswith("model-") and item["count"] == 2
+    assert item["safe_rule"] and "дефектовк" in item["safe_rule"]  # правило из страниц, а не «ничего не выбирать»
 
 
 def test_neutralize_drops_model_advice_lines(ml: MLClient, toir: ToirClient) -> None:
