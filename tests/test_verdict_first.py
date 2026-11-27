@@ -13,7 +13,7 @@ from service import api_v2, main
 from service.agent import Agent
 from service.clients import MLClient, ToirClient
 from service.llm import LLMError, LLMReply
-from test_agent import ANOMALY, make_agent, say
+from test_agent import ANOMALY, FAILED, make_agent, say
 
 
 def client(ag: Agent) -> TestClient:
@@ -88,3 +88,21 @@ def test_card_is_sent_once_per_thread(ml: MLClient, toir: ToirClient) -> None:
     saved = c.get(f"/api/v2/threads/current?vehicle_id={ANOMALY[0]}").json()
     blocks = [b["kind"] for t in saved["transcript"] if t["role"] == "assistant" for b in t["blocks"]]
     assert blocks.count("verdict") == 1
+
+
+def test_card_alone_by_get_without_the_model(ml: MLClient, toir: ToirClient) -> None:
+    """Отдельный запрос карточки: те же поля, что в потоке чата, и ни одного вызова модели."""
+    ag, llm_ = make_agent([say("Ответ.")], ml, toir)
+    c = client(ag)
+    vid, sid = ANOMALY
+    r = c.get(f"/api/v2/vehicles/{vid}/verdict", params={"session_id": sid})
+    assert r.status_code == 200 and llm_.seen == []
+    assert r.json() == verdicts(chat(c, "Что с двигателем?"))[0]["block"]
+    assert c.get(f"/api/v2/vehicles/{vid}/verdict", params={"session_id": "S-9999"}).status_code == 404
+    assert c.get("/api/v2/vehicles/NOPE/verdict", params={"session_id": sid}).status_code == 404
+
+
+def test_failed_check_card_by_get(ml: MLClient, toir: ToirClient) -> None:
+    ag, _ = make_agent([], ml, toir)
+    r = client(ag).get(f"/api/v2/vehicles/{FAILED[0]}/verdict", params={"session_id": FAILED[1]})
+    assert r.status_code == 200 and r.json()["case"] == "failed" and r.json()["fault_code"] is None
