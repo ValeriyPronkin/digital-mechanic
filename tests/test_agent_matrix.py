@@ -94,20 +94,6 @@ def test_confirmed_cell_ticket_survives_bad_model_operations(ml: MLClient, toir:
     assert cell is not None and reply.draft["body"]["operations"] == [o.quote for o in cell.operations]
 
 
-def test_confirmed_cell_ticket_when_model_gives_up(ml: MLClient, toir: ToirClient) -> None:
-    """Механик попросил заявку, модель её не оформила (ответила отказом) — для подтверждённой ячейки черновик
-    собирает код из матрицы, и текст ответа говорит о черновике, а не об отказе."""
-    vid, sid = CONFIRMED
-    steps = [
-        call("get_diagnosis", vehicle_id=vid, session_id=sid),
-        say("Заявку оформить не удалось: без ссылок на страницы заявка не создаётся."),
-    ]
-    ag, _ = make_agent(steps, ml, toir, EmptySearch())
-    reply = ag.ask(ag.start(vid, sid), "Создать заявку на дефектовку")
-    assert reply.draft is not None and reply.draft["body"]["references"]
-    assert "не удалось" not in reply.text and "Отправить" in reply.text
-
-
 def test_silent_cell_is_not_filled_by_code(ml: MLClient, toir: ToirClient) -> None:
     """Ячейка «в руководстве нет порядка работ» — код черновик не придумывает."""
     vid, sid = SILENT

@@ -73,15 +73,6 @@ SEARCH_PLAN_PROMPT = """Ты готовишь поиск по руководст
 давление масла и сигнализатор, перегрев, когда немедленно остановить двигатель, запрет эксплуатации.
 Код неисправности проверки в запросы не добавляй, если вопрос не о ней."""
 _TICKET_ASK = re.compile(r"заявк|оформ|отправ", re.I)
-# явная просьба оформить заявку: по ней код сам собирает черновик подтверждённой ячейки, если модель не собрала
-_TICKET_REQUEST = re.compile(
-    r"(?:оформ|созда|подготов|сдела|состав)\w*\W+(?:\w+\W+){0,2}заявк|заявк\w*\W+(?:\w+\W+){0,2}(?:оформ|созда|подготов)",
-    re.I,
-)
-TICKET_BY_MATRIX = (
-    "Черновик заявки готов: работы и страницы — из руководства этого двигателя {refs}. "
-    "Проверьте состав и нажмите «Отправить»."
-)
 
 SILENT_NOTE = "В руководстве этого двигателя нет порядка работ по этому узлу — нужна дефектовка."
 
@@ -768,8 +759,6 @@ class Agent:
         else:
             text = "Не успел собрать ответ. Переформулируйте вопрос короче."
             conv.messages.append({"role": "assistant", "content": text})
-        if conv.draft is None and _TICKET_REQUEST.search(question):
-            text = self._matrix_ticket(conv) or text  # аудит стенда 27.11: заявка по ячейке — не по удаче модели
 
         if target is None:  # код не узнал язык — берём язык из плана поиска (модель)
             target = language.normalize(str((conv.passport.get("plan") or {}).get("lang") or "")) or "ru"
@@ -1809,24 +1798,6 @@ class Agent:
             if "refused" not in retry:
                 return {**retry, "note": "Работы и страницы — из проверенной матрицы руководства этого двигателя."}
         return res
-
-    def _matrix_ticket(self, conv: Conversation) -> str | None:
-        """Механик попросил заявку, а модель черновик не собрала: для подтверждённой ячейки его собирает код.
-        Возвращает текст ответа со ссылками на страницы черновика; None — черновика нет (ячейка не подтверждена,
-        статус не тот, руководство молчит)."""
-        if not self._confirmed_cell(conv):
-            return None
-        res = self._draft_ticket(conv, {"conclusion": self._card_conclusion(conv)})
-        if "refused" in res or conv.draft is None:
-            return None
-        pages = {(r.manual, r.pdf_page) for r in conv.draft.body.references}
-        refs = [s.ref for s in conv.sources.values() if (s.manual, s.pdf_page) in pages]
-        text = TICKET_BY_MATRIX.format(refs=", ".join(f"[{r}]" for r in dict.fromkeys(refs)))
-        if conv.messages and conv.messages[-1].get("role") == "assistant":  # отказ модели заменяется, не дублируется
-            conv.messages[-1] = {"role": "assistant", "content": text}
-        else:
-            conv.messages.append({"role": "assistant", "content": text})
-        return text
 
     @staticmethod
     def _ticket_refusal(diag: Diagnosis, card: VerdictCard) -> str | None:
