@@ -57,14 +57,11 @@ def test_signed_cell_lists_registry_pages_and_operations(code: str, group: str) 
             assert ref_problem(Ref(doc=row["doc"], page=row["page"], quote=row["anchor"]), engine, None) is None
 
 
-def test_valve_knock_cites_troubleshooting_row_first() -> None:
-    """F01 × ЯМЗ-236М2: первая страница и первая работа — строка таблицы неисправностей РЭ стр. 53 «Двигатель стучит →
-    Нарушена регулировка клапанного механизма → Отрегулировать тепловые зазоры». Без неё ответ говорил, что пункта
-    по стуку клапанов в таблице нет; прежние страницы и работа (РК стр. 269) остаются."""
+def test_valve_knock_cites_troubleshooting_page_first_and_works_are_clean() -> None:
+    """F01 × ЯМЗ-236М2 (B418HK98 в видео): первая страница и основание — таблица неисправностей РЭ стр. 53 «Двигатель
+    стучит → Нарушена регулировка клапанного механизма». Строка оттуда работой не стала: в текстовом слое PDF столбцы
+    перемешаны («механи … зма ры»), а работа — строка листа заявки. Работы — РК стр. 269 и РЭ стр. 34."""
     cell = SRC["codes"]["F01"]["cells"]["ЯМЗ-236М2"]
-    first = cell["operations"][0]
-    assert (first["doc"], first["page"]) == ("yamz-236-re", 53)
-    assert first["anchor"].startswith("Нарушена регулировка клапанного")
     assert [(p["doc"], p["page"]) for p in cell["pages"]] == [
         ("yamz-236-re", 53),
         ("yamz-236-re", 31),
@@ -72,7 +69,79 @@ def test_valve_knock_cites_troubleshooting_row_first() -> None:
         ("yamz-236-rk", 269),
         ("yamz-236-re", 34),
     ]
-    assert ("yamz-236-rk", 269) in {(o["doc"], o["page"]) for o in cell["operations"]}
+    ops = [(o["doc"], o["page"]) for o in cell["operations"]]
+    assert ops == [("yamz-236-rk", 269), ("yamz-236-re", 34), ("yamz-236-re", 34), ("yamz-236-re", 34)]
+
+
+F01_WORKS = [
+    "Проверить и подрегулировать тепловые зазоры клапанного механизма",
+    "Клапанные зазоры рекомендуется регулировать в порядке работы цилиндров",
+    "После регулировки зазоров пустить двигатель и прослушать его работу",
+    "При появлении стука клапанов остановить двигатель и вновь проверить зазоры",
+]
+
+
+@needs_matrix
+def test_valve_knock_ticket_works() -> None:
+    """Работы F01 × ЯМЗ-236М2 — строки листа заявки в видео. Без «обкатки» (машина в эксплуатации) и без срока
+    «15 мин»: РК стр. 269 («не ранее, чем через 15 мин») и РЭ стр. 31 («или менее чем через 15 минут») расходятся —
+    это известное противоречие (data/contradictions.json), ему место в ответе, а не в двух работах заявки."""
+    from service.fault_matrix import cell_for
+
+    cell = cell_for("F01", "ЯМЗ-236М2")
+    assert cell is not None
+    works = [o.quote for o in cell.operations]
+    assert works == F01_WORKS
+    assert not [w for w in works if "обкатк" in w.lower() or "15 мин" in w]
+
+
+# Короткие слова, которые бывают в строке руководства; иное слово в 1–3 буквы (не аббревиатура) — обрывок слова,
+# разорванного перемешанными столбцами таблицы: «зазо зма ры», «механи … зма».
+_SHORT_WORDS = set(
+    "и в с со по на не до от из к ко у о об при или его их ее её за мм мин но чем без для под над то же ли а как так "
+    "бы оси раз оба".split()
+)
+
+
+def interleave_fragments(line: str) -> list[str]:
+    return [
+        w for w in re.findall(r"[А-Яа-яЁё]+", line) if len(w) <= 3 and not w.isupper() and w.lower() not in _SHORT_WORDS
+    ]
+
+
+def test_fragment_detector_catches_column_interleave() -> None:
+    garbled = "Нарушена регулировка клапанного механи Отрегулировать тепловые зазо зма ры в клапанном механизме"
+    assert interleave_fragments(garbled) == ["зма", "ры"]
+    assert interleave_fragments("Проверить исправность и надежность разъемов ЭБН, пускового реле (ПР) и реле ЭБН") == []
+
+
+def test_signed_anchors_have_no_word_fragments() -> None:
+    for spec in SRC["codes"].values():
+        for cell in spec["cells"].values():
+            for row in cell.get("operations", []) if "pages" in cell else []:
+                assert not interleave_fragments(f"{row['anchor']} {row.get('last', '')}"), row
+
+
+@needs_matrix
+def test_signed_works_read_as_clean_lines() -> None:
+    """Работа подписанной ячейки — строка листа заявки: без обрывков слов от перемешанных столбцов PDF."""
+    from service.fault_matrix import all_cells
+
+    signed = {
+        (code, engine)
+        for code, spec in SRC["codes"].items()
+        for group, cell in spec["cells"].items()
+        if "pages" in cell
+        for engine in SRC["groups"][group]
+    }
+    bad = [
+        (c.code, c.engine, o.page, interleave_fragments(o.quote))
+        for c in all_cells()
+        if (c.code, c.engine) in signed
+        for o in c.operations
+        if interleave_fragments(o.quote)
+    ]
+    assert not bad, bad
 
 
 def test_anchor_expands_to_the_line_on_the_page() -> None:
