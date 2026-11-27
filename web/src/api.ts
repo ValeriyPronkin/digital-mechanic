@@ -154,7 +154,16 @@ export interface TicketItem {
   source: string
   quote: string // the lines of the cited page the work was found in; empty in drafts saved before it existed
   scanned: boolean // the lines come from the machine reading of the page image
+  // The page the work or part was found on: the manual by its id and designation (as in `references`), its
+  // short name and the PDF page. Null when the server does not know the page; absent in older drafts.
+  manual_id?: string | null
+  manual?: string | null
+  short?: string | null
+  pdf_page?: number | null
 }
+
+/** A work or a part of a sent ticket with its page, kept beside the payload; ТОиР never gets it. */
+export type TicketLine = TicketItem
 
 export interface TicketPayload {
   vehicle_id: string
@@ -220,6 +229,9 @@ export interface TicketView {
   created_at: string
   payload: TicketPayload // what was sent; its `urgency` is the mechanic's final choice
   urgency_proposed?: Urgency | null // what the server proposed; absent in threads saved before the choice
+  // Each work and part with its own page, as sent. null or absent for a ticket stored before it was kept:
+  // then only `payload.references`, the pages as one list.
+  lines?: { operations: TicketLine[]; spare_parts: TicketLine[] } | null
   outcome: 'confirmed' | 'not_confirmed' | 'other_fault' | null
   outcome_note: string | null
 }

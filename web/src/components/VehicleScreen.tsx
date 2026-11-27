@@ -441,6 +441,7 @@ export function VehicleScreen({
         key={i}
         ticket={tickets.find((t) => t.id === turn.ticket.id) ?? turn.ticket}
         onChange={upsertTicket}
+        onOpenSource={openSource}
       />
     ) : (
       <AssistantBlock
@@ -522,7 +523,7 @@ export function VehicleScreen({
             <section className="space-y-3">
               <p className="text-[13px] text-dim">{copy.ticket.earlier}</p>
               {earlier.map((t) => (
-                <TicketCard key={t.id} ticket={t} onChange={upsertTicket} />
+                <TicketCard key={t.id} ticket={t} onChange={upsertTicket} onOpenSource={openSource} />
               ))}
             </section>
           )}

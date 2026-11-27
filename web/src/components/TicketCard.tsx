@@ -1,16 +1,52 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { setOutcome, type Outcome, type TicketView } from '../api'
+import { setOutcome, type Outcome, type SourceItem, type TicketView } from '../api'
 import { copy } from '../copy'
-import { dateTimeRu, sourceLabel } from '../lib/format'
+import { dateTimeRu } from '../lib/format'
+import { sheetLines, type SheetLine } from '../lib/sheet'
 import { noteChanged as differs, typedAfterSave } from '../lib/tickets'
 import { around, PRESSED } from '../lib/ui'
+import { SourceChip } from './SourceChip'
 
 const OUTCOMES: Outcome[] = ['confirmed', 'not_confirmed', 'other_fault']
+
+/** A work or a part of a sent ticket with its page of the manual under it: the same chip as in answers,
+ *  opening the page, when the ticket's record names the manual by its id; the same words in dim text when
+ *  it does not. Under the line, not beside it: beside it the page does not fit a phone's line. The chip's
+ *  row is 48 px high, so its 40 px tap area ends inside the row, clear of the next work. */
+function Line({ line, onOpen }: { line: SheetLine; onOpen?: (s: SourceItem) => void }) {
+  const scanned = line.scanned && <span className="text-[13px] text-mute">{copy.thread.scanned}</span>
+  return (
+    <li>
+      {line.text}
+      {line.source && onOpen ? (
+        <span className="-ml-1 flex min-h-12 items-center gap-1">
+          <SourceChip source={line.source} onOpen={onOpen} />
+          {scanned}
+        </span>
+      ) : (
+        line.page && (
+          <span className="block text-[13px] text-mute">
+            {line.page}
+            {line.scanned && `, ${copy.thread.scanned}`}
+          </span>
+        )
+      )}
+    </li>
+  )
+}
 
 /** A ticket ТОиР accepted: its number, then what the inspection found, then what was sent. The outcome
  *  is the label the acoustic model's owners need, so it sits right under the number; the works, the
  *  parts and the pages the mechanic has already approved fold away. */
-export function TicketCard({ ticket, onChange }: { ticket: TicketView; onChange: (t: TicketView) => void }) {
+export function TicketCard({
+  ticket,
+  onChange,
+  onOpenSource,
+}: {
+  ticket: TicketView
+  onChange: (t: TicketView) => void
+  onOpenSource?: (s: SourceItem) => void // opens a page of the manual: the chips under the works and parts
+}) {
   const [saving, setSaving] = useState(false)
   const [failed, setFailed] = useState(false)
   // What the mechanic typed and has not saved; null while the field shows the stored note. The field is
@@ -56,6 +92,9 @@ export function TicketCard({ ticket, onChange }: { ticket: TicketView; onChange:
     }
   })
 
+  // The works and the parts each with its own page (lib/sheet.ts): the record's lines only when they are what
+  // was sent. A ticket stored without them has its pages in one line, as before.
+  const sent = sheetLines(p, ticket.lines)
   const [before, number, rest] = around(copy.ticket.created(ticket.ticket_id), ticket.ticket_id)
   return (
     <section className="relative overflow-hidden rounded-xl border border-line bg-surface">
@@ -152,19 +191,30 @@ export function TicketCard({ ticket, onChange }: { ticket: TicketView; onChange:
           </summary>
           <div className="space-y-2 pb-3">
             <ul className="list-disc space-y-1 pl-5 marker:text-mute">
-              {p.operations.map((o) => (
-                <li key={o}>{o}</li>
+              {sent.works.map((w, i) => (
+                <Line key={i} line={w} onOpen={onOpenSource} />
               ))}
             </ul>
-            {p.spare_parts.length > 0 && (
+            {sent.parts.length > 0 &&
+              (sent.parts.some((part) => part.page) ? (
+                <div className="text-[13px] text-dim">
+                  <p>{copy.ticket.parts}:</p>
+                  <ul className="list-disc space-y-1 pl-5 marker:text-mute">
+                    {sent.parts.map((part, i) => (
+                      <Line key={i} line={part} onOpen={onOpenSource} />
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="text-[13px] text-dim">
+                  {copy.ticket.parts}: {sent.parts.map((part) => part.text).join('; ')}
+                </p>
+              ))}
+            {sent.pages.length > 0 && (
               <p className="text-[13px] text-dim">
-                {copy.ticket.parts}: {p.spare_parts.join('; ')}
+                {copy.ticket.sources}: {sent.pages.join(' · ')}
               </p>
             )}
-            <p className="text-[13px] text-dim">
-              {copy.ticket.sources}:{' '}
-              {p.references.map((r) => sourceLabel({ short: r.manual, pdf_page: r.pdf_page })).join(' · ')}
-            </p>
           </div>
         </details>
       </div>
