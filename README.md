@@ -40,11 +40,19 @@
 
 ```sh
 git clone https://github.com/ValeriyPronkin/digital-mechanic.git && cd digital-mechanic
-cp .env.example .env          # ключи пока не нужны — карточки работают и без них
+cp .env.example .env          # ключи пока не нужны — карточки работают и без них; впишите TASK_MATERIALS_URL
 make setup                    # зависимости и git-хуки — один раз после клона
+make fetch-materials          # материалы задачи (заглушки, парк, справочник) — по ссылке, не из git
 make mocks                    # терминал 1: заглушки заказчика Mock ML :8001 и Mock ТОиР :8002
 make run                      # терминал 2: сервис http://localhost:8000
 ```
+
+**Материалы задачи не в репозитории, загружаются по ссылке при развёртывании (п. 9.1 Положения).** Заглушки
+Mock ML и Mock ТОиР, `data/vehicles.json`, `data/fault_types.json` — материалы организаторов: `make fetch-materials`
+скачивает их по ссылке из `TASK_MATERIALS_URL` (ссылка из материалов организаторов; в коде её нет) в
+`vendor/neurodvs_mock/` и `data/` — оба пути в `.gitignore`. Уже скачанный архив: `make fetch-materials MATERIALS=путь.zip`.
+В CI, на стенде и в превью — шаг скачивания по переменной репозитория `TASK_MATERIALS_URL`; без неё тесты с заглушками
+пропускаются со строкой «ВНИМАНИЕ: пропущено …», смоук пропускается, а стенд и превью не собираются.
 
 Проверка: `http://localhost:8000/health` → `"status": "ok"`; на `http://localhost:8000` — список из 50 машин →
 проверка из истории → «Получить результат диагностики» → карточка вердикта. Остановить — Ctrl+C в обоих терминалах.

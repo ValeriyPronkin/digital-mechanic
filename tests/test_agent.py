@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from materials import require
 from service.agent import (
     DATA_CLOSE,
     DATA_OPEN,
@@ -24,6 +25,8 @@ from service.fleet import fleet
 from service.llm import LLMReply, Message, ToolCall, ToolSpec
 from service.manual_search import ManualHit
 from service.store import Store
+
+require()  # парк и справочник читаются при импорте
 
 FRAGMENT = (
     "Проверка давления масла. Давление масла в прогретом двигателе на номинальной частоте "

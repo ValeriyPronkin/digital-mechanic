@@ -357,6 +357,7 @@ def test_speak_repeat_phrase_from_cache_costs_nothing(
     assert [r["kind"] for r in rows] == ["tts", "tts_cache"] and rows[0]["cost_rub"] > 0 and rows[1]["cost_rub"] == 0
 
 
+@pytest.mark.materials
 def test_cost_report_voices_short_phrase_not_whole_answer() -> None:
     """Отчёт #16 считал синтез по всему ответу (+1,19 ₽); приложение озвучивает только короткую фразу."""
     from cost_report import voice_rub
