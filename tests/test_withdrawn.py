@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 from service import api_v2
 from service.agent import WITHDRAWN_UNCITED, WITHDRAWN_UNVERIFIED, Source
 from service.clients import MLClient, ToirClient

@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 
 from service import api_v2, conv_state, main
