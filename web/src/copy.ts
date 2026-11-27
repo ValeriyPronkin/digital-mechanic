@@ -44,6 +44,11 @@ export const copy = {
     mechanic: 'Механик',
     chief: 'Главный механик',
   },
+  // the theme of the screen: kept on the device (lib/theme.ts)
+  theme: {
+    label: 'Тема экрана',
+    choice: { dark: 'Тёмная', light: 'Светлая', system: 'Как в системе' },
+  },
   chief: {
     first: 'Сначала проверить',
     shown: 'Показаны', // «Показаны: требует внимания», while a status counter filters the list
