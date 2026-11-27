@@ -65,6 +65,8 @@ def test_refusal_gets_action_and_nearest_page() -> None:
         [],
     )
     assert complete("Зазор 0,25 мм [R1].", "Что сделать: X.", "Ближе: Y")[1] == []
+    # частичный ответ со ссылками (eval Q36: «прямо названы только болты маховика [R10]») — не дописывается
+    assert complete("В найденных фрагментах нет запрета.\n\n1. Болты маховика — новые [R10].", "X", "Y")[1] == []
 
 
 def test_agent_refusal_names_node_and_nearest_page(ml: MLClient, toir: ToirClient) -> None:

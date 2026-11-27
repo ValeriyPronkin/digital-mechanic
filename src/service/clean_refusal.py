@@ -89,12 +89,12 @@ _NEAREST = re.compile(r"ближе всего", re.I)
 def complete(text: str, action: str, nearest: str | None) -> tuple[str, list[str]]:
     """Отказ без конкретного действия — дописать: дефектовка узла (`action`) и «ближе всего: раздел, стр. N»
     (`nearest`, если поиск нашёл страницу этого двигателя, а ответ на неё не сослался). → (текст, что дописано)."""
-    if not is_refusal(text):
+    if not is_refusal(text) or _REF.search(text):  # со ссылками — ответ по руководству, хоть и неполный (eval Q36)
         return text, []
     added: list[str] = []
     if not _ACTION.search(text):
         added.append(action)
-    if nearest and not _NEAREST.search(text) and not _REF.search(text):
+    if nearest and not _NEAREST.search(text):
         added.append(nearest)
     if not added:
         return text, []
