@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from service import absent_parts, clean_refusal, contradictions, glossary, other_engine, row_check
+from service import absent_parts, clean_refusal, contradictions, glossary, language, other_engine, row_check
 from service.clients import (
     Diagnosis,
     MLClient,
@@ -299,6 +299,7 @@ class AgentReply:
     draft: dict[str, Any] | None
     trace: dict[str, Any]
     followup: dict[str, str] | None = None  # кнопка «к проверке по неисправности из карточки» (#28)
+    lang: str = "ru"  # язык ответа (service.language): по нему — голос озвучки
 
 
 # ---------- правила вокруг модели ----------
@@ -667,24 +668,34 @@ class Agent:
         ]
         return conv
 
-    def ask(self, conv: Conversation, question: str, level: Level = "steps") -> AgentReply:
+    def ask(self, conv: Conversation, question: str, level: Level = "steps", lang: str | None = None) -> AgentReply:
+        """`lang` — язык ответа, выбранный механиком (ru, uz, uz-cyrl, tg, kk, ky, en); нет — вопроса."""
         request_id = uuid.uuid4().hex
         steps: list[dict[str, Any]] = []
-        conv.passport = {"refs_before": set(conv.sources), "level": level}
-        # Уровень — приставкой к вопросу, а не системным сообщением: GigaChat принимает system только первым.
-        conv.messages.append({"role": "user", "content": f"[{LEVEL_PROMPT[level]}]\n\n{mask_pii(question)}"})
+        chosen = language.normalize(lang)
+        target = chosen or language.detect(question)
+        conv.passport = {"refs_before": set(conv.sources), "level": level, "answer_lang": target}
+        if chosen:
+            conv.passport["lang_chosen"] = chosen
+        # Уровень и язык — приставкой к вопросу, а не системным сообщением: GigaChat принимает system только первым.
+        prefix = f"[{LEVEL_PROMPT[level]}]"
+        if target and (hint := language.instruction(target)):
+            prefix += f"\n[{hint}]"
+        conv.messages.append({"role": "user", "content": f"{prefix}\n\n{mask_pii(question)}"})
         self._note_contradiction(conv, question)
         other = self._other_engine_reply(conv, question, request_id)
         if other is not None:  # вопрос про другой двигатель — ответ кода без цифр (независимый прогон, п. 2)
-            return other
+            return self._code_reply_in(other, conv, target, request_id)
         absent = self._absent_reply(conv, question, request_id)
         if absent is not None:  # узла у двигателя нет — ответ кода, без модели (ТЗ F4)
-            return absent
-        cache_key = self._answer_cache_key(conv, question, level)
+            return self._code_reply_in(absent, conv, target, request_id)
+        cache_key = self._answer_cache_key(conv, question, level, target or "")
         if cache_key:
             hit = self.store.cached_answer(cache_key)
             if hit is not None:
-                return self._reply_from_cache(conv, hit, request_id, question)
+                cached = self._reply_from_cache(conv, hit, request_id, question)
+                cached.lang = target or "ru"
+                return cached
         if self.prefetch:
             self._prefetch(conv, question, request_id, steps)
         text = ""
@@ -734,6 +745,10 @@ class Agent:
             text = "Не успел собрать ответ. Переформулируйте вопрос короче."
             conv.messages.append({"role": "assistant", "content": text})
 
+        if target is None:  # код не узнал язык — берём язык из плана поиска (модель)
+            target = language.normalize(str((conv.passport.get("plan") or {}).get("lang") or "")) or "ru"
+            conv.passport["answer_lang"] = target
+        text = self._fix_language(conv, text, target, request_id, steps)
         final, grounded, notes, cited = self.guard(conv, text)
         final, cited, more = self._contradiction_text(conv, final, cited)
         notes += more
@@ -777,7 +792,56 @@ class Agent:
             draft=conv.draft.public() if conv.draft else None,
             trace=trace,
             followup=followup,
+            lang=target,
         )
+
+    def _code_reply_in(self, reply: AgentReply, conv: Conversation, target: str | None, request_id: str) -> AgentReply:
+        """Ответ кода (без модели) — на языке вопроса: перевод моделью, но только если цифры в нём те же."""
+        reply.lang = target or "ru"
+        steps: list[dict[str, Any]] = reply.trace.setdefault("steps", [])
+        text = self._fix_language(conv, reply.text, reply.lang, request_id, steps, keep_history=False)
+        if text != reply.text and numbers(text) == numbers(reply.text):
+            reply.text = text
+            calls = self.store.llm_calls(request_id)
+            reply.trace["cost_rub"] = round(sum(c["cost_rub"] for c in calls), 4)
+        return reply
+
+    def _fix_language(
+        self,
+        conv: Conversation,
+        text: str,
+        target: str,
+        request_id: str,
+        steps: list[dict[str, Any]],
+        keep_history: bool = True,
+    ) -> str:
+        """Ответ не на языке вопроса (модель часто отвечает по-русски) — один вызов перевода. Цифры, единицы и
+        [R…] перевод не меняет, а если изменит — guard уберёт предложение: проверка та же, что для ответа."""
+        if not text.strip() or language.matches(text, target):
+            return text
+        conv.passport["lang_fixed"] = True
+        msgs: list[Message] = [
+            {"role": "system", "content": f"Переведи ответ механику. {language.instruction(target)} "
+                                          "Верни только перевод, без пояснений."},
+            {"role": "user", "content": text},
+        ]  # fmt: skip
+        try:
+            self.check_budget()
+            t0 = time.monotonic()
+            reply = self.provider.chat(msgs, [], max_tokens=1200)
+            ms = int((time.monotonic() - t0) * 1000)
+        except (LLMError, BudgetExceededError):
+            return text
+        cost = self._spend(request_id, len(steps) + 1, reply, ms)
+        steps.append({"step": len(steps) + 1, "kind": "llm", "name": reply.model + " (перевод ответа)",
+                      "tokens_in": reply.tokens_in, "tokens_out": reply.tokens_out,
+                      "tokens_cached": reply.tokens_cached, "cost_rub": round(cost, 4), "ms": ms})  # fmt: skip
+        out = reply.content.strip()
+        if not out or reply.truncated:
+            return text
+        if keep_history and conv.messages and conv.messages[-1].get("role") == "assistant":
+            conv.messages[-1] = {"role": "assistant", "content": out}
+        return out
 
     # ---- связь вопроса с неисправностью из карточки — кодом по матрице (#28) ----
     def _card_link(
@@ -808,7 +872,9 @@ class Agent:
         return f"{text.rstrip()}\n\n{line}", followup
 
     # ---- кэш ответов (issue #16) ----
-    def _answer_cache_key(self, conv: Conversation, question: str, level: Level = "steps") -> str | None:
+    def _answer_cache_key(
+        self, conv: Conversation, question: str, level: Level = "steps", lang: str = ""
+    ) -> str | None:
         """Ключ: вопрос (без ПДн, регистра и знаков) + двигатель + результат проверки + версии индекса,
         матрицы и промпта. Только первый вопрос разговора и не про заявку: дальше ответ зависит от истории."""
         if sum(1 for m in conv.messages if m.get("role") == "user") != 1 or _TICKET_ASK.search(question):
@@ -824,6 +890,7 @@ class Agent:
         parts = [
             norm,
             level,  # «Опытный» и «Пошагово» — разные ответы на один вопрос
+            lang,  # язык ответа: выбор механика меняет ответ на тот же вопрос
             conv.vehicle.engine_model,
             card.status,
             card.fault_code or "",
@@ -1131,8 +1198,9 @@ class Agent:
                 else {"lang": "ru", "question_ru": mask_pii(question), "queries": [mask_pii(question)]}
             )
             query = {"query": plan["question_ru"], "more_queries": plan["queries"], "k": PREFETCH_K}
-            if plan["lang"] not in ("ru", "rus"):
-                query["answer_language"] = plan["lang"]
+            lang = conv.passport.get("answer_lang") or plan["lang"]  # выбор механика или код — важнее плана
+            if lang not in ("ru", "rus"):
+                query["answer_language"] = lang
             calls.append(ToolCall(f"pre-search-{len(conv.messages)}", "search_manual", query))
         if not calls:
             return
@@ -1445,11 +1513,13 @@ class Agent:
                 item["context"] = f"{ctx}: нормы обкатки и испытаний после ремонта, не эксплуатация машины"
             out.append(item)
         lang = str(args.get("answer_language") or "")
+        code = language.normalize(lang) or ""
         hint: dict[str, Any] = (
-            {"answer_language": f"{lang}: ответь на языке вопроса; цифры, детали и ссылки [R…] — как в руководстве"}
-            if lang
+            {"answer_language": language.instruction(code)
+             or f"{lang}: ответь на языке вопроса; цифры, детали и ссылки [R…] — как в руководстве"}
+            if lang and code != "ru"
             else {}
-        )
+        )  # fmt: skip
         if conv.contradiction is not None:  # известное противоречие — цитаты и вывод модели видны сразу
             hint["contradiction"] = contradictions.for_model(*conv.contradiction)
         if not out:

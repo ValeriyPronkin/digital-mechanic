@@ -69,7 +69,7 @@ def test_search_plan_translates_and_rewrites(ml: MLClient, toir: ToirClient) -> 
     assert search.queries[0] == "Какой тепловой зазор клапанов?"
     assert "регулировка тепловых зазоров клапанов" in search.queries
     tool = next(m for m in llm.seen[1] if m["role"] == "tool" and m.get("name") == "search_manual")
-    assert json.loads(str(tool["content"]))["answer_language"].startswith("uz")
+    assert "узбекский" in json.loads(str(tool["content"]))["answer_language"]
     plan_steps = [s for s in reply.trace["steps"] if s["kind"] == "llm" and "план поиска" in s["name"]]
     assert len(plan_steps) == 1 and plan_steps[0]["cost_rub"] > 0  # план — в стоимости запроса
 

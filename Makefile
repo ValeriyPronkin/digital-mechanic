@@ -62,6 +62,11 @@ cost-xlsx: install
 eval-open: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/eval_open.py --label $(or $(LABEL),$(shell date +%Y%m%d-%H%M))
 
+## Многоязычный набор (27.11): вопросы открытой половины на узб./тадж./каз. и ломаном русском — reports/eval-multi.md
+## Вопросы — вне git: .state/questions_multi.jsonl (или EVAL_MULTI=путь); засчитано — страница, числа, язык ответа
+eval-multi: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/eval_open.py --set multi --label $(or $(LABEL),$(shell date +%Y%m%d-%H%M))
+
 ## Стабильность (штурман 26.11): RUNS прогонов eval-open с префиксом PREFIX и сводка по ним
 eval-stability: install
 	for i in $(shell seq 1 $(or $(RUNS),3)); do uv run $(if $(wildcard .env),--env-file .env,) python scripts/eval_open.py --label $(PREFIX)-$$i || exit 1; done

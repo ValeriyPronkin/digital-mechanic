@@ -27,6 +27,7 @@ from typing import Any, Protocol
 import httpx
 import numpy as np
 
+from service import language
 from service.agent import Source, numbers
 from service.clients import ServiceError
 
@@ -79,9 +80,9 @@ def pcm_from_wav(data: bytes) -> tuple[bytes, float]:
 
 
 class SpeechClient(Protocol):
-    def recognize(self, pcm: bytes) -> str: ...
+    def recognize(self, pcm: bytes, lang: str = "ru") -> str: ...
 
-    def synthesize(self, text: str, api: str = "v1") -> bytes: ...
+    def synthesize(self, text: str, api: str = "v1", lang: str = "ru") -> bytes: ...
 
 
 class SpeechKit:
@@ -101,8 +102,10 @@ class SpeechKit:
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Api-Key {self.key}"}
 
-    def recognize(self, pcm: bytes) -> str:
-        params = {"lang": "ru-RU", "topic": "general", "format": "lpcm", "sampleRateHertz": str(SAMPLE_RATE)}
+    def recognize(self, pcm: bytes, lang: str = "ru") -> str:
+        """`lang` — язык, выбранный механиком; без распознавания на этом языке (tg, ky) — русский."""
+        code = (language.LANGS.get(lang) or language.LANGS["ru"]).stt or "ru-RU"
+        params = {"lang": code, "topic": "general", "format": "lpcm", "sampleRateHertz": str(SAMPLE_RATE)}
         try:
             r = self.http.post(STT_URL, params=params, content=pcm, headers=self._headers())
         except httpx.HTTPError as exc:
@@ -111,13 +114,16 @@ class SpeechKit:
             raise VoiceUnavailableError(f"Распознавание не сработало (HTTP {r.status_code}) — спросите текстом.")
         return str(r.json().get("result", "")).strip()
 
-    def synthesize(self, text: str, api: str = "v1") -> bytes:
-        """mp3 короткой версии. `api` — v1 (за символы) или v3 (за запрос до 250 символов); выбор — `choose_tts_api`."""
-        spoken = for_tts(text)
+    def synthesize(self, text: str, api: str = "v1", lang: str = "ru") -> bytes:
+        """mp3 короткой версии. `api` — v1 (за символы) или v3 (за запрос до 250 символов); выбор — `choose_tts_api`.
+        `lang` — язык ответа: узбекский — голос nigora (кириллица — в латиницу кодом), казахский — amira,
+        английский — john; языка без голоса здесь не бывает (speech_for говорит по-русски)."""
+        spoken = spoken_text(text, lang)
+        voice, tts_lang = voice_and_lang(lang, self.voice)
         try:
             if api == "v3":
-                return self._synthesize_v3(spoken)
-            data = {"text": spoken, "lang": "ru-RU", "voice": self.voice, "speed": self.speed, "format": "mp3"}
+                return self._synthesize_v3(spoken, voice)
+            data = {"text": spoken, "lang": tts_lang, "voice": voice, "speed": self.speed, "format": "mp3"}
             r = self.http.post(TTS_URL, data=data, headers=self._headers())
         except httpx.HTTPError as exc:
             raise VoiceUnavailableError("Озвучка не ответила — ответ на экране.") from exc
@@ -125,10 +131,10 @@ class SpeechKit:
             raise VoiceUnavailableError(f"Озвучка не сработала (HTTP {r.status_code}) — ответ на экране.")
         return r.content
 
-    def _synthesize_v3(self, spoken: str) -> bytes:
+    def _synthesize_v3(self, spoken: str, voice: str) -> bytes:
         body: dict[str, Any] = {
             "text": spoken,
-            "hints": [{"voice": self.voice}, {"speed": float(self.speed)}],
+            "hints": [{"voice": voice}, {"speed": float(self.speed)}],
             "outputAudioSpec": {"containerAudio": {"containerAudioType": "MP3"}},
             "loudnessNormalizationType": "LUFS",
         }
@@ -168,6 +174,27 @@ def for_tts(text: str) -> str:
     return text
 
 
+def voice_and_lang(lang: str, default_voice: str) -> tuple[str, str]:
+    """Голос и код языка синтеза для языка ответа; языка без голоса — русский голос по умолчанию."""
+    v = language.voice_for(lang)
+    return (v.voice or default_voice, v.tts_lang or "ru-RU") if v else (default_voice, "ru-RU")
+
+
+def speech_lang(lang: str | None) -> str:
+    """Язык, которым звучит короткая версия: язык ответа, если у SpeechKit есть его голос, иначе русский."""
+    return lang if lang and language.voice_for(lang) is not None else "ru"
+
+
+def spoken_text(text: str, lang: str) -> str:
+    """Текст, который уходит в синтез: русские единицы — словами (только для русского голоса);
+    узбекская кириллица — латиницей (голос nigora читает латиницу)."""
+    if language.voice_for(lang) is None:
+        return for_tts(text)
+    if lang == "uz-cyrl":
+        return language.uz_to_latin(text)
+    return text
+
+
 # ---------- короткая версия ответа ----------
 
 _REF = re.compile(r"\[\s*(R\d+)\s*\]")
@@ -202,10 +229,16 @@ def short_manual(manual: str) -> str:
     return f"{kind} {engine}" if re.search(r"\d", engine) else kind
 
 
-def speech_for(answer: str, sources: dict[str, Source]) -> Speech:
+def speech_for(answer: str, sources: dict[str, Source], lang: str = "ru") -> Speech:
     """Короткая версия для озвучки из проверенного ответа. Каждая цифра в `body` — во фрагменте своей ссылки.
 
-    Сначала — предложение со ссылкой и цифрой (значение с единицами), затем — со ссылкой без цифр."""
+    Сначала — предложение со ссылкой и цифрой (значение с единицами), затем — со ссылкой без цифр.
+    Язык ответа без голоса SpeechKit (таджикский, киргизский) — честная фраза по-русски, ответ — на экране."""
+    if lang != "ru" and lang in language.LANGS and language.voice_for(lang) is None:
+        notice = language.NO_VOICE.format(name=language.LANGS[lang].name.split(" (")[0])
+        return Speech(notice, notice, ())
+    tail_tpl = language.SOURCE_TAIL.get(lang, language.SOURCE_TAIL["ru"])
+    not_in_manual = language.NOT_IN_MANUAL.get(lang, NOT_IN_MANUAL)
     with_numbers: list[Speech] = []
     plain_refs: list[Speech] = []
     fallback: str | None = None
@@ -219,14 +252,14 @@ def speech_for(answer: str, sources: dict[str, Source]) -> Speech:
             allowed: set[str] = set().union(*(numbers(sources[r].text) for r in refs))
             if nums <= allowed:
                 src = sources[refs[0]]
-                tail = f"Источник: {short_manual(src.manual)}, страница {src.pdf_page}."
+                tail = tail_tpl.format(manual=short_manual(src.manual), page=src.pdf_page)
                 (with_numbers if nums else plain_refs).append(Speech(f"{text.rstrip('.')}. {tail}", text, refs))
         elif fallback is None and not nums:
             fallback = text
     if with_numbers or plain_refs:
         return (with_numbers or plain_refs)[0]
     if _NOT_FOUND.search(answer) or not fallback:
-        return Speech(NOT_IN_MANUAL, NOT_IN_MANUAL, ())
+        return Speech(not_in_manual, not_in_manual, ())
     return Speech(fallback, fallback, ())
 
 
@@ -299,13 +332,14 @@ class TtsCache:
         self._lock = threading.Lock()
 
     @staticmethod
-    def key(text: str) -> str:
+    def key(text: str, lang: str = "ru") -> str:
         speed = os.environ.get("TTS_SPEED", "0.95")
-        raw = f"{tts_voice()}|{speed}|{for_tts(text)}"
+        voice, _ = voice_and_lang(lang, tts_voice())
+        raw = f"{voice}|{speed}|{spoken_text(text, lang)}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-    def get(self, text: str) -> bytes | None:
-        k = self.key(text)
+    def get(self, text: str, lang: str = "ru") -> bytes | None:
+        k = self.key(text, lang)
         with self._lock:
             if k in self._mem:
                 self._mem.move_to_end(k)
@@ -319,8 +353,8 @@ class TtsCache:
         self._remember(k, audio)
         return audio
 
-    def put(self, text: str, audio: bytes) -> None:
-        k = self.key(text)
+    def put(self, text: str, audio: bytes, lang: str = "ru") -> None:
+        k = self.key(text, lang)
         self._remember(k, audio)
         if self.bucket is not None:
             bucket = self.bucket

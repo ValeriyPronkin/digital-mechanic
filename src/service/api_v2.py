@@ -31,7 +31,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from service import conv_state, passport
+from service import conv_state, language, passport
 from service.agent import Agent, AgentReply, Conversation
 from service.clients import ServiceError, TicketRequest
 from service.fleet import Fleet, Vehicle
@@ -39,7 +39,7 @@ from service.fleet_status import STATUS_LABEL, trend, vehicle_status
 from service.manuals.catalog import DOCS_BY_ID, documents_for_engine
 from service.store import Store
 from service.verdict_policy import URGENCY_ACTION, VerdictCard, urgency_for
-from service.voice import speech_for
+from service.voice import speech_for, speech_lang
 
 log = logging.getLogger(__name__)
 
@@ -494,6 +494,20 @@ def ticket_view(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ---------- язык ответа ----------
+
+
+def language_event(code: str) -> dict[str, Any]:
+    """Язык ответа и что умеет голос на нём — для переключателя языка в интерфейсе."""
+    lang = language.LANGS.get(code) or language.LANGS["ru"]
+    return {
+        "lang": lang.code,
+        "name": lang.native,
+        "voice_input": lang.stt is not None,
+        "voice_output": lang.code == "ru" or lang.voice is not None,
+    }
+
+
 # ---------- маршруты ----------
 
 
@@ -503,6 +517,8 @@ class ChatIn(BaseModel):
     session_id: str | None = None
     new_thread: bool = False
     level: Literal["expert", "steps"] = "steps"  # уровень механика (#17): формат и длина ответа
+    # язык ответа, выбранный механиком: ru, uz, uz-cyrl, tg, kk, ky, en; нет или "auto" — язык вопроса
+    lang: str | None = Field(default=None, max_length=10)
 
 
 class TicketDecision(BaseModel):
@@ -575,6 +591,11 @@ def build_router(
     def vehicle(vehicle_id: str) -> dict[str, Any]:
         return vehicle_detail(get_fleet(), vehicle_or_404(vehicle_id))
 
+    @router.get("/languages")
+    def languages() -> list[dict[str, Any]]:
+        """Языки ответа для переключателя: текст — все; голос — где есть у SpeechKit."""
+        return [language_event(code) for code in language.LANGS]
+
     @router.get("/threads/current")
     def current_thread(vehicle_id: str, request: Request) -> dict[str, Any] | None:
         b = browser(request)
@@ -611,7 +632,7 @@ def build_router(
                 conv = conv_state.load(thread["state"], get_fleet()) if thread["state"] else None
                 if conv is None:
                     conv = ag.start(v.vehicle_id, session_id)
-                reply = ag.ask(conv, req.message, req.level)
+                reply = ag.ask(conv, req.message, req.level, req.lang)
             except ServiceError as exc:
                 yield _sse({"type": "error", "message": exc.message})
                 yield _sse({"type": "done", "reason": "error"})
@@ -647,13 +668,16 @@ def build_router(
             pp = passport.build(reply.trace, question=req.message, notes=reply.notes, level=req.level)
             passport.write(pp, time.time(), put=log_put())  # журнал стенда (#27), как у /api/chat
             yield _sse({"type": "passport", **pp})
-            spoken = speech_for(reply.text, conv.sources)
+            spoken = speech_for(reply.text, conv.sources, reply.lang)
+            voice_lang = speech_lang(reply.lang)
+            yield _sse({"type": "language", **language_event(reply.lang)})  # интерфейс незнакомое пропускает
             yield _sse(
                 {
                     "type": "speech",
                     "text": spoken.text,
                     "sig": conv_state.sign_text(spoken.text),
                     "url": "/api/voice/speak",
+                    "lang": voice_lang,
                 }
             )
             known = {s["handle"] for s in thread["sources"]}
@@ -679,6 +703,7 @@ def build_router(
                         "text": spoken.text,
                         "sig": conv_state.sign_text(spoken.text),
                         "url": "/api/voice/speak",
+                        "lang": voice_lang,
                     },
                 },
             ]
@@ -799,8 +824,9 @@ def build_router(
         }
 
     @router.post("/transcribe")
-    async def transcribe(request: Request) -> dict[str, Any]:
-        """Голос: WAV 16 кГц моно (интерфейс v2 пишет его через WebAudio) → текст для поля ввода."""
+    async def transcribe(request: Request, lang: str = "ru") -> dict[str, Any]:
+        """Голос: WAV 16 кГц моно (интерфейс v2 пишет его через WebAudio) → текст для поля ввода.
+        `?lang=uz|kk|en` — язык распознавания (выбор механика); по умолчанию и для tg/ky — русский."""
         from service.voice import NOT_HEARD, pcm_from_wav, stt_cost_rub, timed
 
         rate_limit(request)
@@ -809,7 +835,7 @@ def build_router(
         body = await request.body()
         try:
             pcm, seconds = pcm_from_wav(body)
-            text, ms = timed(get_speech().recognize, pcm)
+            text, ms = timed(get_speech().recognize, pcm, language.normalize(lang) or "ru")
         except ServiceError as exc:
             raise HTTPException(exc.http_status, exc.message) from exc
         get_store().log_voice("stt", round(seconds, 2), stt_cost_rub(seconds), ms)
