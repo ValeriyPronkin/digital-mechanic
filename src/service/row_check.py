@@ -32,7 +32,9 @@ _GENERIC = {
 # десятком строк перечня (видео-машина B418HK98, 27.11: снималась верная фраза «втулки коромысел (236-1007118)»)
 _LABEL = re.compile(
     r"\b(?:ЯМЗ|ЗМЗ|МАЗ|КамАЗ|ГАЗ|УАЗ)[\s‑–-]*\d[\d.]*(?:[А-ЯA-Z]\d*)*|\[[RS]\d+\]"
-    r"|\b\d{2,4}[-.]\d{5,8}(?:-[А-ЯA-Z0-9]{1,3})?(?![\d,])",
+    r"|\b\d{2,4}[-.]\d{5,8}(?:-[А-ЯA-Z0-9]{1,3})?(?![\d,])"
+    # марка масла или материала: «М10Д», «М-10ДМ» (eval 27.11: «10» из «масло М10Д» искалось в строках таблицы)
+    r"|\b[А-ЯЁA-Z]{1,3}[-‑]?\d{1,3}[А-ЯЁA-Z]{1,3}\d?\b",
     re.I,
 )
 
@@ -54,7 +56,8 @@ def _prose_goes_on(lines: list[str], i: int) -> bool:
     """Строка кончается числом, но это обычный текст: следующая строка продолжает фразу со строчной буквы и сама
     числом не кончается («…усилием 39,2» / «должен быть от 4 до 8 мм.», «…(360» / «градусов).»)."""
     nxt = next((ln for ln in lines[i + 1 :] if ln), "")
-    return bool(nxt) and nxt[0].islower() and not _ROW_END.search(nxt)
+    # «… 400…635 кПа (4,1…6,5 кгс/см2» / «) при номинальной частоте вращения» — скобка закрывается на следующей строке
+    return bool(nxt) and (nxt[0].islower() or nxt[0] == ")") and not _ROW_END.search(nxt)
 
 
 def rows_with(number: str, page: str) -> list[str] | None:
@@ -149,10 +152,15 @@ def _whole_range(want: set[str], row: str, page: str, nums: set[str]) -> bool:
     return not (want & (_table_words(page) - _weak(page)) - words)
 
 
+# разговорное название детали → слово таблицы руководства («ставлю голову на место» — строка «головки цилиндров»)
+_SAME_PART = {"голова": "головка", "гбц": "головка", "коленвал": "коленчатый", "распредвал": "распределительный"}
+
+
 def row_ok(sentence: str, question: str, pages: list[str]) -> bool:
     """Каждое число фразы, стоящее на странице в строке таблицы, — в строке с деталью из фразы или вопроса
     (по различающим словам строки; общие для многих строк слова не в счёт)."""
     want = distinct(sentence) | distinct(question)
+    want |= {_SAME_PART[w] for w in want if w in _SAME_PART}
     if _ABSENT.search(sentence):
         return True
     nums = _claim_nums(sentence)

@@ -1803,6 +1803,10 @@ class Agent:
             found = _PART_DESIGNATION.findall(" ".join(conv.draft.body.spare_parts))
             labels += found + [re.sub(r"-[А-ЯA-Z0-9]{1,3}$", "", d) for d in found]  # «236-1007118-В» и «236-1007118»
         labels += [d.designation for d in DOCS_BY_ID.values()]
+        # код документа отдельно от полного обозначения: «руководство 536.3902150 РЭ» (heldout h536-max-torque)
+        labels += [
+            code for d in DOCS_BY_ID.values() for code in re.findall(r"\d{3}[.-]\d{7}(?:-[А-ЯA-Z])?", d.designation)
+        ]
         ordered = tuple(sorted({x for x in labels if x}, key=len, reverse=True))
         return NumberContext(ordered, tuple(dates), frozenset(bare), frozenset(percent))
 

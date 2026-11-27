@@ -177,3 +177,10 @@ def test_absence_sentence_may_repeat_the_question_number(ml: MLClient, toir: Toi
     assert "на 100 литров" in text
     text, *_ = ag.guard(conv, "В руководстве этого двигателя нет данных, обычно 5 литров на 100 литров топлива.")
     assert "5 литров" not in text
+
+
+def test_document_designation_is_a_label(ml: MLClient, toir: ToirClient) -> None:
+    """heldout h536-max-torque: «руководство 536.3902150 РЭ» снималось за «536.39» — обозначение документа не число."""
+    ag, conv = _conv(ml, toir)
+    text, *_ = ag.guard(conv, "Таблица — в руководстве по эксплуатации 536.3902150 РЭ [R1].")
+    assert "536.3902150 РЭ [R1]" in text
