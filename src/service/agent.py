@@ -42,7 +42,10 @@ from service.manual_search import ManualSearcher, manual_pdf, search_engine
 from service.manuals.catalog import DOCS_BY_ID, canonical_engine
 from service.manuals.lexical import tokenize
 from service.manuals.search import deterministic_mode, make_quote
+from service.nikita import copy as nk_copy
 from service.nikita import coverage as nk_coverage
+from service.nikita import pages as nk_pages
+from service.nikita import read as nk_read
 from service.spend import SpendLedger
 from service.store import Store
 from service.verdict_policy import CRITICAL_CODES, Urgency, VerdictCard, build_card, urgency_for  # noqa: F401
@@ -190,6 +193,27 @@ TOOLS: list[ToolSpec] = [
         },
     ),
 ]
+
+
+# read_pages Никиты (app/tools/manual.py): страницы целиком по номеру, с соседними — только при SEARCH_ENGINE=nikita
+READ_PAGES_TOOL = ToolSpec(
+    "read_pages",
+    nk_copy.TOOL_READ.replace("[S12]", "[R3]")
+    + " Читай страницы, на которые указывают ссылки R… справочника (fault_guide) или поиска, когда фрагмента мало.",
+    {
+        "type": "object",
+        "properties": {
+            "manual": {"type": "string", "description": nk_copy.TOOL_READ_MANUAL},
+            "pages": {"type": "array", "items": {"type": "integer"}, "description": nk_copy.TOOL_READ_PAGES},
+        },
+        "required": ["manual", "pages"],
+    },
+)
+
+
+def tools() -> list[ToolSpec]:
+    """Инструменты модели: при поиске Никиты — и read_pages."""
+    return [*TOOLS, READ_PAGES_TOOL] if search_engine() == "nikita" else TOOLS
 
 
 class TicketRefusedError(ServiceError):
@@ -383,7 +407,9 @@ def _quote_label(q: Any) -> str:
     return f"{short + ' — ' if short else ''}{doc.designation if doc else q.doc}, стр. {q.page}"
 
 
-GUIDE_ATTACHED = 3  # страниц реестра, которые справочник прикладывает целиком (как у Никиты)
+# страниц реестра, которые справочник прикладывает целиком на вопрос о карточке; остальные модель читает read_pages
+GUIDE_ATTACHED = int(os.environ.get("GUIDE_ATTACHED", "3"))
+READ_PAGE_CHARS = 6000  # текст страницы в источнике R… для проверки цифр
 _DRIVE_ASK = re.compile(
     r"можно ли (?:ехать|ездить|эксплуат)|своим ходом|доехать|перегнать|ехать дальше|можно ездить", re.I
 )
@@ -660,7 +686,7 @@ class Agent:
         for step in range(1, MAX_STEPS + 1):
             self.check_budget()
             t0 = time.monotonic()
-            reply = self.provider.chat(conv.messages, TOOLS, max_tokens=LEVEL_MAX_TOKENS[level])
+            reply = self.provider.chat(conv.messages, tools(), max_tokens=LEVEL_MAX_TOKENS[level])
             ms = int((time.monotonic() - t0) * 1000)
             cost = self._spend(request_id, step, reply, ms)
             steps.append(
@@ -978,8 +1004,17 @@ class Agent:
     def _allowed_numbers(self, conv: Conversation, cited: list[Source]) -> set[str]:
         allowed = self._context_numbers(conv)
         for src in cited:
-            allowed |= numbers(src.text)
+            if not self._other_variant(conv, src):
+                allowed |= numbers(src.text)
         return allowed
+
+    def _other_variant(self, conv: Conversation, src: Source) -> bool:
+        """Как _has в app/verify.py Никиты: страница другой модификации двигателя (registry/page_scope.yaml) читается
+        по номеру, но цифр не подтверждает. Только при SEARCH_ENGINE=nikita."""
+        if search_engine() != "nikita":
+            return False
+        engine = canonical_engine(conv.vehicle.engine_model) or conv.vehicle.engine_model
+        return nk_pages.other_variant(engine, src.manual_id, src.pdf_page) is not None
 
     def _context_numbers(self, conv: Conversation) -> set[str]:
         """Цифры-факты из кода и данных: карточка ТС, проверки этой машины, найденные документы.
@@ -1018,6 +1053,9 @@ class Agent:
                 return self._vehicle_history(conv, args), True
             if name == "search_manual":
                 return self._search_manual(conv, args), True
+            if name == "read_pages" and search_engine() == "nikita":
+                res = self._read_pages(conv, args)
+                return res, bool(res.get("pages"))
             if name == "draft_ticket":
                 res = self._draft_ticket(conv, args)
                 return res, "refused" not in res
@@ -1389,6 +1427,31 @@ class Agent:
             return {"found": [], "note": "В руководстве этого двигателя ничего не найдено.", **hint}
         return {"engine": conv.vehicle.engine_model, "found": out, **hint}
 
+    def _read_pages(self, conv: Conversation, args: dict[str, Any]) -> dict[str, Any]:
+        """read_pages Никиты: страницы руководства этого двигателя целиком, метка — наша R… (одна страница — один R).
+        Текст страницы кладётся в источник: цифры ответа проверяются по нему."""
+        engine = canonical_engine(conv.vehicle.engine_model) or conv.vehicle.engine_model
+
+        def handle_for(manual_id: str, page: int) -> str:
+            return self._source_for(conv, manual_id, page, "", "").ref
+
+        res = nk_read.read_pages(engine, handle_for, str(args.get("manual", "")), args.get("pages"))
+        for p in res["pages"]:
+            src = conv.sources[p["source"]]
+            if not src.section:
+                src.section = nk_pages.get_section(engine, p["manual_id"], p["pdf_page"])
+            if p["text"] not in src.text:
+                src.text = f"{p['text']}\n{src.text}".strip()[:READ_PAGE_CHARS]  # страница целиком — первой
+            if ctx := bench_context(p["manual_id"], p["pdf_page"]):
+                p["context"] = f"{ctx}: нормы обкатки и испытаний после ремонта, не эксплуатация машины"
+        out: dict[str, Any] = {
+            "pages": [{k: v for k, v in p.items() if k in ("source", "text", "context")} for p in res["pages"]]
+        }
+        for key in ("note", "error"):
+            if res.get(key):
+                out[key] = res[key]
+        return out
+
     def _search_many(self, queries: list[str], engine: str, k: int) -> list[Any]:
         """Несколько запросов → одна выдача: по очереди лучшие из каждого, без повторов страниц."""
         lists = [self.searcher.search(q, engine, k=k) for q in dict.fromkeys(queries) if q]
@@ -1619,6 +1682,8 @@ def tool_step(
             "found": len(found),
             "refs": list(dict.fromkeys(f.get("ref") for f in found)),  # фрагменты одной страницы — одна ссылка
         }
+    if name == "read_pages":
+        out["read"] = {"refs": [p.get("source") for p in result.get("pages") or []]}
     if "refused" in result:
         out["refused"] = result["refused"]
     return out

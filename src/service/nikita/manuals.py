@@ -15,6 +15,9 @@ class Manual:
         self.id = doc.doc_id
         self.pages = doc.pages
         self.engines = doc.engines
+        self.designation = doc.designation
+        self.short = doc.designation  # у Никиты — короткое имя; у нас обозначение и есть имя для механика
+        self.title = Path(doc.file).stem
 
 
 def manuals_for(engine_model: str) -> tuple[Manual, ...]:
