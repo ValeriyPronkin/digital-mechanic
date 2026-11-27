@@ -7,7 +7,9 @@
 страницы руководства с цитатами, токены и ₽ из паспорта запроса (#31). Оглавление — по группам: несовместимые,
 помехи, класс 3, остальные отклонения, сбои записи. Заявки в ТОиР не отправляются — только черновики.
 
-Стенд ограничивает частоту вопросов (10 в минуту с адреса): скрипт выдерживает паузу и повторяет после 429.
+Стенд ограничивает частоту вопросов (10 в минуту с адреса): скрипт выдерживает паузу и повторяет после 429;
+5xx и обрыв связи — повторяет с растущей паузой. Что стенд так и не отдал — не пропускается молча: список в начале
+пакета и код возврата 1; догнать — `--only S-0015,S-0062`.
 Полный прогон (84 проверки) — ≈ 15 минут и ≈ 11 ₽ на модель (проба 26.11: 0,13 ₽ на проверку).
 """
 
@@ -46,24 +48,65 @@ def group_of(card: dict[str, Any]) -> str:
     return "anomaly"
 
 
-def _post(c: httpx.Client, url: str, body: dict[str, Any], retries: int = 6) -> httpx.Response:
-    for _ in range(retries):
-        r = c.post(url, json=body)
-        if r.status_code != 429:
-            return r
-        time.sleep(float(r.headers.get("Retry-After") or PAUSE_S) + 0.5)
-    return r
+def _request(
+    c: httpx.Client, method: str, url: str, body: dict[str, Any] | None = None, retries: int = 6, backoff: float = 5.0
+) -> tuple[httpx.Response | None, str | None]:
+    """Запрос к стенду с повтором: 429 — после Retry-After, 5xx и обрыв связи (TLS EOF, таймаут) — с растущей паузой.
+    Возвращает ответ или (None, причина) — вызывающий не пропускает проверку молча, а помечает её в пакете."""
+    why = "нет попыток"
+    for i in range(retries):
+        try:
+            r = c.post(url, json=body) if method == "POST" else c.get(url)
+        except httpx.TransportError as exc:
+            why = f"нет связи со стендом ({type(exc).__name__})"
+            print(f"{url}: {why}, повтор {i + 1}", file=sys.stderr)
+            time.sleep(backoff * (i + 1))
+            continue
+        if r.status_code == 429:
+            why = "HTTP 429"
+            time.sleep(float(r.headers.get("Retry-After") or PAUSE_S) + 0.5)
+            continue
+        if r.status_code >= 500:
+            why = f"HTTP {r.status_code}"
+            print(f"{url}: {why}, повтор {i + 1}", file=sys.stderr)
+            time.sleep(backoff * (i + 1))
+            continue
+        return r, None
+    return None, f"{why} после {retries} попыток"
 
 
-def collect(c: httpx.Client, base: str, limit: int | None = None, pause: float = PAUSE_S) -> list[dict[str, Any]]:
+def _json(c: httpx.Client, url: str, backoff: float) -> Any:
+    r, why = _request(c, "GET", url, backoff=backoff)
+    if r is None or r.status_code != 200:
+        raise SystemExit(f"стенд не отдал {url}: {why or r.status_code if r is not None else why}")
+    return r.json()
+
+
+def collect(
+    c: httpx.Client,
+    base: str,
+    limit: int | None = None,
+    pause: float = PAUSE_S,
+    *,
+    only: set[str] | None = None,
+    skipped: list[dict[str, Any]] | None = None,
+    backoff: float = 5.0,
+) -> list[dict[str, Any]]:
+    """`only` — только эти проверки (догон пропущенных); `skipped` — сюда пишутся проверки, которые стенд не отдал."""
     base = base.rstrip("/")
     rows: list[dict[str, Any]] = []
-    vehicles = c.get(f"{base}/api/vehicles").json()
+    vehicles = _json(c, f"{base}/api/vehicles", backoff)
     for v in vehicles:
-        hist = c.get(f"{base}/api/vehicles/{v['vehicle_id']}").json()
+        hist = _json(c, f"{base}/api/vehicles/{v['vehicle_id']}", backoff)
         for s in reversed(hist["sessions"]):  # по порядку проверок
-            card = _post(c, f"{base}/api/diagnose", {"vehicle_id": v["vehicle_id"], "session_id": s["session_id"]})
-            if card.status_code != 200:
+            if only is not None and s["session_id"] not in only:
+                continue
+            body = {"vehicle_id": v["vehicle_id"], "session_id": s["session_id"]}
+            card, why = _request(c, "POST", f"{base}/api/diagnose", body, backoff=backoff)
+            if card is None or card.status_code != 200:
+                if skipped is not None:  # 404/422 — проверки нет на стенде; иначе — стенд не ответил
+                    skipped.append({"vehicle": v, "session": s, "reason": why or f"HTTP {card.status_code}"})  # type: ignore[union-attr]
+                print(f"--- {v['vehicle_id']} {s['session_id']}: карточка не получена", file=sys.stderr)
                 continue
             cj = card.json()
             if cj["status"] not in QUESTION:
@@ -71,9 +114,11 @@ def collect(c: httpx.Client, base: str, limit: int | None = None, pause: float =
             if limit is not None and len(rows) >= limit:
                 return rows
             q = QUESTION[cj["status"]]
-            ask = {"vehicle_id": v["vehicle_id"], "session_id": s["session_id"], "message": q}
-            r = _post(c, f"{base}/api/chat", ask)
-            answer = r.json() if r.status_code == 200 else {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
+            r, why = _request(c, "POST", f"{base}/api/chat", {**body, "message": q}, backoff=backoff)
+            if r is not None and r.status_code == 200:
+                answer = r.json()
+            else:
+                answer = {"error": why or f"HTTP {r.status_code}: {r.text[:200]}"}  # type: ignore[union-attr]
             rows.append({"vehicle": v, "session": s, "card": cj, "question": q, "answer": answer})
             print(f"{len(rows):3d} {v['vehicle_id']} {s['session_id']} {cj['status']} {cj.get('fault_code') or ''}",
                   file=sys.stderr)  # fmt: skip
@@ -161,7 +206,9 @@ background:#fffdf5;white-space:pre-wrap}cite{display:block;color:#5f6b7a;font-st
 .check{border:1px solid #d9dee5;border-radius:10px;padding:.2rem .9rem .6rem;margin:.8rem 0}"""
 
 
-def render(rows: list[dict[str, Any]], base: str, started: datetime) -> str:
+def render(
+    rows: list[dict[str, Any]], base: str, started: datetime, skipped: list[dict[str, Any]] | None = None
+) -> str:
     by_group: dict[str, list[tuple[int, dict[str, Any]]]] = {g: [] for g, _ in GROUPS}
     for n, row in enumerate(rows, 1):
         by_group[group_of(row["card"])].append((n, row))
@@ -174,7 +221,15 @@ def render(rows: list[dict[str, Any]], base: str, started: datetime) -> str:
            f"черновиков заявок {drafts} · "
            f"ошибок ответа {errors} · ₽ на прогон {rub:.2f} (без НДС, по паспортам запросов)</p>",
            "<p>Заявки в ТОиР не отправлялись — показаны черновики, которые механик подтвердил бы кнопкой.</p>",
-           "<h2>Оглавление</h2><ul>"]  # fmt: skip
+           ]  # fmt: skip
+    if skipped:
+        out.append(f'<h2 id="skipped" class="err">Не получены со стенда ({len(skipped)})</h2><ul>')
+        for k in skipped:
+            who = f"{k['vehicle']['vehicle_id']} {k['session']['session_id']}"
+            out.append(f'<li class="err">{E(who)} — {E(k["reason"])}</li>')
+        out.append("</ul><p>Догнать: <code>--only " + ",".join(E(k["session"]["session_id"]) for k in skipped)
+                   + "</code></p>")  # fmt: skip
+    out.append("<h2>Оглавление</h2><ul>")
     for g, title in GROUPS:
         items = by_group[g]
         links = ", ".join(f'<a href="#c{n}">{E(r["vehicle"]["vehicle_id"])} {E(r["session"]["session_id"])}</a>'
@@ -192,14 +247,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("url", help="адрес стенда, например https://<id>.containers.yandexcloud.net/")
     p.add_argument("--out", type=Path, default=None)
     p.add_argument("--limit", type=int, default=None, help="первые N проверок (для пробы)")
+    p.add_argument("--only", default=None, help="только эти проверки через запятую (догон пропущенных): S-0015,S-0062")
     args = p.parse_args(argv)
     started = datetime.now()
     out = args.out or Path("reports") / f"engineer-pack-{started:%Y-%m-%d-%H%M}.html"
+    only = {x.strip() for x in args.only.split(",") if x.strip()} if args.only else None
+    skipped: list[dict[str, Any]] = []
     with httpx.Client(timeout=180) as c:
-        rows = collect(c, args.url, args.limit)
+        rows = collect(c, args.url, args.limit, only=only, skipped=skipped)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render(rows, args.url, started), encoding="utf-8")
+    out.write_text(render(rows, args.url, started, skipped), encoding="utf-8")
     print(out)
+    if skipped:
+        print(f"не получено проверок: {len(skipped)} — список в начале пакета", file=sys.stderr)
+        return 1
     return 0
 
 
