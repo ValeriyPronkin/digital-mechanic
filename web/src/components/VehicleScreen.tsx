@@ -25,7 +25,7 @@ import { ContradictionCard } from './ContradictionCard'
 import { GuideCard } from './GuideCard'
 import { PageSheet } from './PageSheet'
 import { SpeakButton } from './SpeakButton'
-import { LEVEL_EVENT, REDO, getLevel, otherLevel, redoLevel, setLevel, type Level } from '../lib/level'
+import { levelOf, moreDetail, redoLevel, shorter, type Level } from '../lib/level'
 import { anchoringWhile } from '../lib/scroll'
 import { ScoreChart } from './ScoreChart'
 import { LanguageSwitch } from './LanguageSwitch'
@@ -71,6 +71,11 @@ function SessionPicker({
     </div>
   )
 }
+
+/** The level an answer was given at: the text event's `level_used`, or the passport's for an answer stored
+ *  before the event carried it. */
+const answerLevel = (turn: AssistantTurn): Level | null =>
+  levelOf(turn.level_used) ?? levelOf(turn.passport?.question?.level)
 
 function AssistantBlock({
   turn,
@@ -151,21 +156,32 @@ function AssistantBlock({
           </div>
         </details>
       )}
-      {/* the short spoken version: value, document, page — for busy hands (#14) */}
+      {/* the level the server chose for this question, and the same question again a level down or up (#91);
+          quiet, like the quick replies: «Создать заявку» stays the one accent action under an answer */}
       {(() => {
-        const answered = turn.passport?.question?.level
-        if (!onRedo || turn.live || !turn.text || (answered !== 'expert' && answered !== 'steps')) return null
-        const next = otherLevel(answered)
+        const level = answerLevel(turn)
+        if (!onRedo || turn.live || !turn.text || !level) return null
+        const down = moreDetail(level)
+        const up = shorter(level)
+        const quiet =
+          'min-h-12 rounded-lg border border-line px-3 text-dim hover:text-text min-[900px]:pointer-fine:min-h-9'
         return (
-          <button
-            type="button"
-            onClick={() => onRedo(next)}
-            className="min-h-12 rounded-lg border border-accent px-3 text-[13px] font-semibold text-accent"
-          >
-            {REDO[next].label}
-          </button>
+          <div className="flex flex-wrap items-center gap-2 text-[13px]">
+            <span className="mr-1 text-mute">{copy.level.answered[level]}</span>
+            {down && (
+              <button type="button" onClick={() => onRedo(down)} className={quiet}>
+                {copy.level.more}
+              </button>
+            )}
+            {up && (
+              <button type="button" onClick={() => onRedo(up)} className={quiet}>
+                {copy.level.shorter}
+              </button>
+            )}
+          </div>
         )
       })()}
+      {/* the short spoken version: value, document, page — for busy hands (#14) */}
       {!turn.live && turn.speech && <SpeakButton speech={turn.speech} />}
       {/* manuals disagree: under the direct answer, as the code put it there (D-20) */}
       {turn.blocks
@@ -379,8 +395,15 @@ export function VehicleScreen({
     // On a phone the keyboard would cover the answer, so the field lets go of it. With a real keyboard
     // the field stays ready for the next question.
     if (window.matchMedia('(pointer: coarse)').matches) input.current?.blur()
-    // «подробнее» / «короче» — словами или голосом — меняют уровень только для этого ответа (#17)
-    void thread.send(message.trim(), { sessionId, newThread, level: level ?? redoLevel(message) ?? undefined })
+    const lastAnswer = thread.turns.findLast((t): t is AssistantTurn => t.role === 'assistant')
+    const lastLevel = lastAnswer ? answerLevel(lastAnswer) : null
+    // «подробнее» / «короче», typed or said, move from the level of the last answer, for this question only;
+    // any other question goes without a level, and the server picks it (#91)
+    void thread.send(message.trim(), {
+      sessionId,
+      newThread,
+      level: level ?? redoLevel(message, lastLevel) ?? undefined,
+    })
   }
   const manualNames = Object.fromEntries(vehicle.manuals.map((m) => [m.id, m.short]))
   const session = vehicle.sessions.find((s) => s.session_id === sessionId)
@@ -425,7 +448,7 @@ export function VehicleScreen({
         sources={thread.sources}
         onOpenSource={openSource}
         manualNames={manualNames}
-        onRedo={i === thread.turns.length - 1 && !thread.busy ? (l) => send(REDO[l].message, false, l) : undefined}
+        onRedo={i === thread.turns.length - 1 && !thread.busy ? (l) => send(copy.level.ask[l], false, l) : undefined}
       />
     )
   const earlierTurns = lastUserIndex < 0 ? thread.turns : thread.turns.slice(0, lastUserIndex)
@@ -522,9 +545,10 @@ export function VehicleScreen({
           {/* While the mechanic types, the ready-made questions step aside: the keyboard has taken half
               the screen, and the answer above needs the room. «Создать заявку» is not one of them: it
               stays whatever is in the field (ТЗ F7). */}
-          {/* On a laptop the ready-made questions and «Как объяснять» share one row of 36 px controls, and the
-              questions scroll sideways (the wheel too) instead of wrapping: four of them in two rows, the level
-              and the field took about 200 of 694 px and covered the card. On a phone — as before. */}
+          {/* On a laptop the ready-made questions are one row of 36 px controls that scrolls sideways (the wheel
+              too) instead of wrapping: four of them in two rows and the field took about 200 of 694 px and
+              covered the card. On a phone — as before. The composer is the questions and the field, nothing
+              else: the level is chosen per question by the server, and changed under the answer (#91). */}
           <div className="space-y-2 min-[900px]:flex min-[900px]:items-center min-[900px]:gap-3 min-[900px]:space-y-0">
             {(canTicket || !typing) && (
               <div
@@ -560,7 +584,6 @@ export function VehicleScreen({
                   ))}
               </div>
             )}
-            <LevelSwitch />
           </div>
           {voice.error && (
             <p role="status" className="text-[13px] text-warn">
@@ -681,41 +704,6 @@ export function VehicleScreen({
           onClose={() => setSource(null)}
         />
       )}
-    </div>
-  )
-}
-
-/** «Как объяснять»: коротко (опытный механик) или по шагам — на этом устройстве, для следующих вопросов (#17). */
-function LevelSwitch() {
-  const [level, set] = useState<Level>(getLevel)
-  useEffect(() => {
-    const follow = () => set(getLevel())
-    window.addEventListener(LEVEL_EVENT, follow)
-    return () => window.removeEventListener(LEVEL_EVENT, follow)
-  }, [])
-  const pick = (l: Level) => {
-    setLevel(l)
-    set(l)
-  }
-  return (
-    <div
-      data-waits
-      role="group"
-      aria-label="Как объяснять"
-      className="flex items-center gap-2 text-[13px] text-dim min-[900px]:shrink-0"
-    >
-      <span className="shrink-0">Как объяснять:</span>
-      {(['expert', 'steps'] as const).map((l) => (
-        <button
-          key={l}
-          type="button"
-          aria-pressed={level === l}
-          onClick={() => pick(l)}
-          className="min-h-12 flex-1 rounded-lg border border-line px-2 aria-pressed:border-accent aria-pressed:bg-surface-2 aria-pressed:text-text min-[900px]:flex-none min-[900px]:px-3 min-[900px]:pointer-fine:min-h-9"
-        >
-          {l === 'expert' ? 'Коротко' : 'По шагам'}
-        </button>
-      ))}
     </div>
   )
 }

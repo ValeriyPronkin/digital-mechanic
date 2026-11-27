@@ -15,7 +15,7 @@ import {
   type LanguageInfo,
 } from './api'
 import { copy } from './copy'
-import { getLevel, type Level } from './lib/level'
+import type { LevelChoice } from './lib/level'
 import { chatLang, getLang } from './lib/lang'
 
 export interface AssistantTurn {
@@ -33,6 +33,7 @@ export interface AssistantTurn {
   error?: string
   reason?: string
   live?: boolean
+  level_used?: string // the level the server answered at (#91); also in a restored transcript
 }
 export type Turn = { role: 'user'; text: string } | AssistantTurn | { role: 'ticket'; ticket: TicketView }
 
@@ -64,7 +65,7 @@ function apply(turn: AssistantTurn, e: ChatEvent): AssistantTurn {
         blocks: e.block ? [...turn.blocks, e.block] : turn.blocks,
       }
     case 'text':
-      return { ...turn, text: turn.text + e.text, progress: undefined }
+      return { ...turn, text: turn.text + e.text, progress: undefined, level_used: e.level_used ?? turn.level_used }
     case 'verification': // the checked text replaces the streamed one: failed claims are withdrawn
       return {
         ...turn,
@@ -136,7 +137,7 @@ export function useThread(vehicleId: string, attempt = 0) {
   }, [vehicleId, attempt])
 
   const send = useCallback(
-    async (message: string, options: { sessionId?: string | null; newThread?: boolean; level?: Level } = {}) => {
+    async (message: string, options: { sessionId?: string | null; newThread?: boolean; level?: LevelChoice } = {}) => {
       const live: AssistantTurn = {
         role: 'assistant',
         text: '',
@@ -169,7 +170,7 @@ export function useThread(vehicleId: string, attempt = 0) {
             message,
             session_id: options.sessionId,
             new_thread: options.newThread,
-            level: options.level ?? getLevel(),
+            level: options.level ?? 'auto', // the server picks per question unless the mechanic asked for one
             lang: chatLang(getLang()),
           },
           onEvent,
