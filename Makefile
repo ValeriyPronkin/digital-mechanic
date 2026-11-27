@@ -1,4 +1,4 @@
-.PHONY: run-local stop-local mocks-local stop-mocks-local web web-test engineer-pack demo-check logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
+.PHONY: run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
 
 PORT ?= 8000
 
@@ -103,6 +103,14 @@ mocks-local:
 stop-mocks-local:
 	sh scripts/local_server.sh stop 8001
 	sh scripts/local_server.sh stop 8002
+
+## Демо двух ВЫМЫШЛЕННЫХ поставщиков запчастей: HTTP-заглушка :8003; сервис — PARTS_SUPPLIERS=data/demo/suppliers
+parts-demo:
+	sh scripts/local_server.sh start 8003 service.parts_demo_api:app
+	@echo "сервис с двумя поставщиками: PARTS_SUPPLIERS=data/demo/suppliers make run-local"
+
+stop-parts-demo:
+	sh scripts/local_server.sh stop 8003
 
 ## Всё, что проверяет CI, кроме смоука в Docker. Зелёный = код возврата 0.
 check: lint types test stubs third-party secrets

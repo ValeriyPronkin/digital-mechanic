@@ -272,7 +272,8 @@ def parts_supplier() -> parts_supplier_mod.PartsSupplier:
 @app.get("/api/parts")
 def parts_lookup(q: str) -> dict[str, Any]:
     """Поставщик запчастей по обозначению или наименованию: наличие, цена, срок — если поставщик подключён
-    (PARTS_SUPPLIER=csv|http); по умолчанию — «каталог не подключён» (STUB: parts-catalog)."""
+    (PARTS_SUPPLIERS — файлы поставщиков, опрос параллельно; прежний PARTS_SUPPLIER=csv|http); по умолчанию —
+    «каталог не подключён» (STUB: parts-catalog)."""
     query = q.strip()[:120]
     if not query:
         raise HTTPException(status_code=422, detail="Пустой запрос.")
@@ -533,5 +534,6 @@ app.include_router(
         lambda: page_images(),
         lambda: page_marks(),
         lambda: slog.put if (slog := journal()) is not None else None,
+        get_parts=lambda: parts_supplier(),
     )
 )
