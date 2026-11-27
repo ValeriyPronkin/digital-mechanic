@@ -39,9 +39,10 @@ from e2e import BUSY, DIAG, norm, session_label
 
 ROOT = Path(__file__).resolve().parents[1]
 LIMIT_S = 175.0  # ≤ 2:55 — запас до 3:00
-SPEED_MIN, SPEED_MAX = 4.0, 8.0
+SPEED_MIN, SPEED_MAX = 8.0, 10.0  # Валерий 27.11: ожидание — ×8–10, без пустоты на экране
 WIDTH, HEIGHT = 1280, 800
-GAP_S = 0.5  # тишина между фразами диктора
+GAP_S = 0.9  # сцена = фраза диктора + 0,9 с (Валерий 27.11: без мёртвых пауз)
+BEAT_MAX_S = 1.2  # пауза внутри сцены — на анимацию, не на чтение: читать даёт фраза диктора
 DEMO_CHECKS = [("B418HK98", "S-0009"), ("H142OX78", "S-0113"), ("M260EH47", "S-0079")]
 
 # Текст диктора по сценам (штурман по слову Валерия, 27.11); подпись внизу экрана — тот же текст.
@@ -54,7 +55,7 @@ NARRATION: dict[str, str] = {
     "в оригинале.",
     "question": "Механик спрашивает своими словами. Ответ — коротко сверху, подробности ниже, каждая цифра сверена "
     "со страницей.",
-    "listen": "Руки заняты — ответ можно прослушать.",
+    "listen": "Ответ озвучивает сам помощник.",  # Валерий 27.11: где диктор, а где продукт
     "tools": "Инструмент и запчасти агент берёт из руководства, а не придумывает.",
     "ticket": "Заявка на дефектовку собирается из руководства и уходит в систему ТОиР только после подтверждения "
     "механика.",
@@ -80,7 +81,14 @@ OVERLAY_JS = """
     background: 'rgba(0,0,0,0.82)', color: '#fff', font: '600 24px/1.3 system-ui, sans-serif',
     padding: '12px 48px', textAlign: 'center', pointerEvents: 'none', display: 'none'});
   document.documentElement.appendChild(bar);
+  const busy = document.createElement('div');
+  Object.assign(busy.style, {position: 'fixed', top: '16px', left: '50%', transform: 'translateX(-50%)',
+    zIndex: 2147483647, background: 'rgba(0,0,0,0.82)', color: '#fff', font: '600 22px/1.3 system-ui, sans-serif',
+    padding: '10px 22px', borderRadius: '10px', pointerEvents: 'none', display: 'none'});
+  busy.textContent = 'Агент ищет в руководстве… (ожидание ускорено)';
+  document.documentElement.appendChild(busy);
   window.__dm = {
+    busy(on) { busy.style.display = on ? 'block' : 'none'; },
     sub(text) { bar.textContent = text; bar.style.display = text ? 'block' : 'none'; },
     mark(el) {
       document.querySelectorAll('[data-dm-mark]').forEach(e => { e.style.outline = e.dataset.dmOld || '';
@@ -98,6 +106,7 @@ OVERLAY_JS = """
 @dataclass
 class Take:
     t0: float
+    start: float = 0.0  # секунда записи, с которой начинается видео: парк уже на экране (без пустой загрузки)
     waits: list[tuple[float, float]] = field(default_factory=list)  # секунды записи: ожидание ответа модели
     scenes: list[tuple[float, str]] = field(default_factory=list)  # начало сцены (секунды записи) и ключ
     product: list[tuple[float, Path]] = field(default_factory=list)  # озвучка продукта: момент нажатия и файл
@@ -150,12 +159,14 @@ class Director:
             self.page.evaluate("() => window.__dm.mark(null)")
 
     def pause(self, s: float) -> None:
-        """Пауза, чтобы прочитать кадр; `pace` растягивает все паузы разом."""
-        self.page.wait_for_timeout(int(s * self.pace * 1000))
+        """Короткая пауза на анимацию (не больше BEAT_MAX_S): время на чтение кадра даёт фраза диктора (`fit`)."""
+        self.page.wait_for_timeout(int(min(s * self.pace, BEAT_MAX_S) * 1000))
 
     # ---- ожидание модели: только эти куски потом ускоряются ----
     def model_wait(self) -> None:
         start = self.take.now()
+        self.page.evaluate(OVERLAY_JS)
+        self.page.evaluate("() => window.__dm.busy(true)")
         self.page.wait_for_timeout(800)
         self.page.wait_for_function(f"() => !document.body.innerText.includes({BUSY!r})", timeout=240_000)
         self.page.wait_for_function(
@@ -165,6 +176,7 @@ class Director:
         )
         self.take.waits.append((start, self.take.now()))
         self.page.evaluate(OVERLAY_JS)
+        self.page.evaluate("() => window.__dm.busy(false)")
         self.pause(0.6)
 
     # ---- навигация ----
@@ -237,6 +249,8 @@ def shoot(d: Director) -> None:
     page = d.page
     page.goto(d.base + "/v2", wait_until="domcontentloaded", timeout=120_000)
     page.get_by_text("B418HK98").first.wait_for(timeout=120_000)  # парк на экране — сцена начинается сразу
+    page.wait_for_timeout(500)  # список дорисовался
+    d.take.start = d.take.now()  # видео — отсюда: загрузка страницы (пустой кадр) в него не входит
     page.evaluate(OVERLAY_JS)
     d.scene("park")
     d.mark(page.get_by_text("B418HK98").first)
@@ -370,22 +384,72 @@ def shoot(d: Director) -> None:
 
 
 # ---- голос диктора ----
-def narrate(out: Path, voice: str, speed: str) -> dict[str, Path]:
-    """Фразы диктора — SpeechKit (ключ из окружения, в вывод не попадает); кэш по тексту, голосу и скорости."""
-    from service.voice import SpeechKit
+TTS_V3 = "https://tts.api.cloud.yandex.net/tts/v3/utteranceSynthesis"
 
-    kit = SpeechKit.from_env()
-    kit.voice, kit.speed = voice, speed
+
+def narrate(voice: str, role: str | None, speed: float) -> dict[str, Path]:
+    """Фразы диктора — SpeechKit v3, LPCM 48 кГц → WAV (Валерий 27.11: качество — не сжатый поток). Ключ — из
+    окружения, в вывод не попадает. Кэш по тексту, голосу, роли и скорости."""
+    import base64
+    import os
+    import wave
+
+    import httpx
+
+    key = (os.environ.get("YANDEX_TTS_API_KEY") or os.environ.get("YANDEX_API_KEY") or "").strip()
+    if not key:
+        raise SystemExit("нет ключа SpeechKit (YANDEX_TTS_API_KEY) — make video с .env или --silent")
     cache = ROOT / "reports" / "video" / "voice-cache"
     cache.mkdir(parents=True, exist_ok=True)
+    http = httpx.Client(timeout=60)
+    texts = dict(NARRATION)
     files: dict[str, Path] = {}
-    for key, text in NARRATION.items():
-        name = hashlib.sha256(f"{voice}|{speed}|{text}".encode()).hexdigest()[:16]
-        path = cache / f"{key}-{name}.mp3"
+    for k, text in texts.items():
+        name = hashlib.sha256(f"v3|{voice}|{role}|{speed}|{text}".encode()).hexdigest()[:16]
+        path = cache / f"{k}-{name}.wav"
         if not path.exists():
-            path.write_bytes(kit.synthesize(text, api="v1", lang="ru"))
-        files[key] = path
+            hints: list[dict[str, Any]] = [{"voice": voice}, {"speed": speed}]
+            hints += [{"role": role}] if role else []
+            body = {"text": text, "hints": hints, "loudnessNormalizationType": "LUFS",
+                    "outputAudioSpec": {"rawAudio": {"audioEncoding": "LINEAR16_PCM",
+                                                     "sampleRateHertz": 48000}}}  # fmt: skip
+            r = http.post(TTS_V3, json=body, headers={"Authorization": f"Api-Key {key}"})
+            pcm = b""
+            for line in r.text.splitlines():
+                try:
+                    chunk = ((json.loads(line).get("result") or {}).get("audioChunk") or {}).get("data")
+                except ValueError:
+                    continue
+                if chunk:
+                    pcm += base64.b64decode(chunk)
+            if r.status_code != 200 or not pcm:
+                raise SystemExit(f"SpeechKit: HTTP {r.status_code} на фразе «{k}»")
+            with wave.open(str(path), "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(48000)
+                w.writeframes(pcm)
+        files[k] = path
     return files
+
+
+def blank_frames(video: Path, step: float = 0.5) -> list[float]:
+    """Пустые кадры (Валерий 27.11: «весь кадр белый»): кадр почти однотонный — разброс яркости меньше 12 из 255.
+    Проверяются два кадра в секунду всего ролика; возвращает их время в итоговом видео."""
+    cmd = [ffmpeg_exe(), "-i", str(video), "-vf", f"fps={1 / step},signalstats,metadata=mode=print:file=-",
+           "-an", "-f", "null", "-"]  # fmt: skip
+    out = subprocess.run(cmd, capture_output=True, text=True).stdout  # noqa: S603 — ffmpeg с нашими аргументами
+    blank, t, lo = [], 0.0, None
+    for line in out.splitlines():
+        if m := re.search(r"pts_time:([\d.]+)", line):
+            t = float(m.group(1))
+        elif m := re.search(r"signalstats\.YMIN=([\d.]+)", line):
+            lo = float(m.group(1))
+        elif (m := re.search(r"signalstats\.YMAX=([\d.]+)", line)) and lo is not None:
+            if float(m.group(1)) - lo < 12:
+                blank.append(round(t, 1))
+            lo = None
+    return blank
 
 
 # ---- монтаж: только скорость ожидания модели; звук — поверх ----
@@ -398,16 +462,19 @@ def ffmpeg_exe() -> str:
     return str(imageio_ffmpeg.get_ffmpeg_exe())
 
 
-def plan(duration: float, waits: list[tuple[float, float]]) -> tuple[float, list[tuple[float, float, float]]]:
-    """Скорость ожидания (одна на все куски, от ×4 до ×8) и куски записи (начало, конец, скорость) по порядку."""
-    waits = sorted((max(0.0, a), min(duration, b)) for a, b in waits if b > a)
+def plan(
+    duration: float, waits: list[tuple[float, float]], start: float = 0.0
+) -> tuple[float, list[tuple[float, float, float]]]:
+    """Скорость ожидания (одна на все куски, от ×8 до ×10) и куски записи (начало, конец, скорость) по порядку —
+    с секунды `start` (парк на экране) до конца, без вырезов внутри."""
+    waits = sorted((max(start, a), min(duration, b)) for a, b in waits if b > max(a, start))
     waited = sum(b - a for a, b in waits)
-    rest = duration - waited
+    rest = duration - start - waited
     speed = SPEED_MIN
     if waited and rest + waited / SPEED_MIN > LIMIT_S:
         speed = min(SPEED_MAX, waited / max(LIMIT_S - rest, 1.0))
     pieces: list[tuple[float, float, float]] = []
-    t = 0.0
+    t = start
     for a, b in waits:
         if a > t:
             pieces.append((t, a, 1.0))
@@ -448,8 +515,9 @@ def mix(video: Path, dst: Path, voice: list[tuple[float, Path]], product: list[t
         inputs += ["-i", str(path)]
         chains.append(f"[{i}:a]aresample=48000,adelay=delays={ms}:all=1,volume={gain}[a{i}]")
         labels.append(f"[a{i}]")
-    graph = ";".join(chains) + (
-        f";{''.join(labels)}amix=inputs={len(labels)}:normalize=0:dropout_transition=0,loudnorm=I=-16:TP=-1.5:LRA=11[aout]"
+    graph = ";".join(chains) + (  # лёгкая компрессия, −16 LUFS, истинный пик ≤ −1,5 dBTP — без клиппинга
+        f";{''.join(labels)}amix=inputs={len(labels)}:normalize=0:dropout_transition=0,"
+        "acompressor=threshold=-20dB:ratio=2:attack=20:release=250,loudnorm=I=-16:TP=-1.5:LRA=11[aout]"
     )
     cmd = [ffmpeg_exe(), "-y", "-loglevel", "error", "-i", str(video), *inputs, "-filter_complex", graph,
            "-map", "0:v", "-map", "[aout]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
@@ -472,8 +540,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("base", nargs="?", default="http://127.0.0.1:8010")
     ap.add_argument("--theme", choices=("dark", "light"), default="dark")
     ap.add_argument("--pace", type=float, default=1.6, help="множитель пауз на чтение кадра (1,0 — коротко)")
-    ap.add_argument("--narrator", default="alena", help="голос диктора SpeechKit (не голос продукта zahar)")
-    ap.add_argument("--narrator-speed", default="1.05")
+    ap.add_argument("--narrator", default="anton", help="голос диктора SpeechKit v3 (zahar — голос продукта)")
+    ap.add_argument("--role", default="neutral", help="роль голоса v3: neutral, good, …")
+    ap.add_argument("--narrator-speed", type=float, default=1.05)
     ap.add_argument("--silent", action="store_true", help="без звука (как первые пробы)")
     ap.add_argument("--label", default=datetime.now().strftime("%Y%m%d-%H%M"))
     args = ap.parse_args(argv)
@@ -482,7 +551,7 @@ def main(argv: list[str] | None = None) -> int:
     base = args.base.rstrip("/")
     out = ROOT / "reports" / "video" / f"{args.label}-{args.theme}"
     out.mkdir(parents=True, exist_ok=True)
-    voice_files = {} if args.silent else narrate(out, args.narrator, args.narrator_speed)
+    voice_files = {} if args.silent else narrate(args.narrator, args.role, args.narrator_speed)
     voice_len = {k: duration_of(p) for k, p in voice_files.items()}
     raw = out / "raw"
     labels = {(v, s): session_label(base, v, s) for v, s in DEMO_CHECKS}  # до записи: запрос к серверу не в кадре
@@ -513,7 +582,7 @@ def main(argv: list[str] | None = None) -> int:
     shutil.move(str(src), webm)
     shutil.rmtree(raw, ignore_errors=True)
     full = duration_of(webm) or take.now()
-    speed, pieces = plan(full, take.waits)
+    speed, pieces = plan(full, take.waits, take.start)
     silent = out / "video-silent.mp4"
     render(webm, silent, pieces)
     mp4 = out / "video.mp4"
@@ -530,7 +599,7 @@ def main(argv: list[str] | None = None) -> int:
         "",
         f"Адрес: {base} · исходник {full:.1f} с · ожидание модели {waited:.1f} с, ускорено ×{speed:.1f} · "
         f"итог **{clock(final)}**" + (" ⚠ больше 2:55" if final > LIMIT_S else ""),
-        f"Звук: диктор {args.narrator} ×{args.narrator_speed}"
+        f"Звук: диктор {args.narrator}{f' ({args.role})' if args.role else ''} ×{args.narrator_speed}, v3 WAV 48 кГц"
         + (", озвучка продукта в «Прослушать»" if product_track else "")
         if voice_track
         else "Звук: нет",
@@ -540,6 +609,8 @@ def main(argv: list[str] | None = None) -> int:
         *[f"| {clock(remap(t, pieces))} | {k} | {NARRATION.get(k, '')} |" for t, k in take.scenes],
         *[f"| {clock(remap(t, pieces))} | ▶ озвучка продукта | (голос продукта) |" for t, _ in take.product],
     ]
+    blanks = blank_frames(mp4)
+    lines += ["", f"Пустые кадры (однотонные, проверка 2 кадра/с): {', '.join(clock(t) for t in blanks) or 'нет'}"]
     if take.skipped:
         lines += ["", "Пропущено (на сервере нет): " + "; ".join(take.skipped)]
     (out / "scenes.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -548,7 +619,7 @@ def main(argv: list[str] | None = None) -> int:
                                               ensure_ascii=False, indent=1), encoding="utf-8")  # fmt: skip
     print("\n".join(lines))
     print(f"\n{mp4.relative_to(ROOT)}")
-    return 0 if final <= LIMIT_S else 2
+    return 0 if final <= LIMIT_S and not blanks else 2
 
 
 if __name__ == "__main__":
