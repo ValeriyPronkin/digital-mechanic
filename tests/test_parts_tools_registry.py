@@ -81,3 +81,47 @@ def test_non_tool_question_untouched(ml: MLClient, toir: ToirClient) -> None:
     ag, _ = make_agent([say("Зазор 0,25-0,30 мм [R1].")] * 2, ml, toir, prefetch=False)
     reply = ag.ask(ag.start("B418HK98", "S-0007"), "Какой зазор клапанов?")
     assert "по руководству):**" not in reply.text
+
+
+def test_rows_of_other_nodes_not_returned() -> None:
+    """(а), (в) приёмки #162: ключи чужих строк таблицы моментов, съёмник и щуп соседних работ — не к месту."""
+    rod = parts_tools.find("ЯМЗ-536", "Чем затянуть болты крышек шатуна?", {"tool"})
+    assert all("форсун" not in r.quote.lower() and "маховик" not in r.quote.lower() for r in rod)
+    phases = parts_tools.find("ЗМЗ-40904.10", "Чем проверить фазы газораспределения?", {"tool"})
+    assert phases and all(r.page not in (104, 116) for r in phases)
+    pulley = parts_tools.find("ЗМЗ-5234.10", "Чем снять шкив коленчатого вала?", {"tool"})
+    assert [r.code for r in pulley] == ["16-У-236817"]
+
+
+def test_key_sizes_without_duplicates() -> None:
+    """(б): «S =5» и «Sвн=5» — один ключ; «D×S = 105×128 мм» — не ключ."""
+    sizes = [r.code for r in parts_tools.records("ЯМЗ-536") if r.kind == "tool" and r.code.startswith("S")]
+    assert all(" " not in s for s in sizes)
+    page584 = [r.code for r in parts_tools.records("ЯМЗ-536") if r.page == 584 and r.code.startswith("S")]
+    assert page584.count("Sвн=5") == 1 and "S=5" not in page584
+    assert not any("DхS" in r.quote or "D×S" in r.quote for r in parts_tools.records("ЯМЗ-536"))
+
+
+def test_no_parts_from_trouble_tables_and_no_fragments() -> None:
+    """(г): таблица «неисправность — способ устранения» — не источник запчастей; без обрывков вроде «кольца
+    инжекторах», «бокового штуцера»."""
+    parts = [r for r in parts_tools.records("ЯМЗ-536") if r.kind == "part"]
+    assert not any(r.page == 192 for r in parts)
+    names = {r.name.lower() for r in parts}
+    assert not names & {"кольца инжекторах", "бокового штуцера", "инжектора", "кольца", "форсунки"}
+
+
+def test_one_time_table_and_reuse_question() -> None:
+    """Q36: «Перечень деталей разового монтажа» (ЗМЗ-409, стр. 229); «ставить повторно» — вопрос о запчастях."""
+    q = "Перебираю мотор — какие болты нельзя ставить повторно или можно ограниченно?"
+    assert parts_tools.asks(q) == {"part"}
+    found = parts_tools.find("ЗМЗ-40904.10", q, {"part"})
+    assert [(r.code, r.page) for r in found] == [("4062.1005127", 229)]
+
+
+def test_model_tool_line_always_removed(ml: MLClient, toir: ToirClient) -> None:
+    """(д): «Понадобится: …» модели не отличить от строки реестра — снимается и там, где про инструмент не спрашивали."""
+    answer = "Зазор 0,25-0,30 мм [R1].\n\nПонадобится: щуп и ключ.\n\n1. Проверить зазор [R1]."
+    ag, _ = make_agent([say(answer)] * 2, ml, toir, prefetch=False)
+    reply = ag.ask(ag.start("B418HK98", "S-0007"), "Какой зазор клапанов?")
+    assert "Понадобится" not in reply.text

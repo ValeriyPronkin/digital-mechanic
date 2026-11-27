@@ -2337,6 +2337,11 @@ class Agent:
         if not recs:
             return text, cited
         lines: list[str] = []
+        # одна деталь — одна строка: «прокладка головки цилиндров» из перечня (с обозначением) и она же из фразы
+        # «заменять новой» — строка с обозначением и пометкой «одноразовые» (P07, 27.11)
+        coded = {(r.kind, r.name.lower()) for r in recs if r.code}
+        once_names = {(r.kind, r.name.lower()) for r in recs if r.source == "одноразовая"}
+        recs = [r for r in recs if r.code or (r.kind, r.name.lower()) not in coded]
         for kind, head in (("tool", "Понадобится (по руководству)"), ("part", "Запчасти (по руководству)")):
             items = []
             for r in recs:
@@ -2345,7 +2350,7 @@ class Agent:
                 src = self._source_for(conv, r.doc, r.page, r.node, r.quote)
                 if src not in cited:
                     cited = [*cited, src]
-                once = " — одноразовые, только новые" if r.source == "одноразовая" else ""
+                once = " — одноразовые, только новые" if (r.kind, r.name.lower()) in once_names else ""
                 items.append(f"{r.label()}{once} [{src.ref}]")
             if items:
                 lines.append(f"**{head}:** " + "; ".join(items) + ".")
