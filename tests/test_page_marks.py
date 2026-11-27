@@ -34,6 +34,19 @@ def test_no_mark_when_not_unique_or_numbers_missing() -> None:
     assert find_mark(LINES, "мм") is None  # слишком коротко
 
 
+def test_short_quote_with_number_marked_only_when_unique() -> None:
+    """«15 мин» короче порога: рамка — если это ровно одна строка с тем же числом (стр. 269, 27.11)."""
+    lines = [
+        *LINES,
+        {"t": "но не ранее, чем через 15 мин", "b": [0.12, 0.30, 0.60, 0.32]},
+        {"t": "после остановки двигателя.", "b": [0.12, 0.33, 0.50, 0.35]},
+    ]
+    assert find_mark(lines, "15 мин") == (0.12, 0.30, 0.60, 0.32)
+    assert find_mark(lines, "120 -") is None  # в двух одинаковых строках — не угадываем
+    assert find_mark(lines, "20 мин") is None  # такого числа на странице нет
+    assert find_mark(lines, "двиг") is None  # короткое без числа не обводим
+
+
 class Marks(PageMarks):
     def lines(self, doc_id: str, page: int) -> list[dict[str, Any]]:
         return LINES if (doc_id, page) == ("yamz-236-rk", 270) else []
