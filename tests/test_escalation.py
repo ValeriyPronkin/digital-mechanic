@@ -15,7 +15,7 @@ from service.escalation import NO_RULE, ContradictionQueue
 from test_agent import make_agent, say
 from test_contradictions import QUESTION, RE31, RK269, RK276, Manual236, TorquePages
 
-PASSED = "Передано главному механику на решение (№ 1). Пока — безопасное правило: по выводу выше."
+PASSED = "Передано главному механику на решение (№ 1). Пока — по безопасному правилу выше."
 
 
 def _agent(ml: MLClient, toir: ToirClient, n: int = 1, search: Any = None, queue: Any = None) -> Any:
@@ -40,10 +40,11 @@ def test_contradiction_goes_to_queue_instead_of_advice(ml: MLClient, toir: ToirC
     assert [f["pdf_page"] for f in item["formulations"]] == [31, 269, 276] and item["vehicles"] == ["B418HK98"]
 
 
-def test_no_customer_rule_means_no_value_chosen(ml: MLClient, toir: ToirClient) -> None:
+def test_no_customer_rule_means_rule_from_pages(ml: MLClient, toir: ToirClient) -> None:
     ag, _ = make_agent([say("Затянуть 430-470 Н·м [R1].")], ml, toir, TorquePages())
     text = ag.ask(ag.start("B418HK98", "S-0007"), "С каким моментом тянуть болты крышек коренных подшипников?").text
-    assert f"Пока — безопасное правило: {NO_RULE}." in text and "Вывод:" not in text
+    # правило заказчика не нужно: безопасное правило выведено из страниц, эскалация — рядом с ним (ответ 27.11)
+    assert "Безопасное правило:" in text and "Пока — по безопасному правилу выше." in text and NO_RULE not in text
 
 
 def test_letter_send_resolve_and_decision_next_to_both_formulations(ml: MLClient, toir: ToirClient) -> None:
@@ -59,7 +60,7 @@ def test_letter_send_resolve_and_decision_next_to_both_formulations(ml: MLClient
                          "manufacturer", "письмо ЯМЗ № 12/345")  # fmt: skip
     assert done["status"] == "resolved"  # type: ignore[index]
     text = ag.ask(ag.start("B418HK98", "S-0007"), QUESTION).text
-    assert "Решение по противоречию (источник: завод-изготовитель, " in text and "письмо ЯМЗ № 12/345" in text
+    assert "Решение по противоречию (№ 1; источник: завод-изготовитель, " in text and "письмо ЯМЗ № 12/345" in text
     assert RE31 in text and RK269 in text and RK276 in text and "Передано главному механику" not in text  # рядом
     journal = queue.journal()
     assert [j["event"] for j in journal] == ["sent", "resolved"] and verify(journal)[0]
@@ -73,7 +74,7 @@ def test_cached_answer_shows_todays_decision(ml: MLClient, toir: ToirClient) -> 
     queue.resolve(1, "Только на холодном двигателе", "поддержка", "support")
     again = ag.ask(ag.start("B418HK98", "S-0007"), QUESTION)  # второго ответа модели нет — только кэш
     assert "Передано главному механику" in first
-    assert "Решение по противоречию (источник: поддержка, " in again.text and RK276 in again.text
+    assert "Решение по противоречию (№ 1; источник: поддержка, " in again.text and RK276 in again.text
 
 
 def test_model_noticed_contradiction_is_queued_and_its_advice_dropped(ml: MLClient, toir: ToirClient) -> None:
@@ -90,10 +91,11 @@ def test_model_noticed_contradiction_is_queued_and_its_advice_dropped(ml: MLClie
     r1 = ag._source_for(conv, "yamz-236-re", 31, "Регулировка", RE31).ref
     r2 = ag._source_for(conv, "yamz-236-rk", 269, "Регулировка", RK269).ref
     line = ag._escalate_model(conv, [(RE31, r1), (RK269, r2)])
-    assert line.startswith("Передано главному механику на решение (№ 1)") and NO_RULE in line
+    assert line == "Передано главному механику на решение (№ 1). Пока — по безопасному правилу выше."
     assert ag._escalate_model(conv, [(RK269, r2), (RE31, r1)]).startswith("Передано главному механику на решение (№ 1)")
     item = ag.escalation.items("open")[0]
-    assert item["id"].startswith("model-") and item["count"] == 2 and item["rule"] is None
+    assert item["id"].startswith("model-") and item["count"] == 2
+    assert item["safe_rule"] and "дефектовк" in item["safe_rule"]  # правило из страниц, а не «ничего не выбирать»
 
 
 def test_neutralize_drops_model_advice_lines(ml: MLClient, toir: ToirClient) -> None:
@@ -134,3 +136,13 @@ def test_queue_api(ml: MLClient, toir: ToirClient) -> None:
     assert [j["event"] for j in c.get("/api/v2/contradictions/journal").json()] == ["sent", "resolved"]
     assert c.get("/api/v2/contradictions/99").status_code == 404
     assert len(c.get("/api/v2/contradictions?status=all").json()) == 1
+
+
+def test_block_number_open_and_resolved() -> None:
+    """Номер в блоке v2 — и до решения, и после: карточка механика ссылается на тот же № на экране очереди."""
+    from service.api_v2 import escalation_view
+
+    open_line = "Передано главному механику на решение (№ 3). Пока — безопасное правило: по выводу выше."
+    done_line = "Решение по противоречию (№ 3; источник: завод-изготовитель, 27.11.2026): на холодном двигателе."
+    assert escalation_view(open_line) == {"line": open_line, "number": 3, "resolved": False}
+    assert escalation_view(done_line) == {"line": done_line, "number": 3, "resolved": True}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SpeechInfo } from '../api'
+import { copy } from '../copy'
 import { SILENT_WAV, speechRequest } from '../lib/speech'
 
 // One player for the screen: a new answer read aloud stops the one before.
@@ -30,7 +31,7 @@ export function SpeakButton({ speech }: { speech: SpeechInfo }) {
       .then(() => setState('playing'))
       .catch(() => {
         setState('idle')
-        setError('Нажмите ещё раз, чтобы прослушать.')
+        setError(copy.speech.again)
       })
   }
 
@@ -45,13 +46,13 @@ export function SpeakButton({ speech }: { speech: SpeechInfo }) {
       const res = await fetch(...speechRequest(speech))
       if (!res.ok) {
         const body = await res.json().catch(() => null)
-        throw new Error(typeof body?.detail === 'string' ? body.detail : 'Озвучка недоступна — ответ на экране.')
+        throw new Error(typeof body?.detail === 'string' ? body.detail : copy.speech.unavailable)
       }
       url.current = URL.createObjectURL(await res.blob())
       play(url.current)
     } catch (e) {
       setState('idle')
-      setError(e instanceof Error ? e.message : 'Озвучка недоступна — ответ на экране.')
+      setError(e instanceof Error ? e.message : copy.speech.unavailable)
     }
   }
 
@@ -66,10 +67,27 @@ export function SpeakButton({ speech }: { speech: SpeechInfo }) {
         type="button"
         onClick={state === 'playing' ? stop : () => void start()}
         disabled={state === 'loading'}
-        aria-label={state === 'playing' ? 'Остановить озвучку' : 'Прослушать короткий ответ'}
-        className="min-h-12 rounded-lg border border-line px-3 text-[13px] text-text disabled:opacity-50"
+        aria-label={state === 'playing' ? copy.speech.stopLabel : copy.speech.playLabel}
+        className="inline-flex min-h-12 items-center gap-2 rounded-lg border border-line px-3 text-[13px] text-text disabled:opacity-50"
       >
-        {state === 'playing' ? '■ Стоп' : state === 'loading' ? 'Готовлю звук…' : '▶ Прослушать'}
+        {/* drawn, not typed: iOS shows ▶ and ■ as colour emoji */}
+        {state === 'playing' ? (
+          <>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden>
+              <rect x="2" y="2" width="8" height="8" rx="1" />
+            </svg>
+            {copy.speech.stop}
+          </>
+        ) : state === 'loading' ? (
+          copy.speech.loading
+        ) : (
+          <>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden>
+              <path d="M3 1.8v8.4a.5.5 0 0 0 .76.43l6.9-4.2a.5.5 0 0 0 0-.86l-6.9-4.2A.5.5 0 0 0 3 1.8z" />
+            </svg>
+            {copy.speech.play}
+          </>
+        )}
       </button>
       {error && <span className="text-[13px] text-warn">{error}</span>}
     </div>

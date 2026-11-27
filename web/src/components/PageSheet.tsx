@@ -2,19 +2,21 @@ import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type Tou
 import { ApiError, getPage, type PageMark, type PageView, type SourceItem } from '../api'
 import { copy } from '../copy'
 import { sourceLabel } from '../lib/format'
+import { MAX_ZOOM, nextScale, openingScale, wholeScale } from '../lib/pageZoom'
 import { Sheet } from './Sheet'
 
 /** `view` null: the page could not be opened, and `why` says so in the server's words when it gave any. */
 type Loaded = { page: number; view: PageView | null; why?: string }
 
 const LINE_PX = 18 // the marked line on screen: text of about 16 px
-const TAP_ZOOM = 2.2 // a tap on a page that has no marked line
-const MAX_ZOOM = 4
+/** From 900 px the sheet is a panel beside the thread (index.css), and the page is sized for it. */
+const widePanel = () => window.matchMedia('(min-width: 900px)').matches
 const MARGIN = 24 // kept around the marked line when it is longer than the screen
+const IMAGE_WAIT_MS = 8_000 // a page image not in by then: its text is shown until the image comes
 
 /** A point of the page (fractions of its sides) and where in the scrolled area it goes (px from its corner). */
 type Anchor = { fx: number; fy: number; vx: number; vy: number }
-/** How the page is shown: its width in widths of the sheet, and what to bring into view. */
+/** How the page is shown: its width in widths of the sheet (lib/pageZoom.ts), and what to bring into view. */
 type Zoom = { scale: number; to: 'mark' | 'start' | Anchor }
 
 /** The sheet's own scrolling area: the page scrolls inside it in both directions. */
@@ -59,6 +61,9 @@ export function PageSheet({
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [zoom, setZoom] = useState<Zoom | null>(null) // null until the image of this page has loaded
   const canvas = useRef<HTMLButtonElement>(null)
+  const picture = useRef<HTMLImageElement>(null)
+  const [broken, setBroken] = useState<string | null>(null) // the image that did not load: its text instead
+  const [slow, setSlow] = useState<string | null>(null) // the image still not in after IMAGE_WAIT_MS
   const strip = useRef<HTMLDivElement>(null)
   const pinch = useRef<{ spread: number; scale: number; fx: number; fy: number } | null>(null)
   const pinchedAt = useRef(0)
@@ -124,16 +129,24 @@ export function PageSheet({
     }
   }
 
-  /** A tap: the whole page, or back to reading size at the point tapped. */
+  /** A tap or a click: the whole page, or enlarged at the point (lib/pageZoom.ts). */
   const toggle = (e: MouseEvent<HTMLButtonElement>) => {
     const img = e.currentTarget.querySelector('img')
     const scroller = scrollerOf(e.currentTarget)
     if (!zoom || !img || !scroller || Date.now() - pinchedAt.current < 400) return
-    const reading = lineScale(img, scroller.clientWidth) ?? TAP_ZOOM
+    const wide = widePanel()
+    const covered = strip.current?.offsetHeight ?? 0 // the strip stays over the top of the page
+    const whole = wholeScale(
+      wide,
+      scroller.clientWidth,
+      scroller.clientHeight - covered,
+      img.naturalHeight / img.naturalWidth,
+    )
+    const scale = nextScale(wide, zoom.scale, lineScale(img, scroller.clientWidth), whole)
     const byKeyboard = e.detail === 0 // no point was tapped
     const at = byKeyboard ? null : anchorAt(e.clientX, e.clientY)
-    if (zoom.scale > 1) setZoom({ scale: 1, to: at ?? 'start' })
-    else setZoom({ scale: reading, to: at ?? (mark ? 'mark' : 'start') })
+    if (zoom.scale > 1) setZoom({ scale, to: at ?? 'start' })
+    else setZoom({ scale, to: at ?? (mark ? 'mark' : 'start') })
   }
 
   const pinchStart = (e: TouchEvent) => {
@@ -162,6 +175,32 @@ export function PageSheet({
     pinch.current = null
   }
 
+  /** The image is in: the opening enlargement, and the page becomes visible. */
+  const placed = (img: HTMLImageElement) => {
+    const scroller = scrollerOf(img)
+    const reading = scroller && lineScale(img, scroller.clientWidth)
+    setZoom({ scale: openingScale(widePanel(), reading), to: reading ? 'mark' : 'start' })
+  }
+
+  // The page must not stay invisible when the load event is missed (an image from the cache can be in
+  // before the handler on iPhone) or is late (a stand waking up): a loaded image is placed at once, and
+  // while one is not in after a while its text is shown; the image replaces the text when it comes.
+  const image = view?.image ?? null
+  useEffect(() => {
+    if (!image || zoom) return
+    const img = picture.current
+    if (img?.complete && img.naturalWidth > 0) {
+      placed(img)
+      return
+    }
+    const late = setTimeout(() => {
+      const now = picture.current
+      if (now?.complete && now.naturalWidth > 0) placed(now)
+      else setSlow(image)
+    }, IMAGE_WAIT_MS)
+    return () => clearTimeout(late)
+  }, [image, zoom]) // placed reads the current mark: it is not a dependency
+
   const turn = (to: number) => {
     setZoom(null)
     setPage(to)
@@ -170,6 +209,7 @@ export function PageSheet({
   return (
     <Sheet
       open
+      tall
       onClose={onClose}
       title={sourceLabel({ short: source.short, pdf_page: page })}
       subtitle={view ? `${copy.page.of} ${view.pages}` : undefined}
@@ -179,7 +219,7 @@ export function PageSheet({
             type="button"
             disabled={page <= 1}
             onClick={() => turn(page - 1)}
-            className="min-h-12 flex-1 rounded-lg border border-line disabled:opacity-40"
+            className="min-h-12 flex-1 rounded-lg border border-line enabled:hover:bg-surface-2 disabled:opacity-40"
           >
             {copy.page.previous}
           </button>
@@ -187,7 +227,7 @@ export function PageSheet({
             type="button"
             disabled={!view || page >= view.pages}
             onClick={() => turn(page + 1)}
-            className="min-h-12 flex-1 rounded-lg border border-line disabled:opacity-40"
+            className="min-h-12 flex-1 rounded-lg border border-line enabled:hover:bg-surface-2 disabled:opacity-40"
           >
             {copy.page.next}
           </button>
@@ -207,8 +247,14 @@ export function PageSheet({
       )}
       {!current && <p className="p-4 text-dim">{copy.page.loading}</p>}
       {current && !view && <p className="p-4 text-dim">{current.why ?? copy.page.failed}</p>}
+      {view?.image && !zoom && broken !== view.image && slow !== view.image && (
+        <p className="p-4 text-dim">{copy.page.loading}</p>
+      )}
+      {view?.image && !zoom && broken !== view.image && slow === view.image && (
+        <PageText note={copy.page.imageSlow} text={view.text} />
+      )}
       {view &&
-        (view.image ? (
+        (view.image && broken !== view.image ? (
           <button
             ref={canvas}
             type="button"
@@ -219,18 +265,15 @@ export function PageSheet({
             onTouchCancel={pinchEnd}
             aria-label={zoom && zoom.scale > 1 ? copy.page.zoomOut : copy.page.zoomIn}
             style={{ width: `${(zoom?.scale ?? 1) * 100}%` }}
-            className={`relative block touch-pan-x touch-pan-y bg-white ${zoom ? '' : 'invisible'} ${zoom && zoom.scale > 1 ? 'cursor-zoom-out' : 'cursor-zoom-in'}`}
+            className={`relative mx-auto block touch-pan-x touch-pan-y bg-white ${zoom ? '' : 'invisible'} ${zoom && zoom.scale > 1 ? 'cursor-zoom-out' : 'cursor-zoom-in'}`}
           >
             <img
+              ref={picture}
               key={view.image}
               src={view.image}
               alt={sourceLabel({ short: view.short, pdf_page: view.page })}
-              onLoad={(e) => {
-                const scroller = scrollerOf(e.currentTarget)
-                const reading = scroller && lineScale(e.currentTarget, scroller.clientWidth)
-                setZoom(reading ? { scale: reading, to: 'mark' } : { scale: 1, to: 'start' })
-              }}
-              onError={() => setZoom({ scale: 1, to: 'start' })}
+              onLoad={(e) => placed(e.currentTarget)}
+              onError={() => setBroken(view.image)}
               className="block w-full"
             />
             {mark && (
@@ -247,13 +290,18 @@ export function PageSheet({
             )}
           </button>
         ) : (
-          <div className="p-4">
-            <p className="mb-3 text-[13px] text-mute">{copy.page.textOnly}</p>
-            <pre className="overflow-x-auto font-mono text-[12px] leading-[1.5] whitespace-pre text-text">
-              {view.text}
-            </pre>
-          </div>
+          <PageText note={view.image ? copy.page.imageFailed : copy.page.textOnly} text={view.text} />
         ))}
     </Sheet>
+  )
+}
+
+/** The page's own text, when there is no image of it to show (yet). */
+function PageText({ note, text }: { note: string; text: string }) {
+  return (
+    <div className="p-4">
+      <p className="mb-3 text-[13px] text-mute">{note}</p>
+      <pre className="overflow-x-auto font-mono text-[12px] leading-[1.5] whitespace-pre text-text">{text}</pre>
+    </div>
   )
 }

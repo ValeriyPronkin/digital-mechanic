@@ -30,7 +30,7 @@ BANNER_EARLY_RECHECK = "Норма, но повторите проверку р�
 
 Urgency = Literal["low", "medium", "high"]
 URGENCY_RU = {"high": "высокая", "medium": "средняя", "low": "низкая"}
-BANNER_CONFIRM = "Подтвердите повторной записью. Срочность остаётся высокой: класс опасности 3."
+BANNER_CONFIRM = "Подтвердите повторной записью. Приоритет остаётся высоким: неисправность опасна для двигателя."
 _DANGER = json.loads((Path(__file__).resolve().parents[2] / "data" / "danger_classes.json").read_text(encoding="utf-8"))
 SCORE_HIGH = float(_DANGER["score_high"])
 CONFIDENCE_LOW = float(_DANGER["confidence_low"])
@@ -58,24 +58,52 @@ def _num(x: float) -> str:
     return f"{x:.2f}".replace(".", ",")
 
 
-def urgency_for(diag: Diagnosis) -> tuple[Urgency, str]:
-    """Срочность — правило в коде, с основанием: «<неисправность> — класс N из 3 → <приоритет>; оценка X — порог Y».
-    Одно и то же для карточки, заявки и сводки парка (issue #40 п. 1)."""
+def risk_line(code: str) -> str:
+    """Чем грозит неисправность — по классу опасности (data/danger_classes.json). Это оценка инженера, а не текст
+    руководства, поэтому так и подписано; запрета эксплуатации здесь нет."""
+    basis = _DANGER["classes"].get(code, {}).get("basis")
+    return f"Чем грозит (оценка инженера, не из руководства): {basis}" if basis else ""
+
+
+def preliminary(diag: Diagnosis) -> bool:
+    """Вывод предварительный: уверенность модели ниже порога или запись с помехами."""
+    return (diag.confidence or 0) < CONFIDENCE_LOW or diag.signal_quality == "warning"
+
+
+_STEPS: tuple[Urgency, ...] = ("low", "medium", "high")
+_BASE: dict[int, Urgency] = {1: "low", 2: "medium", 3: "high"}
+
+
+def _urgency_rule(diag: Diagnosis) -> tuple[Urgency, str]:
+    """Срочность — правило в коде, с основанием простыми словами (подписано инженером, наше решение №86):
+    базовый уровень по классу опасности; высокая оценка поднимает не больше чем на ступень, класс 1 («двигателю
+    не грозит») — не выше среднего; предварительный вывод не поднимает и опускает на ступень, кроме класса 3.
+    Одно и то же для карточки, заявки и сводки парка. Название неисправности здесь не повторяется."""
     code = diag.anomaly_type or ""
     cls = danger_class(code) or 2
-    head = f"{_titles().get(code, code or 'отклонение')} — класс {cls} из 3"
     score = diag.anomaly_score or 0
     if cls == 3:
-        return "high", f"{head} → высокая: {CRITICAL_CODES[code]}"
+        return "high", f"Опасная неисправность: {CRITICAL_CODES[code]}"
+    base = _STEPS.index(_BASE[cls])
+    if preliminary(diag):
+        pct, low = round((diag.confidence or 0) * 100), round(CONFIDENCE_LOW * 100)
+        noisy = diag.signal_quality == "warning"
+        why = "Запись с помехами" if noisy else f"Уверенность модели {pct}\u00a0%, порог {low}\u00a0%"
+        return _STEPS[max(base - 1, 0)], f"{why}: сначала повторить запись или провести дефектовку"
     if score >= SCORE_HIGH:
-        return "high", f"{head}; оценка {_num(score)} — не ниже порога {_num(SCORE_HIGH)} → высокая"
-    if (diag.confidence or 0) < CONFIDENCE_LOW or diag.signal_quality == "warning":
-        pct = round((diag.confidence or 0) * 100)
-        why = "запись с помехами" if diag.signal_quality == "warning" else f"уверенность {pct}%"
-        return "low", f"{head}; {why} — сначала уточнить дефектовкой или повторной записью → низкая"
-    if cls == 1:
-        return "low", f"{head}; оценка {_num(score)} — ниже порога {_num(SCORE_HIGH)} → низкая: плановая дефектовка"
-    return "medium", f"{head}; оценка {_num(score)} — ниже порога {_num(SCORE_HIGH)} → средняя"
+        top = 1 if cls == 1 else 2
+        level = _STEPS[min(base + 1, top)]
+        cap = ", для этого класса не выше среднего" if cls == 1 else ""
+        return level, f"Оценка отклонения {_num(score)}, порог {_num(SCORE_HIGH)}: на ступень выше{cap}"
+    return _STEPS[base], f"Оценка отклонения {_num(score)} ниже порога {_num(SCORE_HIGH)}"
+
+
+def urgency_for(diag: Diagnosis) -> tuple[Urgency, str]:
+    """Приоритет и его основание; кроме класса 3 (там угроза уже в основании) — ещё и чем грозит неисправность."""
+    urgency, reason = _urgency_rule(diag)
+    code = diag.anomaly_type or ""
+    risk = risk_line(code) if danger_class(code) != 3 else ""
+    return urgency, f"{reason}. {risk}" if risk else reason
 
 
 def trend_for(history: list[Any], session_id: str) -> str | None:
@@ -100,14 +128,17 @@ def trend_for(history: list[Any], session_id: str) -> str | None:
             break
     if len(run) < 3:
         return None
-    seq = " → ".join(_num(x) for x in run)
-    return f"Оценка отклонения растёт {len(run) - 1}-ю проверку подряд: {seq}."
+    seq = ", ".join(_num(x) for x in run)
+    times = {2: "вторую", 3: "третью", 4: "четвёртую"}.get(len(run) - 1, f"{len(run) - 1}-ю")
+    return f"Оценка отклонения растёт {times} проверку подряд: {seq}."
 
 
 URGENCY_ACTION = {
-    "high": "Срочно: до дефектовки машину не эксплуатировать. Оформите заявку.",
-    "medium": "Нужна дефектовка в ближайшее время — оформите заявку.",
-    "low": "Уточните дефектовкой или повторите запись: уверенность снижена. Заявку можно оформить.",
+    # Значения приоритетов — ответ организаторов 26.11. Запрет эксплуатации здесь не пишется: он бывает только
+    # словами руководства на этот двигатель и со страницей.
+    "high": "Поставить на дефектовку до выпуска в рейс. Оформите заявку.",
+    "medium": "Дефектовка на ближайшем ТО, до него машина работает под наблюдением. Оформите заявку.",
+    "low": "Машина работает, узел проверить на следующей проверке. Заявку можно оформить.",
 }
 
 
@@ -173,6 +204,16 @@ def find_injection(description: str) -> str | None:
         if _INJECTION.search(part):
             return " ".join(parts[i:])
     return None
+
+
+def heard_text(description: str) -> str:
+    """Описание сервиса без постороннего текста (`find_injection`): это механику показывают как «сообщение
+    сервиса» и это получает модель. Посторонний текст — только отдельной пометкой на экране."""
+    parts = [p for p in re.split(r"(?<=[.!?;])\s+", (description or "").strip()) if p]
+    for i, part in enumerate(parts):
+        if _INJECTION.search(part):
+            return " ".join(parts[:i])
+    return (description or "").strip()
 
 
 def build_card(
@@ -255,7 +296,9 @@ def _build_card(diag: Diagnosis, fault_titles: dict[str, str], engine: str | Non
     return VerdictCard(
         status="anomaly",
         color="red",
-        title=f"Неисправность: {title}" if known else "Неисправность неизвестного типа",
+        title=f"{'Предварительно' if preliminary(diag) else 'Вероятно'}: {title[:1].lower()}{title[1:]}"
+        if known and title
+        else "Неисправность неизвестного типа",
         action=URGENCY_ACTION[urgency]
         if urgency
         else "Тип неисправности не распознан. Повторите проверку; заявку по такому результату не оформляем.",

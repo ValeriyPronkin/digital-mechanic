@@ -1,4 +1,4 @@
-"""HTTP-сервис: страница механика (/), /health и API парка и диагностики."""
+"""HTTP-сервис: интерфейс механика (/ → /v2, прежняя страница — /v1), /health и API парка и диагностики."""
 
 from __future__ import annotations
 
@@ -6,8 +6,9 @@ import asyncio
 import logging
 import os
 import re
+import threading
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -15,7 +16,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from service import (
@@ -44,6 +45,9 @@ from service.pages import PageImages
 from service.rate_limit import RateLimiter, client_key
 from service.spend import BucketObject, RefreshingIamAuth, SharedLedger
 from service.store import Store
+from service.ticket_book import KEY as TICKET_BOOK_KEY
+from service.ticket_book import SharedTickets
+from service.ticket_once import TicketMarks
 from service.verdict_policy import VerdictCard, build_card
 from service.voice import (
     DEFAULT_VOICE,
@@ -167,11 +171,77 @@ def ml_client() -> MLClient:
 
 @lru_cache(maxsize=1)
 def store() -> Store:
-    return Store()
+    return Store(shared=shared_tickets())
+
+
+def shared_tickets() -> SharedTickets | None:
+    """Стенд (задан S3_BUCKET): отправленные заявки и их исходы — в бакете, общие для всех экземпляров (аудит 27.11,
+    A2). Локально — SQLite экземпляра."""
+    if not os.environ.get("S3_BUCKET", "").strip() or os.environ.get("TICKET_BOOK", "bucket") != "bucket":
+        return None
+    http = httpx.Client()
+    endpoint = os.environ.get("S3_ENDPOINT", kb_store.DEFAULT_ENDPOINT)
+    bucket = kb_store.Bucket(os.environ["S3_BUCKET"].strip(), RefreshingIamAuth(http), http, endpoint)
+    return SharedTickets(BucketObject(bucket, TICKET_BOOK_KEY))
+
+
+class IndexRetry:
+    """Индекс руководств не скачался при старте (сбой бакета, сети) — докачать при следующих вопросах, а не жить
+    до перезапуска с пустым поиском (ревью 27.11). Не чаще раза в `every_s` и не больше `max_tries` раз."""
+
+    def __init__(
+        self,
+        fetch: Callable[[], bool],
+        present: Callable[[], bool],
+        clock: Callable[[], float] = time.monotonic,
+        every_s: float = 30.0,
+        max_tries: int = 5,
+    ) -> None:
+        self.fetch, self.present, self.clock = fetch, present, clock
+        self.every_s, self.max_tries = every_s, max_tries
+        self.tries, self.last = 0, float("-inf")
+        self._lock = threading.Lock()
+
+    def __call__(self) -> bool:
+        """True — индекс на диске (уже был или только что скачан)."""
+        if self.present():
+            return True
+        with self._lock:
+            if self.present():
+                return True
+            if self.tries >= self.max_tries or self.clock() - self.last < self.every_s:
+                return False
+            self.tries += 1
+            self.last = self.clock()
+            return bool(self.fetch()) and self.present()
+
+
+def _index_present() -> bool:
+    from service.manuals.index import index_dir
+
+    return (index_dir() / "fragments.jsonl").is_file()
+
+
+_INDEX_RETRY = IndexRetry(lambda: kb_store.ensure_index_from_env() is not None, _index_present)
+
+
+def index_retry() -> bool:
+    """Стенд (S3_BUCKET): индекс есть или докачан сейчас. Локально — ничего не качаем."""
+    if not os.environ.get("S3_BUCKET", "").strip():
+        return False
+    return _INDEX_RETRY()
+
+
+def agent() -> Agent:
+    """Агент экземпляра. Поиск без индекса (загрузка при старте не удалась) — докачка индекса и новый поиск."""
+    ag = _agent()
+    if not getattr(ag.searcher, "available", True) and index_retry():
+        ag.searcher = default_searcher()
+    return ag
 
 
 @lru_cache(maxsize=1)
-def agent() -> Agent:
+def _agent() -> Agent:
     return Agent(
         provider=provider_from_env(),
         ml=ml_client(),
@@ -182,8 +252,20 @@ def agent() -> Agent:
         budget_day_rub=float(os.environ.get("LLM_BUDGET_DAY_RUB", "100")),
         budget_total_rub=float(os.environ.get("LLM_BUDGET_TOTAL_RUB", "1000")),
         ledger=shared_ledger(),
+        ticket_marks=ticket_marks(),
         escalation=ContradictionQueue.from_env(),  # очередь противоречий главного механика (бакет на стенде)
     )
+
+
+def ticket_marks() -> TicketMarks | None:
+    """Стенд (задан S3_BUCKET): отметки отправленных заявок в бакете — одна заявка на подтверждение для всех
+    экземпляров (ревью 27.11). Локально — проверка по SQLite экземпляра."""
+    if not os.environ.get("S3_BUCKET", "").strip() or os.environ.get("TICKET_MARKS", "bucket") != "bucket":
+        return None
+    http = httpx.Client()
+    endpoint = os.environ.get("S3_ENDPOINT", kb_store.DEFAULT_ENDPOINT)
+    bucket = kb_store.Bucket(os.environ["S3_BUCKET"].strip(), RefreshingIamAuth(http), http, endpoint)
+    return TicketMarks(lambda key: BucketObject(bucket, key))
 
 
 def shared_ledger() -> SharedLedger | None:
@@ -224,9 +306,19 @@ def _rate_limit(request: Request) -> None:
 app.include_router(build_fleet_router(lambda: store()))  # /fleet — главный механик (#21)
 
 
-@app.get("/health")
-def health() -> dict[str, Any]:
-    """Сервис жив. Ключи не раскрываются — только факт их наличия."""
+@app.get("/health", response_model=None)
+def health() -> dict[str, Any] | JSONResponse:
+    """Сервис жив. Ключи не раскрываются — только факт их наличия. Стенд (S3_BUCKET) без индекса руководств —
+    503 с причиной: ответы по руководствам невозможны, это видят платформа и `make demo-check` (ревью 27.11)."""
+    body = health_body()
+    if os.environ.get("S3_BUCKET", "").strip() and not body["manuals_index"]["present"]:
+        why = kb_store.LAST_ERROR.get("error") or "загрузка не начиналась или идёт"
+        body.update(status="no_index", reason=f"Индекс руководств из бакета не скачан: {why}")
+        return JSONResponse(body, status_code=503)
+    return body
+
+
+def health_body() -> dict[str, Any]:
     return {
         "status": "ok",
         "version": __version__,
@@ -299,8 +391,18 @@ def manuals_index_status() -> dict[str, Any]:
     }
 
 
-@app.get("/", response_class=HTMLResponse)
-def index() -> str:
+@app.get("/", include_in_schema=False, response_model=None)
+def index(request: Request) -> Response:
+    """Адрес стенда открывает интерфейс v2. Без сборки (`make run` без `make web`) — прежняя страница, как /v1."""
+    if _v2_file("") is not None:
+        query = f"?{request.url.query}" if request.url.query else ""
+        return RedirectResponse(f"/v2/{query}", status_code=307)
+    return HTMLResponse(INDEX_HTML.read_text(encoding="utf-8"))
+
+
+@app.get("/v1", response_class=HTMLResponse)
+def index_v1() -> str:
+    """Прежняя страница механика (список машин → карточка → чат); ссылка «Парк →» ведёт на /fleet."""
     return INDEX_HTML.read_text(encoding="utf-8")
 
 

@@ -74,7 +74,7 @@ def test_agent_refusal_names_node_and_nearest_page(ml: MLClient, toir: ToirClien
     ag, _ = make_agent([say("В руководстве на этот двигатель этого нет. Обратитесь к специалисту.")], ml, toir)
     reply = ag.ask(ag.start(*ANOMALY), "Что делать, почему давление падает?")
     assert "специалист" not in reply.text
-    assert "Что сделать: дефектовка узла по неисправности" in reply.text and "(F02)" in reply.text
+    assert "Что сделать: дефектовка узла по неисправности" in reply.text and "F02" not in reply.text  # без кода
     near = reply.sources[-1]  # ближайшая страница этого двигателя из поиска — в источниках ответа
     assert f"Ближе всего в руководстве на ЯМЗ-236М2: «{near['section']}», стр. {near['pdf_page']}" in reply.text
 
@@ -118,3 +118,16 @@ def test_no_label_for_other_language_and_abbreviation_kept() -> None:
     assert out.endswith("1. Қадам [R1].\n\n«в руководстве не нашёл» — дефектовка.")
     out, _ = unnumber_gaps("Ответ [R1].\n\n1. ТНВД — уточните у производителя.")
     assert out.endswith("Что сделать: ТНВД — уточните у производителя.")
+
+
+# ---------- граница фразы (#90): только перед заглавной, не после сокращений ----------
+
+
+def test_sentence_split_keeps_abbreviations_and_lowercase() -> None:
+    from service.sentences import SPLIT
+
+    assert SPLIT.split("Гильза св. 130,02 до 130,04 мм [R1]. Поэтому группа Б.") == [
+        "Гильза св. 130,02 до 130,04 мм [R1].",
+        "Поэтому группа Б.",
+    ]
+    assert len(SPLIT.split("По рис. 6 [R1] снять гайки поз. 3. затем крышку.")) == 1  # строчная — не новая фраза

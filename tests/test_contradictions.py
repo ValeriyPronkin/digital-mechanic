@@ -1,5 +1,5 @@
 """Противоречивые инструкции (требование заказчика, 26.11): обе формулировки дословно со страницами, отметка
-противоречия, совет уточнить у производителя двигателя; известный кейс ЯМЗ-236 — вывод «регулировать на холодном»."""
+противоречия, безопасное правило из страниц; известный кейс ЯМЗ-236 — вывод «регулировать на холодном»."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from service.clients import MLClient, ToirClient
-from service.contradictions import ESCALATION, HEADER, check_model_blocks, known, verified_quotes
+from service.contradictions import ESCALATION, HEADER, RULE, check_model_blocks, known, verified_quotes
 from service.manual_search import ManualHit
 from test_agent import make_agent, say
 
@@ -48,7 +48,7 @@ def _ask(ml: MLClient, toir: ToirClient, answer: str, question: str = QUESTION, 
 def test_known_case_shows_all_quotes_marks_and_concludes_cold(ml: MLClient, toir: ToirClient) -> None:
     reply, _ = _ask(ml, toir, "Можно в течение 15 минут после остановки [R1].")
     text = reply.text
-    assert HEADER in text and ADVICE in text
+    assert HEADER in text and "уточните" not in text
     for quote in (RE31, RK269, RK276):
         assert quote in text  # каждая формулировка — дословно
     assert "стр. 31" in text and "стр. 269" in text and "стр. 276" in text
@@ -93,7 +93,8 @@ def test_safe_line_once_outside_list(ml: MLClient, toir: ToirClient) -> None:
 
 def test_model_own_conclusion_dropped_one_conclusion_left(ml: MLClient, toir: ToirClient) -> None:
     reply, _ = _ask(ml, toir, "Нет, дайте остыть.\n\nВывод: можно через 15 минут.\n\n1. Снять крышки [R1].")
-    assert reply.text.count("Вывод:") == 1 and "можно через 15 минут" not in reply.text
+    assert "Вывод:" not in reply.text and reply.text.count("Безопасное правило:") == 1
+    assert "можно через 15 минут" not in reply.text
     assert "\n\n\n" not in reply.text
 
 
@@ -116,8 +117,9 @@ def test_without_page_text_no_contradiction_claimed(ml: MLClient, toir: ToirClie
 def test_model_block_kept_only_with_two_verified_quotes() -> None:
     sources = {"R1": PAGES[("yamz-236-re", 31)], "R2": PAGES[("yamz-236-rk", 269)]}
     good = f"Ответ.\n\nПротиворечие в документации:\n- «{RE31}» [R1]\n- «{RK269}» [R2]"
-    text, notes = check_model_blocks(good, sources.get, lambda found: f"{ADVICE}9). Пока — …")
-    assert RE31 in text and RK269 in text and ADVICE in text and not notes and ESCALATION.search(text)
+    line = f"{ADVICE}9). Пока — по безопасному правилу выше."
+    text, notes = check_model_blocks(good, sources.get, lambda found: line)
+    assert RE31 in text and RK269 in text and RULE in text and ADVICE in text and not notes and ESCALATION.search(text)
     fake = f"Ответ.\n\nПротиворечие в документации:\n- «{RE31}» [R1]\n- «Регулировать на горячем двигателе сразу.» [R2]"
     text, notes = check_model_blocks(fake, sources.get)
     assert "Противоречие" not in text and "горячем" not in text and notes  # вторая цитата не со страницы — убрано
@@ -148,7 +150,7 @@ def test_value_in_same_line_as_timing_claim_survives(ml: MLClient, toir: ToirCli
 TORQUE_PAGES = {
     ("yamz-236-rk", 41): "затяжку болтов крепления крышек производить с моментом 421-461 Н*м (43-47 кгс*м)",
     ("yamz-236-rk", 56): "должны быть затянуты моментом силы от 421 до 461 Н·м ( от 43 до 47 кгс·м)",
-    ("yamz-236-rk", 248): "- затянуть болты крепления крышек коренных подшипников не менее,\n"
+    ("yamz-236-rk", 248): "болты крепления крышек коренных подшипников не менее,\n"
     "чем в три приема, моментом силы от 421 до 461 Нм (от 42 до 46 кгс·м);",
     ("yamz-236-rk", 286): "Болты крепления крышек коренных\nподшипников:\n вертикальные 430-470 (43-47)",
     ("yamz-536-re", 274): "Болты крепления скоб форсунок в\nголовке цилиндров\nПредварительный момент\nзатяжки: 16±1 "
@@ -172,7 +174,7 @@ def test_main_bearing_torque_both_values_no_pick(ml: MLClient, toir: ToirClient)
     ag, _ = make_agent([say("Затянуть 430-470 Н·м [R1].\n\n1. В три приёма.")], ml, toir, TorquePages())
     question = "С каким моментом тянуть болты крышек коренных подшипников?"
     text = ag.ask(ag.start("B418HK98", "S-0007"), question).text
-    assert HEADER in text and ADVICE in text and "Вывод:" not in text  # правила заказчика нет — не выбираем
+    assert HEADER in text and RULE in text and "Вывод:" not in text  # правила заказчика нет — правило из страниц
     assert "421-461" in text and "430-470 (43-47)" in text
     for page in (41, 56, 248, 286):
         assert f"стр. {page}" in text
@@ -192,3 +194,30 @@ def test_safe_line_once_for_bullets(ml: MLClient, toir: ToirClient) -> None:
                        ml, toir, TorquePages())  # fmt: skip
     text = ag.ask(ag.start("M260EH47", "S-0079"), "Какой момент затяжки болтов скоб форсунок?").text
     assert text.count("указан по-разному") == 1 and not text.startswith("\n")
+
+
+def test_model_block_under_known_conflict_is_not_withdrawn(ml: MLClient, toir: ToirClient) -> None:
+    """golden torque-236 (eval 27.11): свои цитаты модели в блоке «Противоречие в документации» с чужими ссылками
+    снимались — а блок всё равно заменяет блок кода. Теперь блок модели убирается до проверки: снятых нет."""
+    answer = (
+        "Затянуть по разделу сборки [R1].\n\nПротиворечие в документации:\n"
+        "- «вертикальные 430-470 (43-47)» [R1]\n- «от 421 до 461 Н·м» [R1]"
+    )
+    ag, _ = make_agent([say(answer)], ml, toir, TorquePages())
+    reply = ag.ask(ag.start("B418HK98", "S-0007"), "С каким моментом тянуть болты крышек коренных подшипников?")
+    assert HEADER in reply.text and "Утверждение снято" not in reply.text and reply.withdrawn == []
+
+
+def test_disputed_timing_outside_the_topic_gets_the_rule_without_block(ml: MLClient, toir: ToirClient) -> None:
+    """B418HK98 (видео), текст к черновику заявки: «регулировка — на холодном или не позднее 15 минут после остановки»
+    по одной странице. Блок противоречия только под вопросом о зазорах, а здесь — правило вместо одной формулировки."""
+    answer = (
+        "Черновик готов: дефектовка клапанного механизма.\n\n"
+        "1. Регулировка — на холодном двигателе или не позднее 15 минут после остановки [R1]."
+    )
+    from test_agent import call
+
+    ag, _ = make_agent([call("search_manual", query="регулировка зазоров"), say(answer)], ml, toir, Manual236())
+    reply = ag.ask(ag.start("B418HK98", "S-0007"), "Создай заявку на дефектовку.")
+    assert "не позднее 15 минут" not in reply.text and HEADER not in reply.text
+    assert "1. Безопасное правило: Регулировать зазоры на холодном двигателе" in reply.text

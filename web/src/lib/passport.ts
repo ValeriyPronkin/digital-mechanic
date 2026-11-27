@@ -1,5 +1,5 @@
 import type { Passport } from '../api.ts'
-import { num } from './format.ts'
+import { num, plural } from './format.ts'
 
 const NBSP = ' '
 const rub = (x: number) => `${num(x, x > 0 && x < 0.01 ? 4 : 2)}${NBSP}₽`
@@ -11,7 +11,7 @@ export function passportRows(p: Passport) {
   const fragments = p.searches.flatMap((s) =>
     s.fragments.map((f) => ({
       label: `${f.manual}, стр.${NBSP}${f.pdf_page}`,
-      tokens: `≈${f.tokens}${NBSP}ток.`,
+      tokens: `≈${f.tokens}${NBSP}${plural(f.tokens, ['токен', 'токена', 'токенов'])}`,
       used: f.used,
     })),
   )
@@ -30,12 +30,11 @@ export function passportRows(p: Passport) {
     [
       'Лишний контекст',
       t.fragments_tokens
-        ? `${Math.round(t.unused_share * 100)}% — ${t.unused_tokens} из ${t.fragments_tokens} ток. не пошли в ответ`
+        ? `${Math.round(t.unused_share * 100)}${NBSP}% — ${t.unused_tokens} из ${t.fragments_tokens}${NBSP}${plural(t.fragments_tokens, ['токена', 'токенов', 'токенов'])} не пошли в ответ`
         : '—',
     ],
   ] as const
   return { fragments, calls, total, rules: p.rules }
 }
 
-export const passportFile = (p: Passport) =>
-  new Blob([JSON.stringify(p, null, 1)], { type: 'application/json' })
+export const passportFile = (p: Passport) => new Blob([JSON.stringify(p, null, 1)], { type: 'application/json' })

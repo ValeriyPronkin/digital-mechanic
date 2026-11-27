@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { VerdictBlock } from '../api'
 import { copy } from '../copy'
-import { checkData } from '../lib/checks'
+import { checkData, confidenceLine } from '../lib/checks'
 import { dateTimeRu, num } from '../lib/format'
 
 const tone = (v: VerdictBlock): { bar: string; text: string } => {
@@ -33,6 +33,7 @@ export function VerdictCard({ verdict: v }: { verdict: VerdictBlock }) {
   const [showForeign, setShowForeign] = useState(false)
   const t = tone(v)
   const mismatch = v.case === 'mismatch'
+  const threshold = confidenceLine(v)
   return (
     <section className="relative overflow-hidden rounded-xl border border-line bg-surface">
       <div className={`absolute inset-y-0 left-0 w-1 ${t.bar}`} aria-hidden />
@@ -54,11 +55,15 @@ export function VerdictCard({ verdict: v }: { verdict: VerdictBlock }) {
         {/* Columns as wide as what they hold: in three equal ones «Уверенность» (81 px) ran into
             «Запись» on a 320 px screen, where a column is 75 px. */}
         {!mismatch && v.anomaly_score !== null && v.confidence !== null && (
-          <dl className="grid grid-cols-[auto_auto_auto] justify-between gap-x-2.5 border-t border-line pt-3">
+          <dl className="grid grid-cols-[auto_auto_auto] justify-between gap-x-2.5 border-t border-line pt-3 min-[900px]:justify-start min-[900px]:gap-x-12">
             <Fact label={copy.verdict.score} value={num(v.anomaly_score)} note={copy.verdict.scoreOf} />
             <Fact label={copy.verdict.confidence} value={v.confidence_word ?? ''} note={num(v.confidence)} />
             <Fact label={copy.verdict.recording} value={copy.quality[v.signal_quality]} />
           </dl>
+        )}
+        {/* the threshold of the server's rule, as a number: why the result is or is not preliminary */}
+        {!mismatch && threshold && (
+          <p className={`text-[13px] ${threshold.below ? 'text-warn' : 'text-dim'}`}>{threshold.text}</p>
         )}
 
         {v.urgency && (
@@ -68,14 +73,13 @@ export function VerdictCard({ verdict: v }: { verdict: VerdictBlock }) {
                 <span className="text-dim">{copy.verdict.urgency}: </span>
                 <span className={`font-semibold ${urgencyTone[v.urgency.level]}`}>{v.urgency.word}</span>
               </span>
-              <span className="text-[13px] text-accent group-open:hidden">{copy.verdict.why}</span>
-              <span className="hidden text-[13px] text-accent group-open:inline">{copy.verdict.hide}</span>
-              {v.urgency.action && (
-                <span className="basis-full pb-2">
-                  {v.urgency.action}
-                  <span className="block text-[13px] text-mute">{copy.verdict.recommendation}</span>
-                </span>
-              )}
+              <span className="text-[13px] text-accent group-open:hidden [@media(hover:hover)]:[summary:hover_&]:underline">
+                {copy.verdict.why}
+              </span>
+              <span className="hidden text-[13px] text-accent group-open:inline [@media(hover:hover)]:[summary:hover_&]:underline">
+                {copy.verdict.hide}
+              </span>
+              {v.urgency.action && <span className="basis-full pb-2">{v.urgency.action}</span>}
             </summary>
             <ul className="mt-1 list-disc space-y-1 pl-5 text-[13px] text-dim marker:text-mute">
               {v.urgency.reasons.map((r) => (

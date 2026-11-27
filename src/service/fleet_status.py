@@ -69,18 +69,20 @@ def vehicle_status(v: Vehicle, fault_titles: dict[str, str] | None = None) -> Ve
     if last.status == "anomaly":
         code = last.anomaly_type or ""
         title = titles.get(code, "")
-        name = f"{code} «{title}»" if title else code or "отклонение"
+        name = title or code or "отклонение"  # код F.. механику не нужен: он есть в карточке
         compat = compat_check(code, v.engine_model) if code else None
         if compat is not None and not compat.ok:
             return VehicleStatus(
                 "quarantine", [f"{name}: {compat.why} — результату верить нельзя, нужна повторная проверка"], last
             )
         urgency, why = urgency_for(last)
+        why = why.split(". Чем грозит")[0]  # строка парка — только основание; угроза — на карточке
         why = _ru(why.removeprefix(f"{code}: "))
+        why = why[:1].lower() + why[1:]  # «Клапанный механизм: оценка отклонения 0,93, …» — одна строка
         if urgency == "high":
             return VehicleStatus("quarantine", [f"{name}: {why}"], last)
         reasons = [f"{name}: {why}"]
-        if last.signal_quality == "warning":
+        if last.signal_quality == "warning" and "помех" not in why:
             reasons.append("запись с помехами, уверенность снижена")
         return VehicleStatus("attention", reasons, last)
     reasons = []

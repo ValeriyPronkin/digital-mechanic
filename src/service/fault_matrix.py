@@ -30,6 +30,34 @@ STATUSES = ("confirmed", "not_applicable", "silent", "unknown")
 PageText = Callable[[str, int], str | None]  # (doc_id, page) → текст страницы или None, если её нет
 
 
+# Организаторы 26.11: текста руководств в открытом репозитории и его истории нет. Цитата в данных — ссылка на
+# страницу, а не выгрузка; проверка открытого репозитория считает выгрузкой 25 слов подряд и больше (#96).
+QUOTE_MAX_WORDS = 24
+
+
+_TOKEN = re.compile(r"\w+")
+
+
+def trim_quote(quote: str, keep: str = "", limit: int = QUOTE_MAX_WORDS) -> str:
+    """Отрывок цитаты не длиннее `limit` слов подряд (слово — `\\w+`, как считает проверка открытого репозитория:
+    «1-5-4-2-6-3-7-8» — восемь слов). Отрывок вырезан из самой цитаты, поэтому стоит на той же странице
+    (сравнение со страницей — через `normalize`). Из всех отрывков — тот, где есть обозначение `keep`, затем тот,
+    где больше слов с цифрами, затем тот, что кончается вместе с цитатой (там обычно единица), затем самый ранний."""
+    tokens = list(_TOKEN.finditer(quote))
+    if len(tokens) <= limit:
+        return quote
+    need = normalize(keep) if keep else ""
+
+    def part(i: int) -> str:
+        return quote[tokens[i].start() : tokens[i + limit - 1].end()]
+
+    def score(i: int) -> tuple[bool, int, bool, int]:
+        digits = sum(any(c.isdigit() for c in t.group()) for t in tokens[i : i + limit])
+        return (not need or need in normalize(part(i)), digits, i + limit == len(tokens), -i)
+
+    return part(max(range(len(tokens) - limit + 1), key=score))
+
+
 @dataclass
 class Ref:
     doc: str

@@ -1,4 +1,4 @@
-.PHONY: fetch-materials run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
+.PHONY: e2e fetch-materials run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check reset-demo logs spend-probe eval-open eval-golden eval-sweep eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx cost-final index kb-publish kb-fetch pages-render pages-publish
 
 PORT ?= 8000
 
@@ -44,8 +44,15 @@ e2e: install
 	uv run python -m playwright install webkit chromium
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/e2e.py $(E2E_URL) $(E2E_ARGS)
 
-demo-check: install  ## сценарий видео на стенде /v2 перед дублем: таблица шагов, код 0 = готово (заявку не шлёт)
+## Маршрут дубля на стенде /v2 (B418HK98/S-0009, H142OX78/S-0113, запасная M739BA198/S-0104): таблица шагов
+## и секунд; код 0 = «готово к дублю», 3 = только «ждёт PR #N», 1 = ❌. Заявку не шлёт. ARGS=--help — параметры
+demo-check: install
 	uv run python scripts/demo_check.py $(or $(STAND),$(STAND_URL)) $(ARGS)
+
+## Сброс демо-машин перед повторным дублем: нити v2 и отметки заявок в бакете (статический ключ из .env), заявки
+## в локальной SQLite; стенд только читает. Сначала ARGS=--dry-run. Перезапуск стенда — команда в конце вывода
+reset-demo: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/reset_demo.py --stand $(or $(STAND),$(STAND_URL)) $(ARGS)
 
 cost: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/cost_report.py --label $(LABEL)
@@ -65,9 +72,17 @@ pages-render: install
 pages-publish: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/pages_publish.py --upload $(if $(DOC),--doc $(DOC),)
 
-## Шаблон организаторов по замеру: reports/cost-template-<замер>.xlsx (шаблон — COST_TEMPLATE, в git не входит)
+## Шаблон организаторов по замеру → сдаваемый reports/cost-calculator.xlsx (жёлтые ячейки; шаблон — он же или COST_TEMPLATE).
+## Другой замер для сравнения — в другой файл: make cost-xlsx XLSX_LABEL=gigachat-1 XLSX_OUT=.state/gigachat.xlsx
 cost-xlsx: install
-	uv run python scripts/cost_xlsx.py $(if $(XLSX_LABEL),--label $(XLSX_LABEL),)
+	uv run python scripts/cost_xlsx.py $(if $(XLSX_LABEL),--label $(XLSX_LABEL),) $(if $(XLSX_OUT),--out $(XLSX_OUT),)
+
+## Себестоимость на текущем коммите одной командой (перед сдачей, после последних слияний): живой замер всех
+## сценариев, 2 прогона (≈1 ₽; нужны .env с ключом модели и Yandex и индекс .index/) → reports/cost/final.*,
+## reports/cost.md и сдаваемый шаблон reports/cost-calculator.xlsx. Провал проверки качества — код ≠ 0, шаблон не пишется.
+cost-final: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/cost_report.py --label final --repeat 2
+	uv run python scripts/cost_xlsx.py --label final
 
 ## Открытая половина вопросов приёмщика на настоящей модели (issue #28): reports/eval-open.md (вопросы — вне git)
 eval-open: install
@@ -77,6 +92,16 @@ eval-open: install
 ## Вопросы — вне git: .state/questions_multi.jsonl (или EVAL_MULTI=путь); засчитано — страница, числа, язык ответа
 eval-multi: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/eval_open.py --set multi --label $(or $(LABEL),$(shell date +%Y%m%d-%H%M))
+
+## Контрольные вопросы Никиты (36 сверенных + 48 написанных вслепую) через /api/v2/chat работающего сервиса:
+## reports/eval-golden.md. Сервис — make run (EVAL_URL по умолчанию http://127.0.0.1:8000) или стенд; заявку не шлёт
+eval-golden: install
+	uv run python scripts/eval_golden.py --set $(or $(EVAL_SET),all) --label $(or $(LABEL),$(shell date +%Y%m%d-%H%M)) $(if $(EVAL_URL),--url $(EVAL_URL),) $(EVAL_ARGS)
+
+## Живой агент по каждой ячейке двигатель × неисправность и особым проверкам (67 нитей): диагноз → «Создать заявку»
+## до листа подтверждения, без отправки — reports/eval-sweep.md. Сервис — make run (EVAL_URL) или стенд
+eval-sweep: install
+	uv run python scripts/eval_sweep.py --label $(or $(LABEL),$(shell date +%Y%m%d-%H%M)) $(if $(EVAL_URL),--url $(EVAL_URL),) $(EVAL_ARGS)
 
 ## Стабильность (штурман 26.11): RUNS прогонов eval-open с префиксом PREFIX и сводка по ним
 eval-stability: install

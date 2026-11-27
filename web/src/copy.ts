@@ -10,6 +10,8 @@ export const copy = {
     loadFailed: 'Не получилось загрузить парк',
     check: 'проверка',
     noValidCheck: 'нет пригодной записи',
+    score: 'оценка', // «Клапанный механизм · оценка 0,93 · приоритет высокий» in a fleet row
+    priority: 'приоритет',
     pick: 'Выберите машину',
     pickHint: 'Результат проверки, ответы по руководству и заявка — на экране машины',
   },
@@ -44,12 +46,15 @@ export const copy = {
   },
   chief: {
     first: 'Сначала проверить',
+    shown: 'Показаны', // «Показаны: требует внимания», while a status counter filters the list
+    reset: 'Сбросить',
     all: 'Все',
     hint: 'Сверху — машины, которыми нужно заняться в первую очередь',
     outcomes: (confirmed: number, recorded: number) => `Дефектовка: подтвердилось ${confirmed} из ${recorded}`,
     outcomesNone: 'Дефектовка: результатов пока нет',
     outcomesOf: (tickets: number, recorded: number) => `заявок: ${tickets} · с результатом: ${recorded}`,
     export: 'Скачать выгрузку',
+    openRegister: 'Открыть заявки',
     legendTitle: 'Что значат статусы',
     legend:
       'Карантин: приоритет высокий, машину ставят на дефектовку до выпуска в рейс. Требует внимания: приоритет средний или низкий. Это рекомендации по результату проверки, а не запрет на эксплуатацию',
@@ -69,7 +74,6 @@ export const copy = {
     recording: 'Запись',
     urgency: 'Приоритет',
     why: 'Почему такой приоритет',
-    recommendation: 'Это рекомендация, а не запрет. Запрет действует, только если он записан в руководстве',
     heard: 'По записи',
     // A result that does not fit the engine: the check's own figures in one small line, not as the card's facts.
     byCheck: 'По данным проверки',
@@ -77,6 +81,10 @@ export const copy = {
     show: 'Показать',
     hide: 'Скрыть',
     model: 'модель',
+    // the confidence against the server's threshold, as numbers: «Уверенность 0,58 — ниже порога 0,60: вывод предварительный»
+    belowThreshold: (confidence: string, threshold: string) =>
+      `Уверенность ${confidence} — ниже порога ${threshold}: вывод предварительный`,
+    atThreshold: (confidence: string, threshold: string) => `Уверенность ${confidence} — не ниже порога ${threshold}`,
   },
   guide: {
     word: {
@@ -100,7 +108,12 @@ export const copy = {
       denied: 'Нет доступа к микрофону. Разрешите его в настройках браузера',
       failed: 'Распознавание речи сейчас не работает. Напишите вопрос текстом',
     },
-    quick: ['Можно ли ехать своим ходом', 'Что проверить в первую очередь', 'Какие нужны запчасти'],
+    quick: [
+      'Можно ли ехать своим ходом',
+      'Что проверить в первую очередь',
+      'Какие нужны запчасти',
+      'Какой нужен инструмент',
+    ],
     createTicket: 'Создать заявку',
     createTicketMessage: 'Создать заявку на дефектовку',
     working: 'Готовим ответ…',
@@ -141,6 +154,18 @@ export const copy = {
     // The reply was cut before a step of the agent (a search, a page, a ticket draft): the step was not done.
     stepCut: 'Ответ оборван, и последний шаг агент не выполнил. Повторите вопрос',
   },
+  // Under the last answer (#91): the level the server chose for this question, and the same question again one
+  // level down or up. `ask` is what goes to the thread as the mechanic's question.
+  level: {
+    answered: { novice: 'Объяснено для новичка', mechanic: 'Объяснено для механика', master: 'Объяснено для мастера' },
+    more: 'Подробнее',
+    shorter: 'Короче',
+    ask: {
+      novice: 'Объясни подробнее, по шагам',
+      mechanic: 'Объясни ещё раз: ответ и порядок работ',
+      master: 'Короче: только значение, инструмент и страница',
+    },
+  },
   sections: [
     'Что слышно',
     'Что это может быть',
@@ -158,6 +183,8 @@ export const copy = {
     next: 'Следующая',
     close: 'Закрыть',
     loading: 'Открываем страницу…',
+    imageFailed: 'Картинка страницы не загрузилась. Ниже — текст этой страницы',
+    imageSlow: 'Картинка страницы ещё грузится. Пока — текст этой страницы',
     failed: 'Не получилось открыть страницу',
     textOnly: 'Текст страницы. Изображения страниц появятся, когда на сервере будут файлы руководств',
     zoomIn: 'Увеличить страницу',
@@ -175,6 +202,9 @@ export const copy = {
     operations: 'Работы',
     parts: 'Запчасти',
     noParts: 'Запчасти — по результатам дефектовки',
+    offers: 'Наличие у поставщиков',
+    offersHint: 'Для справки, в заявку не входит',
+    offerLead: (days: number) => `срок ${days} дн.`,
     sources: 'Источники',
     remove: 'Убрать',
     restore: 'Вернуть',
@@ -200,6 +230,57 @@ export const copy = {
     earlier: 'Заявки по машине',
     failed: 'Не получилось отправить. Попробуйте ещё раз',
   },
+  lang: {
+    label: 'Язык ответа',
+    auto: 'Как в вопросе',
+    autoInline: 'как в вопросе', // after «Язык ответа:» in the folded line
+    change: 'изменить',
+    voiceRu: 'голосом — по-русски',
+    showRu: 'Показать по-русски',
+  },
+  // the chief mechanic's register of tickets (TicketRegister), ported from Nikita's interface
+  register: {
+    title: 'Заявки',
+    loading: 'Загружаем заявки…',
+    loadFailed: 'Не получилось загрузить заявки',
+    empty: 'Заявок пока нет. Заявку создают на экране машины, по проверке с отклонением',
+    show: 'Какие заявки показать',
+    filter: { all: 'все', waiting: 'ждут дефектовки', recorded: 'с результатом' },
+    emptyFilter: { waiting: 'Заявок, которые ждут дефектовки, нет', recorded: 'Заявок с результатом пока нет' },
+    // what came of a ticket; the three outcomes are the words of the ticket card's buttons
+    state: {
+      waiting: 'ждёт дефектовки',
+      confirmed: 'подтвердилось',
+      not_confirmed: 'не подтвердилось',
+      other_fault: 'другая неисправность',
+    },
+    columns: {
+      ticket: 'Заявка',
+      vehicle: 'Машина',
+      date: 'Дата',
+      fault: 'Неисправность',
+      priority: 'Приоритет',
+      state: 'Дефектовка',
+    },
+    byFault: 'По типам неисправностей',
+    faultLine: (title: string, confirmed: number, recorded: number) =>
+      `${title}: подтвердилось ${confirmed} из ${recorded}`,
+    // shown when it is not zero: a real fault of another kind is not a false alarm
+    faultOther: (other: number) => `другая неисправность: ${other}`,
+    faultTickets: (tickets: number) => `заявок: ${tickets}`,
+    export: 'Скачать выгрузку для модели проверки',
+    exportHint: 'В файле — каждая заявка, данные её проверки и результат дефектовки',
+  },
+  // the sheet a sent ticket prints on, for the defect inspection (TicketPrint)
+  print: {
+    action: 'Распечатать',
+    ticketOf: (date: string) => `Заявка от ${date}`,
+    checkOf: (id: string, date: string | null) => (date ? `проверка ${id} от ${date}` : `проверка ${id}`),
+    result: 'Результат дефектовки:',
+    outcome: { confirmed: 'подтвердилось', not_confirmed: 'не подтвердилось', other_fault: 'другая неисправность' },
+    date: 'Дата',
+    signature: 'Подпись',
+  },
   tool: {
     get_diagnosis: 'Запрос диагностики',
     get_vehicle_history: 'История машины',
@@ -207,5 +288,59 @@ export const copy = {
     search_manual: 'Поиск в руководстве',
     read_pages: 'Чтение страниц',
     create_ticket: 'Подготовка заявки',
+    // the names of the /api/v2 agent: without them the log shows the server's first-person labels
+    vehicle_history: 'История машины',
+    draft_ticket: 'Подготовка заявки',
+    fleet_summary: 'Сводка парка',
   } as Record<string, string>,
+  // Manuals disagree (D-20): both wordings verbatim, each with its page; the line under them is the server's
+  // hand-over to the chief mechanic (#93), shown as it comes.
+  // The vehicle's earlier conversations (#92): continue one, or print it for a warranty claim.
+  history: {
+    title: 'Обращения по машине',
+    count: (n: number) => `${n}`,
+    status: {
+      open: 'разговор',
+      ticket_pending: 'заявка ждёт подтверждения',
+      ticket_sent: 'заявка отправлена',
+    } as Record<string, string>,
+    noTopic: 'без вопроса',
+    records: (n: number) => `записей: ${n}`,
+    current: 'Открыто сейчас',
+    resume: 'Продолжить',
+    resuming: 'Открываем…',
+    claim: 'Для рекламации',
+    claimHint: 'Все ответы со страницами руководства, модель и проверка, что записи не правили. Откроется для печати',
+    json: 'JSON',
+    loadFailed: 'Не получилось загрузить обращения',
+    resumeFailed: 'Не получилось открыть обращение. Попробуйте ещё раз',
+  },
+  contradiction: {
+    title: (what: string) => `Противоречие в документации — ${what}`,
+    label: 'Противоречие в документации',
+    // #93: the hand-over to the chief mechanic, by its number in his queue
+    open: (n: number | null) => (n === null ? 'У главного механика' : `№ ${n} · у главного механика`),
+    resolved: (n: number | null) => (n === null ? 'Решено' : `№ ${n} · решено`),
+    openQueue: 'Открыть очередь противоречий',
+  },
+  // «Прослушать» (#14): the short spoken version of the answer.
+  speech: {
+    play: 'Прослушать',
+    playLabel: 'Прослушать короткий ответ',
+    stop: 'Стоп',
+    stopLabel: 'Остановить озвучку',
+    loading: 'Готовим звук…',
+    again: 'Нажмите ещё раз, чтобы прослушать',
+    unavailable: 'Озвучка недоступна, ответ на экране',
+  },
+  // The passport of an answer (#31), at the end of the action log.
+  passport: {
+    title: 'Паспорт ответа',
+    fragments: 'Что ушло в модель из руководства',
+    used: 'в ответе',
+    unused: 'не пошло в ответ',
+    calls: 'Вызовы модели: токены на входе и на выходе',
+    rules: 'Сработавшие правила',
+    download: 'Скачать паспорт ответа',
+  },
 } as const

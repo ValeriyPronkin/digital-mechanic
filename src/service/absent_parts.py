@@ -2,7 +2,7 @@
 
 Вопрос о таком узле — ответ строит код, а не модель: «у <двигатель> нет <узел>», цитаты из руководства этого двигателя
 со страницами, проверка и регулировка не применимы, при признаках неисправности — дефектовка. Без советов модели и без
-чужих цифр: модель под пометкой «мнение помощника» советовала работы с узлом, которого нет (приёмка v2, 4/9).
+чужих цифр: модель под пометкой «предположение» советовала работы с узлом, которого нет (приёмка v2, 4/9).
 Таблица — `data/absent_parts.json`; цитаты сверяются со страницами, без подтверждённой цитаты ответ не строится.
 """
 
@@ -21,7 +21,9 @@ from service.manuals.catalog import canonical_engine
 PATH = Path(__file__).resolve().parents[2] / "data" / "absent_parts.json"
 PageText = Callable[[str, int], str | None]
 NOT_APPLICABLE = "Проверка и регулировка этого узла к вашему двигателю не применимы."
-ADVICE = "Если есть признаки неисправности (стук, дым, потеря мощности) — оформите дефектовку, там определят причину."
+ADVICE = (
+    "Повторите проверку; если признаки неисправности остаются (стук, дым, потеря мощности) — проведите дефектовку узла."
+)
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,17 @@ def items() -> tuple[Absent, ...]:
     return tuple(out)
 
 
+def for_code(engine: str, code: str, title: str = "") -> Absent | None:
+    """Запись «узла нет» для кода неисправности из карточки: ячейка матрицы этого двигателя, иначе — по названию."""
+    canon = canonical_engine(engine)
+    by_id = {a.id: a for a in items()}
+    return by_id.get(f"matrix-{code}-{canon}") or (match(engine, title) if title else None)
+
+
+def head(engine: str, a: Absent) -> str:
+    return a.header or f"У {engine} нет {a.part}."
+
+
 def match(engine: str, question: str) -> Absent | None:
     canon = canonical_engine(engine)
     for a in items():
@@ -114,8 +127,7 @@ def verified(a: Absent, page_text: PageText | None) -> list[Quote] | None:
 def answer(
     engine: str, a: Absent, quotes: list[Quote], refs: dict[tuple[str, int], str], label: Callable[[Quote], str]
 ) -> str:
-    head = a.header or f"У {engine} нет {a.part}."
-    lines = [f"**{head}** {a.statement}", "", "По руководству этого двигателя:"]
+    lines = [f"**{head(engine, a)}** {a.statement}", "", "По руководству этого двигателя:"]
     for q in quotes:
         ref = refs.get((q.doc, q.page))
         lines.append(f"- {label(q)}: «{q.quote}»" + (f" [{ref}]" if ref else ""))

@@ -42,6 +42,20 @@ def test_v2_without_build(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
     assert r.status_code == 404 and "make web" in r.json()["detail"]
 
 
-def test_old_page_untouched() -> None:
-    r = TestClient(main.app).get("/")
-    assert r.status_code == 200 and "Цифровой механик" in r.text
+def test_root_opens_v2(dist: Path) -> None:
+    c = TestClient(main.app)
+    r = c.get("/", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == "/v2/"
+    assert c.get("/?vehicle=B418HK98", follow_redirects=False).headers["location"] == "/v2/?vehicle=B418HK98"
+    assert 'id="root"' in c.get("/").text  # стенд по своему адресу открывает интерфейс v2
+
+
+def test_root_without_build_is_old_page(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(main, "WEB_DIST", tmp_path / "nothing")
+    r = TestClient(main.app).get("/", follow_redirects=False)
+    assert r.status_code == 200 and "Цифровой механик" in r.text and 'href="/fleet"' in r.text
+
+
+def test_old_page_on_v1(dist: Path) -> None:
+    r = TestClient(main.app).get("/v1")
+    assert r.status_code == 200 and "Цифровой механик" in r.text and 'id="root"' not in r.text

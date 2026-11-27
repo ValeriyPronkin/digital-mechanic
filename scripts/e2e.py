@@ -195,6 +195,20 @@ class Screen:
         got = f"лист {box['height']:.0f} из {vp['height']} px, y={box['y']:.0f}; {what}"
         return in_view and tall and what != "пусто", got
 
+    def frame(self) -> tuple[bool, str]:
+        """Рамка на строке: у открытой страницы с «Найдено на странице» и картинкой строка обведена (кадр С1)."""
+        sheet = self.page.locator("dialog.sheet[open]").last
+        self.page.wait_for_timeout(1500)
+        got = self.page.evaluate(
+            """(d) => { const ps = [...d.querySelectorAll('p')].map(p => p.textContent.trim());
+              const at = ps.indexOf('Найдено на странице');
+              return {quote: at >= 0 ? ps[at + 1] : null, frame: !!d.querySelector('button span.absolute'),
+                      img: !!d.querySelector('img')} }""",
+            sheet.element_handle(),
+        )
+        quote = f" «{got['quote'][:60]}»" if got["quote"] else " (цитаты нет)"
+        return bool(got["frame"]), ("рамка есть" if got["frame"] else "рамки нет") + quote
+
     def close_sheet(self) -> None:
         self.page.locator("dialog.sheet[open]").last.get_by_role("button", name="Закрыть").first.click()
         self.page.wait_for_timeout(500)
@@ -208,6 +222,14 @@ def scene_s1(scr: Screen, rep: Report, prof: str, send: bool) -> None:
     rep.add(pg, prof, scene, "карточка", "отклонение: кнопка «Создать заявку» или уже отправленная заявка",
             f"кнопок заявки: {ticket_btn.count()}" + (f"; есть {sent.group(0)}" if sent else ""),
             ticket_btn.count() > 0 or bool(sent))  # fmt: skip
+    first = pg.locator("button:has(svg title)").first  # первый ✓-чип объяснения — кадр С1
+    if first.count():
+        label = norm(first.inner_text())
+        first.scroll_into_view_if_needed()
+        scr.press(first)
+        ok, got = scr.frame()
+        rep.add(pg, prof, scene, "первый ✓ → рамка", "страница с рамкой на строке", f"{label}: {got}", ok)
+        scr.close_sheet()
     secs = scr.ask(QUESTION)
     chip = pg.locator("button", has_text="стр.").last
     chips = pg.locator("button", has_text="стр.").count()

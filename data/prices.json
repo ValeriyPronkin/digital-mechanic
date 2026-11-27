@@ -28,7 +28,7 @@
     "out": 0.6
    },
    "note": "пик — будни 01:00–04:00 и 06:00–10:00 UTC (04:00–07:00 и 09:00–13:00 МСК), остальное время вдвое дешевле; считаем по пику — оценка сверху",
-   "source": "https://api-docs.deepseek.com/quick_start/pricing — 26.11 страница отвечала HTTP 525, цены — из снимка той же страницы от 24.11.2026: http://web.archive.org/web/20261124084006/https://api-docs.deepseek.com/quick_start/pricing/"
+   "source": "https://api-docs.deepseek.com/quick_start/pricing — 27.11.2026 страница открылась, цены те же (deepseek-flash, пик/вне пика, без НДС); 26.11 она отвечала HTTP 525, тогда цены брали из снимка от 24.11.2026: http://web.archive.org/web/20261124084006/https://api-docs.deepseek.com/quick_start/pricing/"
   },
   "gigachat": {
    "model": "GigaChat-2-Max (синхронный режим)",
