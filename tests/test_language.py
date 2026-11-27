@@ -23,6 +23,9 @@ from test_agent import ANOMALY, make_agent, say
         ("Какой момент затяжки крышек коренных подшипников?", "ru"),
         ("слушай брат момент затяжка коренной крышка какой нада", "ru"),  # ломаный русский — ответ по-русски
         ("What is the valve clearance of this engine?", "en"),
+        ("मुख्य बेयरिंग कैप के बोल्ट किस टॉर्क से कसने हैं?", "hi"),
+        ("Bhai, main bearing cap ke nut ka tightening torque kitna hai?", "hi"),  # хинглиш
+        ("What is the main bearing cap torque?", "en"),
     ],
 )
 def test_detect(text: str, code: str) -> None:
@@ -59,10 +62,12 @@ def test_answer_in_wrong_language_is_translated(ml: MLClient, toir: ToirClient) 
     assert any("перевод ответа" in s["name"] for s in reply.trace["steps"] if s["kind"] == "llm")
 
 
-def test_answer_in_right_language_costs_nothing_extra(ml: MLClient, toir: ToirClient) -> None:
-    ag, llm = make_agent([say("Moy bosimini manometr bilan tekshiring.")], ml, toir, prefetch=False)
+def test_answer_in_right_language_is_not_translated(ml: MLClient, toir: ToirClient) -> None:
+    ag, _ = make_agent([say("Moy bosimini manometr bilan tekshiring."), say("Проверьте давление масла манометром.")],
+                         ml, toir, prefetch=False)  # fmt: skip
     reply = ag.ask(ag.start(*ANOMALY), "Moy bosimini qanday tekshirish kerak? Bu dvigatel uchun nima qilish kerak?")
-    assert reply.lang == "uz" and len(llm.seen) == 1
+    assert reply.lang == "uz" and reply.text.startswith("Moy bosimini")  # второй вызов — только «по-русски»
+    assert not any("перевод ответа" in s["name"] for s in reply.trace["steps"] if s["kind"] == "llm")
 
 
 def test_mechanic_chooses_russian(ml: MLClient, toir: ToirClient) -> None:
@@ -91,3 +96,36 @@ def test_voice_by_language() -> None:
     assert speech_lang("tg") == "ru" and speech_lang("uz") == "uz"
     assert spoken_text("Тирқиш 0,30 мм", "uz-cyrl") == "Tirqish 0,30 mm"
     assert "миллиметра" in spoken_text("0,30 мм", "ru")
+
+
+HI = "तेल का दबाव कैसे जाँचें? इस इंजन के लिए क्या करना चाहिए?"
+
+
+def test_hindi_back_translation_from_russian_original(ml: MLClient, toir: ToirClient) -> None:
+    """Модель ответила по-русски — перевод на хинди, а «по-русски» — исходный ответ, без третьего вызова."""
+    ag, llm = make_agent([say("Проверьте давление масла манометром."), say("मैनोमीटर से तेल का दबाव जाँचें।")],
+                         ml, toir, prefetch=False)  # fmt: skip
+    reply = ag.ask(ag.start(*ANOMALY), HI)
+    assert reply.lang == "hi" and reply.text.startswith("मैनोमीटर")
+    assert reply.back_translation == "Проверьте давление масла манометром." and len(llm.seen) == 2
+
+
+def test_hindi_back_translation_numbers_checked(ml: MLClient, toir: ToirClient) -> None:
+    """Ответ сразу на хинди — один вызов перевода на русский; цифра не из руководства в нём убирается guard."""
+    ag, llm = make_agent([say("मैनोमीटर से तेल का दबाव जाँचें।"),
+                          say("Проверьте давление масла манометром. Давление должно быть 777 кПа.")],
+                         ml, toir, prefetch=False)  # fmt: skip
+    reply = ag.ask(ag.start(*ANOMALY), HI)
+    assert reply.back_translation is not None and "манометром" in reply.back_translation
+    assert "777" not in reply.back_translation and len(llm.seen) == 2
+    assert any("по-русски для проверки" in s["name"] for s in reply.trace["steps"] if s["kind"] == "llm")
+
+
+def test_russian_answer_has_no_back_translation(ml: MLClient, toir: ToirClient) -> None:
+    ag, _ = make_agent([say("Проверьте давление масла манометром.")], ml, toir, prefetch=False)
+    assert ag.ask(ag.start(*ANOMALY), "Как проверить давление масла?").back_translation is None
+
+
+def test_hindi_no_voice() -> None:
+    sp = speech_for("दबाव 0,30 мм [R1].", _src(), "hi")
+    assert sp.text.startswith("Озвучки на языке «хинди» нет")

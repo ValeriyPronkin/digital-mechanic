@@ -300,6 +300,8 @@ class AgentReply:
     trace: dict[str, Any]
     followup: dict[str, str] | None = None  # кнопка «к проверке по неисправности из карточки» (#28)
     lang: str = "ru"  # язык ответа (service.language): по нему — голос озвучки
+    # ответ не на русском — он же по-русски («Показать по-русски»: проверяемость для жюри); цифры проверены guard
+    back_translation: str | None = None
 
 
 # ---------- правила вокруг модели ----------
@@ -748,6 +750,7 @@ class Agent:
         if target is None:  # код не узнал язык — берём язык из плана поиска (модель)
             target = language.normalize(str((conv.passport.get("plan") or {}).get("lang") or "")) or "ru"
             conv.passport["answer_lang"] = target
+        original = text  # до перевода: если модель ответила по-русски, это и есть «по-русски» без нового вызова
         text = self._fix_language(conv, text, target, request_id, steps)
         final, grounded, notes, cited = self.guard(conv, text)
         final, cited, more = self._contradiction_text(conv, final, cited)
@@ -773,6 +776,10 @@ class Agent:
                 },
             )  # fmt: skip
         final, followup = self._card_link(conv, question, cited, final)
+        back = None
+        if target != "ru":
+            ru = original if original != text else None  # ответ переводили — русский оригинал уже есть
+            back = self._back_translation(conv, final, ru, request_id, steps)
         calls = self.store.llm_calls(request_id)
         trace = {
             "request_id": request_id,
@@ -793,7 +800,40 @@ class Agent:
             trace=trace,
             followup=followup,
             lang=target,
+            back_translation=back,
         )
+
+    def _back_translation(
+        self, conv: Conversation, final: str, ru: str | None, request_id: str, steps: list[dict[str, Any]]
+    ) -> str | None:
+        """Ответ по-русски для проверки (жюри хинди не читает): русский оригинал, если ответ переводили, иначе один
+        вызов перевода на русский. Цифры проверяет тот же guard; паспорт guard — от ответа механику, не от этого."""
+        if ru is None:
+            msgs: list[Message] = [
+                {"role": "system", "content": "Переведи ответ механику на русский язык. Числа, диапазоны, единицы, "
+                                              "обозначения деталей, ссылки [R…] и цитаты «…» оставь без изменений. "
+                                              "Верни только перевод."},
+                {"role": "user", "content": final},
+            ]  # fmt: skip
+            try:
+                self.check_budget()
+                t0 = time.monotonic()
+                reply = self.provider.chat(msgs, [], max_tokens=1200)
+                ms = int((time.monotonic() - t0) * 1000)
+            except (LLMError, BudgetExceededError):
+                return None
+            cost = self._spend(request_id, len(steps) + 1, reply, ms)
+            steps.append({"step": len(steps) + 1, "kind": "llm", "name": reply.model + " (по-русски для проверки)",
+                          "tokens_in": reply.tokens_in, "tokens_out": reply.tokens_out,
+                          "tokens_cached": reply.tokens_cached, "cost_rub": round(cost, 4), "ms": ms})  # fmt: skip
+            if reply.truncated or not reply.content.strip():
+                return None
+            ru = reply.content.strip()
+        saved = conv.passport.get("guard")
+        checked, *_ = self.guard(conv, ru)
+        if saved is not None:
+            conv.passport["guard"] = saved
+        return checked or None
 
     def _code_reply_in(self, reply: AgentReply, conv: Conversation, target: str | None, request_id: str) -> AgentReply:
         """Ответ кода (без модели) — на языке вопроса: перевод моделью, но только если цифры в нём те же."""
@@ -801,6 +841,7 @@ class Agent:
         steps: list[dict[str, Any]] = reply.trace.setdefault("steps", [])
         text = self._fix_language(conv, reply.text, reply.lang, request_id, steps, keep_history=False)
         if text != reply.text and numbers(text) == numbers(reply.text):
+            reply.back_translation = reply.text  # ответ кода по-русски — он и есть «по-русски»
             reply.text = text
             calls = self.store.llm_calls(request_id)
             reply.trace["cost_rub"] = round(sum(c["cost_rub"] for c in calls), 4)

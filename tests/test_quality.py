@@ -63,8 +63,8 @@ def test_search_plan_translates_and_rewrites(ml: MLClient, toir: ToirClient) -> 
     plan = {"lang": "uz", "question_ru": "Какой тепловой зазор клапанов?",
             "queries": ["регулировка тепловых зазоров клапанов", "зазор впускных и выпускных клапанов"]}  # fmt: skip
     search = PageSearch()
-    ag, llm = make_agent([_plan(json.dumps(plan, ensure_ascii=False)), say("Javob [R1].")], ml, toir, search,
-                         plan_search=True)  # fmt: skip
+    ag, llm = make_agent([_plan(json.dumps(plan, ensure_ascii=False)), say("Javob [R1]."), say("Ответ [R1].")],
+                         ml, toir, search, plan_search=True)  # fmt: skip  # третий вызов — «по-русски»
     reply = ag.ask(ag.start(*ANOMALY), "Klapanlarning issiqlik tirqishi qancha?")
     assert search.queries[0] == "Какой тепловой зазор клапанов?"
     assert "регулировка тепловых зазоров клапанов" in search.queries

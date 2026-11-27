@@ -685,6 +685,9 @@ def build_router(
                 )
             text = to_handles(answer_text)
             yield _sse({"type": "text", "text": text, "round": 1})
+            back = to_handles(reply.back_translation) if reply.back_translation else None
+            if back:  # «Показать по-русски»: ответ не на русском — он же по-русски, цифры проверены guard
+                yield _sse({"type": "back_translation", "text": back})
             ver = verification(reply, text)
             yield _sse(ver)
             pending = ticket_pending(conv, parts_source())
@@ -719,6 +722,7 @@ def build_router(
                 {
                     "role": "assistant",
                     "text": text,
+                    "back_translation": back,
                     "blocks": blocks,
                     "tools": [
                         {"id": e["id"], "name": e["name"], "label": e.get("label"), "ok": True}
