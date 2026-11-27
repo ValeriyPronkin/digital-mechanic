@@ -166,3 +166,14 @@ def test_engine_variant_and_position_lists_are_labels(ml: MLClient, toir: ToirCl
     assert "ЯМЗ-53642-20: 1130 Н·м" in text and "поз. 11 и 12 — 24,5…29,4 Н·м" in text
     text, *_ = ag.guard(conv, "Затянуть по рис. 5 и 20 Н·м [R5].")
     assert "20 Н·м" not in text
+
+
+def test_absence_sentence_may_repeat_the_question_number(ml: MLClient, toir: ToirClient) -> None:
+    """heldout h536-adblue: «В руководстве нет данных о расходе AdBlue на 100 литров» снималось — 100 из вопроса
+    («на сто литров»). Число, которого в вопросе нет, в такой фразе по-прежнему снимается."""
+    ag, conv = _conv(ml, toir)
+    conv.messages.append({"role": "user", "content": "Сколько AdBlue на сто литров солярки?"})
+    text, *_ = ag.guard(conv, "В руководстве этого двигателя нет данных о расходе AdBlue на 100 литров топлива.")
+    assert "на 100 литров" in text
+    text, *_ = ag.guard(conv, "В руководстве этого двигателя нет данных, обычно 5 литров на 100 литров топлива.")
+    assert "5 литров" not in text

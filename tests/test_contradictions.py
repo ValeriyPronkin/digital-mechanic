@@ -194,3 +194,15 @@ def test_safe_line_once_for_bullets(ml: MLClient, toir: ToirClient) -> None:
                        ml, toir, TorquePages())  # fmt: skip
     text = ag.ask(ag.start("M260EH47", "S-0079"), "Какой момент затяжки болтов скоб форсунок?").text
     assert text.count("указан по-разному") == 1 and not text.startswith("\n")
+
+
+def test_model_block_under_known_conflict_is_not_withdrawn(ml: MLClient, toir: ToirClient) -> None:
+    """golden torque-236 (eval 27.11): свои цитаты модели в блоке «Противоречие в документации» с чужими ссылками
+    снимались — а блок всё равно заменяет блок кода. Теперь блок модели убирается до проверки: снятых нет."""
+    answer = (
+        "Затянуть по разделу сборки [R1].\n\nПротиворечие в документации:\n"
+        "- «вертикальные 430-470 (43-47)» [R1]\n- «от 421 до 461 Н·м» [R1]"
+    )
+    ag, _ = make_agent([say(answer)], ml, toir, TorquePages())
+    reply = ag.ask(ag.start("B418HK98", "S-0007"), "С каким моментом тянуть болты крышек коренных подшипников?")
+    assert HEADER in reply.text and "Утверждение снято" not in reply.text and reply.withdrawn == []

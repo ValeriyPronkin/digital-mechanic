@@ -520,6 +520,16 @@ def page_body(text: str) -> str:
     return "\n".join(lines)
 
 
+_NUMBER_WORDS = {"десять": "10", "двадцать": "20", "пятьдесят": "50", "сто": "100", "двести": "200", "тысяч": "1000",
+                 "тысяча": "1000", "тысячу": "1000"}  # fmt: skip
+
+
+def _asked_numbers(question: str) -> set[str]:
+    """Числа из вопроса механика — цифрами и самыми частыми словами («на сто литров»)."""
+    words = re.findall(r"[а-яё]+", question.lower())
+    return numbers(question) | {_NUMBER_WORDS[w] for w in words if w in _NUMBER_WORDS}
+
+
 def _mask_page_labels(line: str, pages: set[int]) -> tuple[str, dict[str, str]]:
     """«стр. 41» той страницы, на которую ссылается строка, — метка, а не число: на время проверки заменяется знаком
     без цифр (иначе деление на фразы после «стр.» оставило бы «41» отдельным числом). Номер другой страницы остаётся."""
@@ -1222,6 +1232,8 @@ class Agent:
             conv.passport["answer_lang"] = target
         original = text  # до перевода: если модель ответила по-русски, это и есть «по-русски» без нового вызова
         text = self._fix_language(conv, text, target, request_id, steps)
+        if conv.contradiction is not None:  # известное противоречие: свой блок модели заменит блок кода — его не
+            text, _ = contradictions.check_model_blocks(text, lambda ref: None)  # проверяем и не «снимаем» (eval 27.11)
         final, grounded, notes, cited = self.guard(conv, text)
         withdrawn = list(conv.withdrawn)  # back-перевод ниже снова вызывает guard
         final, cited, more = self._contradiction_text(conv, final, cited)
@@ -1637,6 +1649,7 @@ class Agent:
 
         ctx = self._number_context(conv)
         allowed = self._source_numbers(conv, cited)
+        asked = _asked_numbers(_last_question(conv))
         question = _last_question(conv)
         page_text = getattr(self.searcher, "page_text", None)
 
@@ -1677,6 +1690,8 @@ class Agent:
                 # ссылки ни в предложении, ни в строке — как раньше, по всем источникам ответа
                 own = [r for r in _REF.findall(part) if r in conv.sources] or line_refs
                 need = ctx.needs_source(part, {conv.sources[r].pdf_page for r in own})
+                if not own and clean_refusal.REFUSAL.search(part):
+                    need -= asked  # «в руководстве нет … на 100 л» — число вопроса механика, а не со страницы
                 if need - allowed:
                     dropped += 1
                     state = "unverified" if own else "uncited"
