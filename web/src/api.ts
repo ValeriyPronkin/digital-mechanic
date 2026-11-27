@@ -296,6 +296,8 @@ export interface PassportFragment {
   section: string
   tokens: number
   used: boolean
+  why_in?: string // why the page went to the model (since PR #177); absent in older passports
+  why_out?: string | null // why it did not go into the answer; null — it did
 }
 export interface Passport {
   request_id: string | null
@@ -322,6 +324,8 @@ export interface Passport {
     unused_tokens: number
     unused_share: number
   }
+  // the passport in plain words (since PR #177): one line each; absent in older passports
+  explain?: { cost?: string; tokens?: string; cached?: string; unused?: string }
 }
 
 /** The short spoken version of an answer (our #14): built by the code from the checked answer, every number

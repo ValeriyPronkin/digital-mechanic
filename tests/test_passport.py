@@ -242,3 +242,13 @@ def test_card_question_pages_say_they_came_from_the_fault(ml: MLClient, toir: To
     ag.ask(conv, "Получить результат диагностики")
     whys = [s.why for s in conv.sources.values()]
     assert whys and any(w.startswith("поиск по неисправности из карточки (F") for w in whys), whys
+
+
+def test_page_from_earlier_answer_says_so() -> None:
+    t = _trace()
+    t["fragments"][0]["new"] = False
+    p = passport.build(t, question="?")
+    first = p["searches"][0]["fragments"][0]
+    assert (
+        first["why_in"] == "уже в разговоре — с прежнего ответа (по неисправности из карточки (F01 Клапанный механизм))"
+    )

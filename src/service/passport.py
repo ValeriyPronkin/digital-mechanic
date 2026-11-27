@@ -169,7 +169,10 @@ def build(
     fragments = {
         f["ref"]: {
             **f,
-            "why_in": f.get("why") or WHY_SEARCH,
+            # страница с прежнего ответа этого разговора — она снова ушла в модель как контекст разговора
+            "why_in": (f.get("why") or WHY_SEARCH)
+            if f.get("new", True)
+            else f"уже в разговоре — с прежнего ответа ({f.get('why') or WHY_SEARCH})",
             "why_out": None if f.get("used") else _why_out(f["ref"], withdrawn),
         }
         for f in trace.get("fragments") or []

@@ -55,3 +55,45 @@ test('the passport reads as rows: used and unused context, calls with tokens and
   assert.match(total['Лишний контекст'], /^40\u00a0% — 80 из 200\u00a0токенов/)
   assert.match(total['Поиск по руководству'], /0,0000/) // a sum below a kopeck keeps its digits
 })
+
+test('in plain words: why each page is there, why one was not used, the cost in one line, details apart', () => {
+  const p: Passport = {
+    ...passport,
+    searches: [
+      {
+        ...passport.searches[0],
+        fragments: [
+          {
+            ...passport.searches[0].fragments[0],
+            why_in: 'поиск по неисправности из карточки (F01): «зазор»',
+            why_out: null,
+          },
+          {
+            ...passport.searches[0].fragments[1],
+            why_in: 'поиск по словам вопроса: «зазор»',
+            why_out: 'модель не сослалась на эту страницу',
+          },
+        ],
+      },
+    ],
+    explain: {
+      cost: '0,04 ₽ · 2,4 с',
+      tokens: '3 936 токенов на входе ≈ инструкция агента 3 000 + …',
+      cached: 'из них 3 712 повторно использовано (кэш провайдера) — почти бесплатно, дешевле в 50 раз',
+      unused: '40 % страниц оплачено, но не понадобилось (80 из 200 токенов руководства)',
+    },
+  }
+  const rows = passportRows(p)
+  assert.equal(rows.fragments[0].why, 'поиск по неисправности из карточки (F01): «зазор»')
+  assert.equal(rows.fragments[0].whyOut, null)
+  assert.equal(rows.fragments[1].whyOut, 'модель не сослалась на эту страницу')
+  assert.equal(rows.cost, '0,04 ₽ · 2,4 с')
+  assert.equal(rows.details.length, 3)
+})
+
+test('an older passport (no explain, no reasons) keeps its total line and has no details', () => {
+  const rows = passportRows(passport)
+  assert.equal(rows.fragments[0].why, null)
+  assert.match(rows.cost, /0,04 ₽ · 2,40 с/)
+  assert.deepEqual(rows.details, [])
+})
