@@ -18,3 +18,10 @@ dist/
 # Интерфейс v2: зависимости и сборка — только в Docker/CI, не в git
 web/node_modules/
 web/dist/
+
+# Материалы задачи (ответ организаторов 27.11, п. 9.1): не в git — make fetch-materials по TASK_MATERIALS_URL
+/vendor/neurodvs_mock/
+/data/vehicles.json
+/data/fault_types.json
+# Пакет для инженера — в нём ответы заглушек (описания диагностики): локально, не в git
+/reports/*engineer-pack*.html

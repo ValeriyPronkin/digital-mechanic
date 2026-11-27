@@ -3,12 +3,17 @@
 # STAND_CONCURRENCY — запросов на один экземпляр (по умолчанию 4): интерфейс v2 шлёт запросы параллельно
 # (чат, страница, парк, озвучка), при 1 каждый параллельный запрос будит ещё один экземпляр с холодным стартом.
 
-# deploy_container ИМЯ ОБРАЗ ПАМЯТЬ ТАЙМАУТ [доп. аргументы yc ...] → печатает URL контейнера (со слешем в конце)
+# Тёплые экземпляры (STAND_MIN_INSTANCES) — квота облака serverless.containersWorkersProvisioned = 2 на все контейнеры:
+# тёплыми бывают только основной и заглушка ML, ТОиР всегда 0 (вызов: `X=$(STAND_MIN_INSTANCES=0 deploy_container …)`).
+
+# deploy_container ИМЯ ОБРАЗ ПАМЯТЬ ТАЙМАУТ [доп. аргументы yc ...] → печатает URL контейнера (со слешем в конце).
+# Любая ошибка yc — код возврата 1 (вызов `X=$(deploy_container …)` под set -e валит шаг): внутри $(...) set -e
+# не действует, и раньше упавший `revision deploy` (квота) молча оставлял старую ревизию при зелёном шаге.
 deploy_container() {
   name=$1 image=$2 memory=$3 timeout=$4
   shift 4
   if ! yc serverless container get --name "$name" >/dev/null 2>&1; then
-    yc serverless container create --name "$name" >/dev/null
+    yc serverless container create --name "$name" >/dev/null || { echo "Не создали контейнер $name" >&2; return 1; }
   fi
   yc serverless container revision deploy \
     --container-name "$name" \
@@ -19,8 +24,8 @@ deploy_container() {
     --execution-timeout "$timeout" \
     --min-instances "$STAND_MIN_INSTANCES" \
     --concurrency "${STAND_CONCURRENCY:-4}" \
-    "$@" >/dev/null
-  yc serverless container allow-unauthenticated-invoke --name "$name" >/dev/null
+    "$@" >/dev/null || { echo "Ревизия $name не задеплоена (тёплых: $STAND_MIN_INSTANCES) — см. ошибку yc выше" >&2; return 1; }
+  yc serverless container allow-unauthenticated-invoke --name "$name" >/dev/null || return 1
   url=$(yc serverless container get --name "$name" --format json | jq -r '.url')
   if [ -z "$url" ] || [ "$url" = "null" ]; then
     echo "Не получили url контейнера $name" >&2

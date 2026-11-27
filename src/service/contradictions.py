@@ -1,10 +1,12 @@
 """Противоречивые инструкции в руководствах одного двигателя (требование заказчика, 26.11).
 
-Агент не выбирает одну формулировку как бесспорную: показывает все дословно с документом и страницей и отмечает
-«Противоречие в документации». Совета механику («уточните у производителя / специалиста») нет — вместо него действие
-системы (Валерий, 27.11): противоречие ставится в очередь главного механика (`service.escalation`), под формулировками —
-«Передано главному механику на решение (№ N). Пока — безопасное правило: …», а после решения — «Решение по
-противоречию (источник, дата): …» рядом с формулировками, не вместо них.
+Агент не выбирает одну формулировку как бесспорную: показывает все дословно с документом и страницей, отмечает
+«Противоречие в документации» и даёт безопасное правило, выведенное из самих страниц (`safe_rule`). Отсылки
+«к специалисту / производителю / главному механику» нет: механик сам специалист, решение — сейчас (ответы
+организаторов 27.11: обе формулировки со страницами и безопасное правило; у заказчика своего правила нет).
+Рядом с правилом, не вместо него, — эскалация (Валерий, 27.11): противоречие ставится в очередь главного механика
+(`service.escalation`), под правилом — «Передано главному механику на решение (№ N)…», после решения — «Решение по
+противоречию (источник, дата): …».
 
 Два слоя, оба — кодом:
 1. Известные противоречия (`data/contradictions.json`): по двигателю и теме вопроса код сам строит блок с цитатами
@@ -30,7 +32,8 @@ from service.sentences import SPLIT
 
 PATH = Path(__file__).resolve().parents[2] / "data" / "contradictions.json"
 HEADER = "⚠ Противоречие в документации"
-# строка эскалации под формулировками (её текст — `escalation.escalation_line`); по ней блок находит интерфейс v2
+RULE = "Безопасное правило:"  # строка правила под формулировками; по ней блок находит интерфейс v2
+# строка эскалации под правилом (её текст — `escalation.escalation_line`)
 ESCALATION = re.compile(r"^(?:Передано главному механику на решение|Решение по противоречию)\b.*$", re.M)
 _DOC_SHORT = {"re": "РЭ", "rk": "РК"}
 
@@ -59,6 +62,10 @@ class Known:
     quotes: tuple[Quote, ...]
     conclusion: str
     basis: str
+    # страница, которая отсылает к другому разделу: {"doc", "page", "text" — слова отсылки на странице, "section",
+    # "to": [doc, page] — страница раздела, "also": [{"quote" — дословно с той страницы, "note" — к чему он}]}
+    refers: dict[str, Any] | None = None
+    appendix: tuple[tuple[str, int], ...] = ()  # страницы-приложения с моментами затяжки / зазорами
 
 
 @lru_cache(maxsize=1)
@@ -76,6 +83,8 @@ def known() -> tuple[Known, ...]:
             quotes=tuple(Quote(q["doc"], int(q["page"]), q["quote"]) for q in i["quotes"]),
             conclusion=i["conclusion"],
             basis=i["basis"],
+            refers=i.get("refers"),
+            appendix=tuple((d, int(p)) for d, p in i.get("appendix", [])),
         )
         for i in data["items"]
     )
@@ -101,21 +110,22 @@ def match_answer(engine: str, answer: str) -> Known | None:
 _SENT = SPLIT  # не перед строчной и не после «св.», «п.» (#90)
 _LIST_PREFIX = re.compile(r"^(\s*(?:\d+[.)]|[-*•])\s+)")
 _NO_CONTRADICTION = re.compile(r"противоречи\w* (?:в документации )?нет", re.I)
-# совет «уточнить / сообщить / обратиться» от модели — убрать: противоречие передаёт главному механику код
 _ADVICE_DUP = re.compile(
-    r"^\s*(?:\W\s*)?(?:для вашей модификации[^.]*?)?(?:уточните|сообщите|обратитесь|проконсультируйтесь)\s+"
-    r"(?:\w+\s+)?(?:у|к|с)?\s*(?:специалист|производител|завод|дилер|сервис)",
+    r"^\s*(?:\W\s*)?(?:для вашей модификации[^.]*?)?(?:уточните|сообщите|обратитесь|проконсультируйтесь|свяжитесь)\s+"
+    r"(?:\w+\s+)?(?:у|к|с)?\s*(?:специалист|производител|изготовител|завод|дилер|сервис|главн\w* механик)",
     re.I,
 )
-_CONCLUSION = re.compile(r"^\s*\**Вывод\**:", re.I)
+_MODEL_RULE = re.compile(r"^\s*(?:[*\-•]\s*)?\**(?:безопасное правило|вывод)\**\s*:", re.I)
 
 
-def neutralize(k: Known, text: str) -> str:
+def neutralize(k: Known, text: str, safe_line: str | None = None) -> str:
     """Ответ модели рядом с блоком кода: строки, где модель выбрала одну формулировку по спорной теме, — вывод
-    заказчика со ссылкой на блок; «противоречий нет», свой «Вывод:» и повтор совета — убрать."""
+    заказчика со ссылкой на блок; «противоречий нет», свой «Вывод:» и повтор совета — убрать. `safe_line` — чем
+    заменить без блока (ответ не о спорной теме, но называет спорный срок или значение)."""
     out: list[str] = []
+    safe = safe_line or k.safe_line
     for ln in text.split("\n"):
-        if _NO_CONTRADICTION.search(ln) or _ADVICE_DUP.search(ln) or _CONCLUSION.search(ln):
+        if _NO_CONTRADICTION.search(ln) or _ADVICE_DUP.search(ln) or _MODEL_RULE.match(ln):
             continue
         if k.claim.search(ln):
             m = _LIST_PREFIX.match(ln)
@@ -123,7 +133,7 @@ def neutralize(k: Known, text: str) -> str:
             # заменяется только фраза о сроке: остальное в строке (значение зазора, ссылка) остаётся
             parts = [p for p in _SENT.split(ln[len(prefix) :]) if p.strip()]
             kept = [p for p in parts if not k.claim.search(p)]
-            safe_seen = any(k.safe_line in o for o in out)
+            safe_seen = any(safe in o for o in out)
             if safe_seen and not kept and not re.match(r"\s*\d", prefix):
                 continue  # вывод уже есть; нумерованный шаг оставляем — нумерация не ломается
             if not prefix and safe_seen:
@@ -131,7 +141,7 @@ def neutralize(k: Known, text: str) -> str:
                     continue  # вне списка вывод — один раз
                 ln = " ".join(kept)
             else:
-                ln = prefix + " ".join([*kept, k.safe_line])
+                ln = prefix + " ".join([*kept, safe])
         out.append(ln)
     return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
 
@@ -148,35 +158,187 @@ def verified_quotes(k: Known, page_text: Callable[[str, int], str | None] | None
     return out
 
 
-def block(k: Known, quotes: list[Quote], refs: dict[tuple[str, int], str], escalation: str) -> str:
-    """Блок кода: формулировки дословно со страницами, вывод заказчика (если есть) и строка эскалации."""
+def block(
+    k: Known,
+    quotes: list[Quote],
+    refs: dict[tuple[str, int], str],
+    escalation: str = "",
+    page_text: PageText | None = None,
+) -> str:
+    """Блок кода: формулировки дословно со страницами, безопасное правило и строка эскалации (если есть)."""
     lines = [f"{HEADER} — {k.title}:"]
     for q in quotes:
         ref = refs.get((q.doc, q.page))
         lines.append(f"- {q.label()}: «{q.quote}»" + (f" [{ref}]" if ref else ""))
-    if k.conclusion:
-        lines.append(f"Вывод: {k.conclusion} Основание — {k.basis}.")
-    else:  # правила заказчика нет — ни одно значение не выбираем
-        lines.append("Какое значение верно для вашего двигателя, руководства не уточняют.")
-    lines.append(escalation)
+    # правило из данных (зазоры ЯМЗ-236: «на холодном» удовлетворяет обеим формулировкам) или выведенное из страниц;
+    # основание из данных механику не показывается (своего правила у заказчика нет — ответ организаторов 27.11)
+    lines.append(f"{RULE} {k.conclusion or safe_rule(k, quotes, page_text)}")
+    if escalation:
+        lines.append(escalation)
     return "\n".join(lines)
 
 
-def for_model(k: Known, quotes: list[Quote]) -> dict[str, Any]:
+def for_model(k: Known, quotes: list[Quote], page_text: PageText | None = None) -> dict[str, Any]:
     """То же — в результат поиска, чтобы ответ модели не спорил с выводом."""
     return {
         "title": k.title,
         "quotes": [{"manual": q.label(), "text": q.quote} for q in quotes],
-        "conclusion": k.conclusion or "нет: ни одно значение не выбирай",
-        "rule": "Не выбирай одну формулировку как бесспорную. Блок с цитатами и выводом вставит код — не повторяй их "
-        "и не пиши свой «Вывод:»; дай прямой ответ по выводу (если он есть) и шаги.",
+        "conclusion": k.conclusion or f"{RULE} {safe_rule(k, quotes, page_text)}",
+        "rule": "Не выбирай одну формулировку как бесспорную. Блок с цитатами и правилом вставит код — не повторяй их "
+        "и не пиши свой «Вывод:»; дай прямой ответ по этому правилу и шаги. Не отсылай к производителю, специалисту "
+        "или главному механику.",
     }
+
+
+# ---------- безопасное правило, выведенное из страниц (ответ организаторов 27.11) ----------
+
+PageText = Callable[[str, int], str | None]
+_NUM_RE = r"\d+(?:[.,]\d+)?"
+_VALUE = re.compile(rf"(?:от\s+)?({_NUM_RE})\s*(?:(±)\s*({_NUM_RE})|(?:-|–|—|…|\.\.\.|до)\s*({_NUM_RE}))")
+_UNIT = re.compile(r"\s*(н\s*[*·⋅.]?\s*м|кпа|мпа|мм)(?![а-яё])", re.I)
+_MAIN_UNIT = {
+    **dict.fromkeys(("нм", "н*м", "н·м", "н⋅м", "н.м"), "Н·м"),
+    "кпа": "кПа",
+    "мпа": "МПа",
+    "мм": "мм",
+}
+_ALT = re.compile(r"\s*\(([^)]*)\)")
+
+
+@dataclass(frozen=True)
+class Value:
+    """Первое значение формулировки: диапазон как он написан, основная единица (если указана) и скобки за ним."""
+
+    text: str
+    lo: float
+    hi: float
+    unit: str | None
+    alt: str | None
+
+
+def _f(s: str) -> float:
+    return float(s.replace(",", "."))
+
+
+def first_value(quote: str) -> Value | None:
+    m = _VALUE.search(quote)
+    if m is None:
+        return None
+    a, pm, d, b = m.groups()
+    lo, hi = (_f(a) - _f(d), _f(a) + _f(d)) if pm else (_f(a), _f(b))
+    end = m.end()
+    unit = None
+    u = _UNIT.match(quote, end)
+    if u:
+        unit = _MAIN_UNIT.get(re.sub(r"\s", "", u.group(1).lower()))
+        end = u.end()
+    alt_m = _ALT.match(quote, end)
+    alt = re.sub(r"\s|от|до|кгс|[*·⋅.]м", "", alt_m.group(1).lower()) if alt_m else None
+    return Value(m.group(0).strip(), min(lo, hi), max(lo, hi), unit, alt)
+
+
+def _where(items: list[tuple[str, str]]) -> str:
+    """[(документ, страница-или-ссылка)] → «РК, стр. 41, 56» / «[R1], [R2]»: страницы одного документа — вместе."""
+    groups: dict[str, list[str]] = {}
+    for doc, page in items:
+        groups.setdefault(doc, []).append(page)
+    return "; ".join(f"{doc}, стр. {', '.join(p)}" if doc else ", ".join(p) for doc, p in groups.items())
+
+
+def derive(
+    items: list[tuple[str, str, str]],
+    appendix: set[tuple[str, str]] | None = None,
+) -> str:
+    """Правило по значениям формулировок `[(текст, документ, страница)]` — по порядку ответа организаторов:
+    значения совпадают в основной единице и расходятся только в пересчёте → они совпадают; диапазоны пересекаются →
+    укладываться в оба, каждый диапазон целиком со своей страницей; иначе — значение приложения, при сомнении —
+    дефектовка узла. Новых чисел (общих границ, пересчётов) правило не составляет."""
+    vals = [(first_value(t), doc, page) for t, doc, page in items]
+    if any(v is None for v, _, _ in vals) or len(vals) < 2:
+        return _NO_RULE
+    known = [(v, doc, page) for v, doc, page in vals if v is not None]
+    units = {v.unit for v, _, _ in known if v.unit}
+    if len(units) > 1:  # разные основные единицы — значения не сравнить
+        return _NO_RULE
+    unit = next(iter(units), None)
+    ranges: dict[tuple[float, float], list[tuple[Value, str, str]]] = {}
+    for v, doc, page in known:
+        ranges.setdefault((v.lo, v.hi), []).append((v, doc, page))
+    if len(ranges) == 1 and unit and len({v.alt for v, _, _ in known}) > 1:
+        v = known[0][0]
+        where = _where([(doc, page) for _, doc, page in known])
+        return (f"в {unit} значения совпадают — {v.text} {unit} ({where}); расходится только пересчёт в скобках, "
+                f"поэтому правило — значение в {unit}.")  # fmt: skip
+    spans = list(ranges)
+    if len(spans) > 1 and all(a[0] <= b[1] and b[0] <= a[1] for a in spans for b in spans):
+        parts = [f"{grp[0][0].text} ({_where([(d, p) for _, d, p in grp])})" for grp in ranges.values()]
+        return f"держите значение в пределах всех диапазонов сразу: {' и '.join(parts)}."
+    if appendix:
+        app = {(v.lo, v.hi) for v, doc, page in known if (doc, page) in appendix}
+        if len(app) == 1:
+            grp = ranges[next(iter(app))]
+            where = _where([(d, p) for _, d, p in grp if (d, p) in appendix])
+            return f"значение приложения — {grp[0][0].text} ({where}); при сомнении — дефектовка узла."
+    return _NO_RULE
+
+
+_NO_RULE = (
+    "значения не совпадают и не пересекаются, а приложение спор не решает — до работы с узлом проведите его "
+    "дефектовку и сверьте узел с описанием на страницах выше; наугад ни одно значение не применяйте."
+)
+
+
+def _short(doc: str) -> str:
+    return _DOC_SHORT.get(doc.rsplit("-", 1)[-1], doc)
+
+
+def safe_rule(k: Known, quotes: list[Quote], page_text: PageText | None = None) -> str:
+    """Безопасное правило известного противоречия без правила заказчика. Первым — отсылка: страница отсылает к
+    разделу — действует он, его словами и со страницей (слова отсылки сверяются со страницей). Затем `derive`."""
+    r = getattr(k, "refers", None)  # противоречие, замеченное моделью, — без отсылок и приложений
+    if r and page_text is not None:
+        src = page_text(r["doc"], int(r["page"]))
+        to_doc, to_page = r["to"][0], int(r["to"][1])
+        target = next((q for q in quotes if (q.doc, q.page) == (to_doc, to_page)), None)
+        to_text = page_text(to_doc, to_page) or ""
+        also = [a for a in r.get("also", []) if normalize(a["quote"]) in normalize(to_text)]
+        if src and normalize(r["text"]) in normalize(src) and target is not None:
+            rule = (f"{_short(r['doc'])}, стр. {r['page']} отсылает к разделу «{r['section']}» — действует он "
+                    f"({_short(to_doc)}, стр. {to_page}): «{target.quote}»")  # fmt: skip
+            if also:
+                rule += "; " + "; ".join(f"«{a['quote']}» ({a['note']})" for a in also)
+            tv = first_value(target.quote)
+            same = [(q, v) for q in quotes if tv and (v := first_value(q.quote)) and (v.lo, v.hi) == (tv.lo, tv.hi)]
+            if tv and tv.unit and len(same) > 1 and len({v.alt for _, v in same}) > 1:
+                where = _where([(_short(q.doc), str(q.page)) for q, _ in same])
+                rule += f". В {tv.unit} это значение совпадает ({where}); расходится только пересчёт в скобках"
+            others = [(q, v) for q in quotes if (v := first_value(q.quote)) and (q, v) not in same]
+            for q, v in others:  # значение, которое раздел не подтверждает, — названо целиком со своей страницей
+                where = f"{_short(q.doc)}, стр. {q.page}"
+                in_appendix = (q.doc, q.page) in getattr(k, "appendix", ())
+                head = f"Приложение ({where}) даёт" if in_appendix else f"На {where} —"
+                rule += f". {head} {v.text}: при отсылке действует раздел"
+            return rule + "."
+    appendix = {(_short(d), str(p)) for d, p in getattr(k, "appendix", ())}
+    return derive([(q.quote, _short(q.doc), str(q.page)) for q in quotes], appendix)
 
 
 # ---------- противоречие, которое заметила модель ----------
 
 _MODEL_HEADER = re.compile(r"^\s*(?:[⚠*#>\-\s]*)противоречи[ея] в документации", re.I)
 _QUOTE_REF = re.compile(r"«([^»]{12,})»[^\n]*?\[(R\d+)\]")
+
+
+# фраза, которая отсылает к блоку противоречия («противоречие, см. ниже»): без блока она — обрывок
+_ANNOUNCE = re.compile(r"[^.!?\n]*противоречи\w*[^.!?\n]*(?:ниже|выше|см\.)[^.!?\n]*[.!?]?", re.I)
+
+
+def drop_announcement(text: str) -> str:
+    """Блока «Противоречие в документации» в ответе нет — убрать фразы, которые на него отсылают."""
+    if HEADER in text or re.search(_MODEL_HEADER.pattern, text, re.I | re.M):
+        return text
+    out = _ANNOUNCE.sub("", text)
+    return re.sub(r"\n{3,}", "\n\n", re.sub(r"[ \t]{2,}", " ", out)).strip()
 
 
 def check_model_blocks(
@@ -186,7 +348,7 @@ def check_model_blocks(
 ) -> tuple[str, list[str]]:
     """Блок «Противоречие в документации» от модели: каждая цитата «…» [R…] — на странице этой ссылки.
     Меньше двух подтверждённых цитат — блок (заголовок и его строки до пустой строки) убирается. Подтверждённый —
-    без совета модели; `escalate([(цитата, R…), …])` ставит его в очередь и даёт строку эскалации."""
+    без совета модели, с правилом кода; `escalate([(цитата, R…), …])` ставит его в очередь и даёт строку эскалации."""
     lines = text.split("\n")
     out: list[str] = []
     notes: list[str] = []
@@ -207,10 +369,13 @@ def check_model_blocks(
                 if src and normalize(quote) in normalize(src):
                     good.append((quote, ref))
         if len(good) >= 2:
-            out.extend(ln for ln in blk if not _ADVICE_DUP.search(ln) and not ESCALATION.match(ln))
+            # совет «уточните у …» и своё правило модели — убрать; правило выводит код из подтверждённых цитат
+            keep = (ln for ln in blk if not _ADVICE_DUP.search(ln) and not _MODEL_RULE.match(ln))
+            out.extend(ln for ln in keep if not ESCALATION.match(ln))
+            out.append(f"{RULE} {derive([(q, '', f'[{ref}]') for q, ref in good])}")
             if escalate is not None:
                 out.append(escalate(good))
         else:
             notes.append("Противоречие не подтверждено цитатами со страниц — блок убран.")
         i = j
-    return "\n".join(out), notes
+    return drop_announcement("\n".join(out)), notes

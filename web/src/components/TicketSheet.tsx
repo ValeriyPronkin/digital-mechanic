@@ -9,8 +9,12 @@ import {
   type Urgency,
 } from '../api'
 import { copy } from '../copy'
+import { CHECKED } from '../lib/ui'
 import { Sheet } from './Sheet'
 import { SourceChip } from './SourceChip'
+import { PartsOffers } from './PartsOffers'
+import { shownOffers } from '../lib/offers'
+import { itemSource } from '../lib/sheet'
 
 type Sources = Record<string, SourceItem>
 const urgencyTone = { high: 'text-stop', medium: 'text-warn', low: 'text-text' } as const
@@ -93,7 +97,7 @@ function Items({
             )}
             <div className="flex min-h-9 items-center justify-between gap-2">
               <span className="-ml-0.5 min-w-0">
-                {!gone && <SourceChip source={sources[item.source]} onOpen={onOpen} />}
+                {!gone && <SourceChip source={itemSource(item, sources)} onOpen={onOpen} />}
               </span>
               <button
                 type="button"
@@ -130,6 +134,7 @@ export function TicketSheet({
   onClose,
   onCreated,
   onOpenSource,
+  focusAfter,
 }: {
   pending: TicketPending
   sources: Sources
@@ -138,6 +143,7 @@ export function TicketSheet({
   onClose: () => void
   onCreated: (ticket: TicketView) => void
   onOpenSource: (s: SourceItem) => void
+  focusAfter?: () => HTMLElement | null // where focus goes when the sheet is gone and its opener too
 }) {
   const [removedOps, setRemovedOps] = useState<Set<number>>(new Set())
   const [removedParts, setRemovedParts] = useState<Set<number>>(new Set())
@@ -203,6 +209,7 @@ export function TicketSheet({
   return (
     <Sheet
       open={!hidden}
+      focusAfter={focusAfter}
       onClose={() => {
         if (!hidden) onClose() // closing it to show a page over it is not the mechanic closing it
       }}
@@ -303,6 +310,12 @@ export function TicketSheet({
           <p className="text-dim">{copy.ticket.noParts}</p>
         )}
       </Field>
+      {/* what the suppliers have for the parts still in the ticket; for reference, it is not sent */}
+      {shownOffers(pending.parts_offers, removedParts) && (
+        <Field label={copy.ticket.offers}>
+          <PartsOffers offers={pending.parts_offers} removed={removedParts} />
+        </Field>
+      )}
       <Field label={copy.ticket.conclusion}>{p.conclusion}</Field>
       <Field label={copy.ticket.urgency}>
         {choices.length ? (
@@ -314,9 +327,19 @@ export function TicketSheet({
                 role="radio"
                 aria-checked={urgency === c.level}
                 onClick={() => setUrgency(c.level)}
-                className="min-h-12 flex-1 rounded-lg border border-line px-1 text-dim aria-checked:border-accent aria-checked:bg-surface-2 aria-checked:text-text"
+                className={`min-h-12 flex-1 rounded-lg border border-line px-1 text-dim ${CHECKED}`}
               >
-                <span className="block leading-tight">{c.word}</span>
+                {/* The choice goes to ТОиР, from a phone in a garage: it is told by a shape, not by
+                    brightness alone. A filled dot in the chosen one, an empty ring in the other two. */}
+                <span className="flex items-center justify-center gap-1.5 leading-tight">
+                  <span
+                    aria-hidden
+                    className="grid size-3.5 shrink-0 place-items-center rounded-full border-[1.5px] border-current"
+                  >
+                    {urgency === c.level && <span className="size-1.5 rounded-full bg-current" />}
+                  </span>
+                  {c.word}
+                </span>
                 {c.level === pending.urgency.level && (
                   <span className="block text-[13px] leading-tight text-dim">{copy.ticket.proposed}</span>
                 )}
@@ -330,7 +353,6 @@ export function TicketSheet({
         {(chosen?.action ?? pending.urgency.action) && (
           <p className="mt-2 text-[13px]" aria-live="polite">
             {chosen?.action ?? pending.urgency.action}
-            <span className="block text-mute">{copy.verdict.recommendation}</span>
           </p>
         )}
         <p className="mt-2 text-[13px] text-dim">{copy.ticket.proposedWhy(pending.urgency.word)}</p>

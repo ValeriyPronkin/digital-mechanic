@@ -1,0 +1,2898 @@
+{
+ "label": "fix-2",
+ "set": "heldout",
+ "url": "http://127.0.0.1:8100",
+ "at": "2026-11-27 15:44",
+ "questions": 48,
+ "passed": 36,
+ "page": {
+  "ok": 35,
+  "of": 38
+ },
+ "numbers": {
+  "ok": 27,
+  "of": 32
+ },
+ "refuses": {
+  "ok": 7,
+  "of": 8
+ },
+ "refusals_by_wording": 7,
+ "says": {
+  "ok": 8,
+  "of": 8
+ },
+ "clean": {
+  "ok": 6,
+  "of": 7
+ },
+ "foreign": 0,
+ "ban_sourced": {
+  "ok": 2,
+  "of": 2
+ },
+ "opinion_clean": {
+  "ok": 0,
+  "of": 0
+ },
+ "withdrawn_answers": 2,
+ "banned_answers": 0,
+ "tickets_sent": 0,
+ "errors": 2,
+ "classes": {
+  "отказ, где ответ есть": 5,
+  "проверка кода сняла фразу с числом": 2,
+  "сбой": 2,
+  "неверная или нет страницы": 2,
+  "ответ, где руководство молчит": 1
+ },
+ "rub_total": 3.98,
+ "rub_per_question": 0.083,
+ "seconds_p50": 3.0,
+ "seconds_p95": 4.3,
+ "results": [
+  {
+   "id": "h236-injector-opening-pressure",
+   "kind": "norm",
+   "session": "S-0006",
+   "cited": [
+    [
+     "yamz-236-re",
+     37
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "yamz-236-re",
+     37
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.097,
+   "seconds": 3.0,
+   "total_seconds": 3.0,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h236-liner-size-group-b",
+   "kind": "norm",
+   "session": "S-0006",
+   "cited": [
+    [
+     "yamz-236-rk",
+     60
+    ],
+    [
+     "yamz-236-rk",
+     222
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "yamz-236-rk",
+     60
+    ],
+    [
+     "S4",
+     "yamz-236-rk",
+     222
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0878,
+   "seconds": 3.2,
+   "total_seconds": 3.2,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": false,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": false,
+   "banned": [],
+   "refusal": null,
+   "class": "отказ, где ответ есть"
+  },
+  {
+   "id": "h236-crank-cam-gear-backlash",
+   "kind": "norm",
+   "session": "S-0006",
+   "cited": [
+    [
+     "yamz-236-rk",
+     42
+    ],
+    [
+     "yamz-236-rk",
+     248
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S4",
+     "yamz-236-rk",
+     248
+    ],
+    [
+     "S1",
+     "yamz-236-rk",
+     42
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.095,
+   "seconds": 2.8,
+   "total_seconds": 2.8,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h236-flywheel-bolt-torque",
+   "kind": "norm",
+   "session": "S-0006",
+   "cited": [
+    [
+     "yamz-236-rk",
+     41
+    ],
+    [
+     "yamz-236-rk",
+     286
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S3",
+     "yamz-236-rk",
+     286
+    ],
+    [
+     "S2",
+     "yamz-236-rk",
+     41
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0891,
+   "seconds": 2.5,
+   "total_seconds": 2.5,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h236-thermostat-opening-temp",
+   "kind": "norm",
+   "session": "S-0006",
+   "cited": [
+    [
+     "yamz-236-re",
+     48
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "yamz-236-re",
+     48
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0892,
+   "seconds": 2.8,
+   "total_seconds": 2.8,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h236-power-check-rpm",
+   "kind": "norm",
+   "session": "S-0006",
+   "cited": [
+    [
+     "yamz-236-rk",
+     45
+    ],
+    [
+     "yamz-236-rk",
+     268
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S5",
+     "yamz-236-rk",
+     45
+    ],
+    [
+     "S2",
+     "yamz-236-rk",
+     268
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.1627,
+   "seconds": 4.8,
+   "total_seconds": 43.8,
+   "tools": [
+    "get_diagnosis",
+    "search_manual",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": false,
+    "page": false,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": false,
+   "banned": [],
+   "refusal": null,
+   "class": "отказ, где ответ есть"
+  },
+  {
+   "id": "h236-compressor-belt-deflection",
+   "kind": "conflict",
+   "session": "S-0006",
+   "cited": [
+    [
+     "yamz-236-re",
+     28
+    ],
+    [
+     "yamz-236-re",
+     29
+    ],
+    [
+     "yamz-236-rk",
+     259
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "yamz-236-re",
+     28
+    ],
+    [
+     "S3",
+     "yamz-236-rk",
+     259
+    ],
+    [
+     "S4",
+     "yamz-236-re",
+     29
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.1045,
+   "seconds": 3.8,
+   "total_seconds": 40.8,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h236-oil-fill-volume",
+   "kind": "variant",
+   "session": "S-0006",
+   "cited": [
+    [
+     "yamz-236-re",
+     11
+    ],
+    [
+     "yamz-236-re",
+     16
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S2",
+     "yamz-236-re",
+     11
+    ],
+    [
+     "S1",
+     "yamz-236-re",
+     16
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0772,
+   "seconds": 2.5,
+   "total_seconds": 2.5,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "clean": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h236-rod-bolt-sequence",
+   "kind": "procedure",
+   "session": "S-0006",
+   "cited": [
+    [
+     "yamz-236-rk",
+     42
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "yamz-236-rk",
+     42
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.1115,
+   "seconds": 3.7,
+   "total_seconds": 5.7,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "page": true,
+    "says": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h236-water-in-oil-causes",
+   "kind": "procedure",
+   "session": "S-0006",
+   "cited": [
+    [
+     "yamz-236-re",
+     4
+    ],
+    [
+     "yamz-236-re",
+     23
+    ],
+    [
+     "yamz-236-re",
+     54
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S3",
+     "yamz-236-re",
+     54
+    ],
+    [
+     "S5",
+     "yamz-236-re",
+     23
+    ],
+    [
+     "S1",
+     "yamz-236-re",
+     4
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.1704,
+   "seconds": 4.9,
+   "total_seconds": 5.9,
+   "tools": [
+    "get_diagnosis",
+    "search_manual",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "page": true,
+    "says": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h236-common-rail-pressure",
+   "kind": "refuse",
+   "session": "S-0006",
+   "cited": [
+    [
+     "yamz-236-re",
+     52
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S3",
+     "yamz-236-re",
+     52
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0494,
+   "seconds": 2.8,
+   "total_seconds": 7.8,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "refuses": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": "wording",
+   "class": null
+  },
+  {
+   "id": "h236-other-engine-yamz-7511",
+   "kind": "refuse",
+   "session": "S-0006",
+   "cited": [],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [],
+   "tickets_sent": 0,
+   "rub": 0.0,
+   "seconds": 0.0,
+   "total_seconds": 3.0,
+   "tools": [
+    "get_diagnosis"
+   ],
+   "error": null,
+   "checks": {
+    "refuses": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": "wording",
+   "class": null
+  },
+  {
+   "id": "h536-conrod-bolts",
+   "kind": "norm",
+   "session": "S-0080",
+   "cited": [
+    [
+     "yamz-536-re",
+     99
+    ],
+    [
+     "yamz-536-rk",
+     325
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "yamz-536-rk",
+     325
+    ],
+    [
+     "S4",
+     "yamz-536-re",
+     99
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0949,
+   "seconds": 3.0,
+   "total_seconds": 6.0,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h536-rail-pressure-idle",
+   "kind": "norm",
+   "session": "S-0080",
+   "cited": [
+    [
+     "yamz-536-re",
+     191
+    ],
+    [
+     "yamz-536-re",
+     243
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S2",
+     "yamz-536-re",
+     243
+    ],
+    [
+     "S1",
+     "yamz-536-re",
+     191
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0918,
+   "seconds": 2.8,
+   "total_seconds": 2.8,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h536-thermostat-open",
+   "kind": "norm",
+   "session": "S-0080",
+   "cited": [
+    [
+     "yamz-536-re",
+     116
+    ],
+    [
+     "yamz-536-re",
+     123
+    ],
+    [
+     "yamz-536-re",
+     221
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S2",
+     "yamz-536-re",
+     116
+    ],
+    [
+     "S3",
+     "yamz-536-re",
+     123
+    ],
+    [
+     "S1",
+     "yamz-536-re",
+     221
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.083,
+   "seconds": 3.0,
+   "total_seconds": 3.0,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h536-crank-runout",
+   "kind": "norm",
+   "session": "S-0080",
+   "cited": [
+    [
+     "yamz-536-rk",
+     244
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "yamz-536-rk",
+     244
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.1001,
+   "seconds": 2.7,
+   "total_seconds": 41.7,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h536-rear-seal-depth",
+   "kind": "norm",
+   "session": "S-0080",
+   "cited": [
+    [
+     "yamz-536-rk",
+     349
+    ],
+    [
+     "yamz-536-rk",
+     351
+    ],
+    [
+     "yamz-536-rk",
+     596
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "yamz-536-rk",
+     351
+    ],
+    [
+     "S3",
+     "yamz-536-rk",
+     596
+    ],
+    [
+     "S2",
+     "yamz-536-rk",
+     349
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0934,
+   "seconds": 3.4,
+   "total_seconds": 39.4,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": false,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": false,
+   "banned": [],
+   "refusal": null,
+   "class": "отказ, где ответ есть"
+  },
+  {
+   "id": "h536-oil-volume",
+   "kind": "norm",
+   "session": "S-0080",
+   "cited": [
+    [
+     "yamz-536-re",
+     249
+    ],
+    [
+     "yamz-536-re",
+     283
+    ],
+    [
+     "yamz-536-rk",
+     13
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 1,
+   "withdrawn_claims": [
+    {
+     "text": "Контроль результата: уровень по указателю (щупу) в норме, давление масла в системе смазки прогретого до 80–100 °C двигателя при номинальной частоте вращения — 400–635 кПа (4,1–6,5 кгс/см²) [S3].",
+     "state": "unverified",
+     "missing": [
+      "100"
+     ],
+     "reason": "not_on_page",
+     "handles": [
+      "S3"
+     ]
+    }
+   ],
+   "sources_all": [
+    [
+     "S3",
+     "yamz-536-rk",
+     13
+    ],
+    [
+     "S2",
+     "yamz-536-re",
+     249
+    ],
+    [
+     "S4",
+     "yamz-536-re",
+     283
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0961,
+   "seconds": 2.7,
+   "total_seconds": 3.7,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "clean": true,
+    "own_engine": true,
+    "nothing_withdrawn": false
+   },
+   "passed": false,
+   "banned": [],
+   "refusal": null,
+   "class": "проверка кода сняла фразу с числом"
+  },
+  {
+   "id": "h536-crank-endplay",
+   "kind": "conflict",
+   "session": "S-0080",
+   "cited": [],
+   "events": [
+    "error"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [],
+   "tickets_sent": 0,
+   "rub": 0.0,
+   "seconds": 0.0,
+   "total_seconds": 4.0,
+   "tools": [],
+   "error": "HTTP 429",
+   "checks": {
+    "ran": false
+   },
+   "passed": false,
+   "banned": [],
+   "refusal": null,
+   "class": "сбой"
+  },
+  {
+   "id": "h536-max-torque",
+   "kind": "variant",
+   "session": "S-0080",
+   "cited": [
+    [
+     "yamz-536-re",
+     45
+    ],
+    [
+     "yamz-536-re",
+     58
+    ],
+    [
+     "yamz-536-re",
+     67
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "yamz-536-re",
+     45
+    ],
+    [
+     "S2",
+     "yamz-536-re",
+     58
+    ],
+    [
+     "S3",
+     "yamz-536-re",
+     67
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.095,
+   "seconds": 2.9,
+   "total_seconds": 2.9,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "clean": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h536-valve-adjust-order",
+   "kind": "procedure",
+   "session": "S-0080",
+   "cited": [
+    [
+     "yamz-536-re",
+     173
+    ],
+    [
+     "yamz-536-re",
+     174
+    ],
+    [
+     "yamz-536-re",
+     176
+    ],
+    [
+     "yamz-536-rk",
+     416
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S2",
+     "yamz-536-re",
+     173
+    ],
+    [
+     "S3",
+     "yamz-536-re",
+     176
+    ],
+    [
+     "S4",
+     "yamz-536-rk",
+     416
+    ],
+    [
+     "S1",
+     "yamz-536-re",
+     174
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0635,
+   "seconds": 3.6,
+   "total_seconds": 4.6,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "says": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h536-fuel-in-oil",
+   "kind": "procedure",
+   "session": "S-0080",
+   "cited": [
+    [
+     "yamz-536-re",
+     164
+    ],
+    [
+     "yamz-536-re",
+     192
+    ],
+    [
+     "yamz-536-re",
+     206
+    ],
+    [
+     "yamz-536-re",
+     227
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "yamz-536-re",
+     164
+    ],
+    [
+     "S3",
+     "yamz-536-re",
+     227
+    ],
+    [
+     "S4",
+     "yamz-536-re",
+     192
+    ],
+    [
+     "S5",
+     "yamz-536-re",
+     206
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.1666,
+   "seconds": 4.3,
+   "total_seconds": 10.4,
+   "tools": [
+    "get_diagnosis",
+    "search_manual",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "page": false,
+    "says": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": false,
+   "banned": [],
+   "refusal": null,
+   "class": "неверная или нет страницы"
+  },
+  {
+   "id": "h536-adblue",
+   "kind": "refuse",
+   "session": "S-0080",
+   "cited": [
+    [
+     "yamz-536-re",
+     143
+    ],
+    [
+     "yamz-536-re",
+     202
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [
+    {
+     "text": "В руководстве этого двигателя нет данных о расходе реагента (AdBlue) на 100 литров топлива и об объёме бака под мочевину — в найденных фрагментах таких норм нет.",
+     "state": "uncited",
+     "missing": [
+      "100"
+     ],
+     "reason": "no_source",
+     "handles": []
+    }
+   ],
+   "sources_all": [
+    [
+     "S5",
+     "yamz-536-re",
+     202
+    ],
+    [
+     "S7",
+     "yamz-536-re",
+     143
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.1486,
+   "seconds": 4.3,
+   "total_seconds": 8.3,
+   "tools": [
+    "get_diagnosis",
+    "search_manual",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "refuses": false,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": false,
+   "banned": [],
+   "refusal": null,
+   "class": "ответ, где руководство молчит"
+  },
+  {
+   "id": "h536-yamz238-head",
+   "kind": "refuse",
+   "session": "S-0080",
+   "cited": [],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [],
+   "tickets_sent": 0,
+   "rub": 0.0,
+   "seconds": 0.0,
+   "total_seconds": 0.0,
+   "tools": [
+    "get_diagnosis"
+   ],
+   "error": null,
+   "checks": {
+    "refuses": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": "wording",
+   "class": null
+  },
+  {
+   "id": "h5234-shatun-gaiki",
+   "kind": "norm",
+   "session": "S-0145",
+   "cited": [
+    [
+     "zmz-5234-rk",
+     124
+    ],
+    [
+     "zmz-5234-rk",
+     137
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "zmz-5234-rk",
+     124
+    ],
+    [
+     "S2",
+     "zmz-5234-rk",
+     137
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.103,
+   "seconds": 2.8,
+   "total_seconds": 2.8,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h5234-korzina-bolty",
+   "kind": "norm",
+   "session": "S-0145",
+   "cited": [
+    [
+     "zmz-5234-rk",
+     113
+    ],
+    [
+     "zmz-5234-rk",
+     114
+    ],
+    [
+     "zmz-5234-rk",
+     137
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S2",
+     "zmz-5234-rk",
+     137
+    ],
+    [
+     "S3",
+     "zmz-5234-rk",
+     113
+    ],
+    [
+     "S1",
+     "zmz-5234-rk",
+     114
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0981,
+   "seconds": 2.9,
+   "total_seconds": 3.9,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h5234-benzonasos-davlenie",
+   "kind": "norm",
+   "session": "S-0145",
+   "cited": [
+    [
+     "zmz-5234-rk",
+     46
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "zmz-5234-rk",
+     46
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.101,
+   "seconds": 3.4,
+   "total_seconds": 40.4,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "ban_sourced": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h5234-datchik-temp-om",
+   "kind": "norm",
+   "session": "S-0145",
+   "cited": [
+    [
+     "zmz-5234-rk",
+     77
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 2,
+   "withdrawn_claims": [
+    {
+     "text": "Понадобится: цифровой электронный вольтметр, миллиамперметр, эквивалентное сопротивление 100 Ом, источник питания 14 В [S1].",
+     "state": "unverified",
+     "missing": [
+      "14"
+     ],
+     "reason": "not_on_page",
+     "handles": [
+      "S1"
+     ]
+    },
+    {
+     "text": "Подать питание 14 В [S1].",
+     "state": "unverified",
+     "missing": [
+      "14"
+     ],
+     "reason": "not_on_page",
+     "handles": [
+      "S1"
+     ]
+    }
+   ],
+   "sources_all": [
+    [
+     "S1",
+     "zmz-5234-rk",
+     77
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0486,
+   "seconds": 2.6,
+   "total_seconds": 39.6,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": false
+   },
+   "passed": false,
+   "banned": [],
+   "refusal": null,
+   "class": "проверка кода сняла фразу с числом"
+  },
+  {
+   "id": "h5234-lampa-davlenie-masla",
+   "kind": "norm",
+   "session": "S-0145",
+   "cited": [
+    [
+     "zmz-5234-rk",
+     23
+    ],
+    [
+     "zmz-5234-rk",
+     76
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "zmz-5234-rk",
+     23
+    ],
+    [
+     "S2",
+     "zmz-5234-rk",
+     76
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0894,
+   "seconds": 2.6,
+   "total_seconds": 3.6,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "ban_sourced": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h5234-kolenval-osevoy",
+   "kind": "norm",
+   "session": "S-0145",
+   "cited": [],
+   "events": [
+    "error"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [],
+   "tickets_sent": 0,
+   "rub": 0.0,
+   "seconds": 0.0,
+   "total_seconds": 4.0,
+   "tools": [],
+   "error": "HTTP 429",
+   "checks": {
+    "ran": false
+   },
+   "passed": false,
+   "banned": [],
+   "refusal": null,
+   "class": "сбой"
+  },
+  {
+   "id": "h5234-golovka-skolko-gaek",
+   "kind": "norm",
+   "session": "S-0145",
+   "cited": [
+    [
+     "zmz-5234-rk",
+     16
+    ],
+    [
+     "zmz-5234-rk",
+     128
+    ],
+    [
+     "zmz-5234-rk",
+     137
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "zmz-5234-rk",
+     128
+    ],
+    [
+     "S3",
+     "zmz-5234-rk",
+     16
+    ],
+    [
+     "S2",
+     "zmz-5234-rk",
+     137
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0538,
+   "seconds": 3.3,
+   "total_seconds": 3.3,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": false,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": false,
+   "banned": [],
+   "refusal": null,
+   "class": "отказ, где ответ есть"
+  },
+  {
+   "id": "h5234-davlenie-masla-upalo",
+   "kind": "procedure",
+   "session": "S-0145",
+   "cited": [
+    [
+     "zmz-5234-rk",
+     25
+    ],
+    [
+     "zmz-5234-rk",
+     102
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "zmz-5234-rk",
+     25
+    ],
+    [
+     "S2",
+     "zmz-5234-rk",
+     102
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0978,
+   "seconds": 3.2,
+   "total_seconds": 4.2,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "page": true,
+    "says": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h5234-vpusknoy-kollektor-poryadok",
+   "kind": "procedure",
+   "session": "S-0145",
+   "cited": [
+    [
+     "zmz-5234-rk",
+     130
+    ],
+    [
+     "zmz-5234-rk",
+     131
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S2",
+     "zmz-5234-rk",
+     130
+    ],
+    [
+     "S3",
+     "zmz-5234-rk",
+     131
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.1018,
+   "seconds": 3.1,
+   "total_seconds": 9.1,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "says": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h5234-klapan-vtulka-zazor",
+   "kind": "conflict",
+   "session": "S-0145",
+   "cited": [
+    [
+     "zmz-5234-rk",
+     20
+    ],
+    [
+     "zmz-5234-rk",
+     98
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "zmz-5234-rk",
+     98
+    ],
+    [
+     "S2",
+     "zmz-5234-rk",
+     20
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0898,
+   "seconds": 2.7,
+   "total_seconds": 6.7,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h5234-net-inzhektora",
+   "kind": "refuse",
+   "session": "S-0145",
+   "cited": [
+    [
+     "zmz-5234-rk",
+     45
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S2",
+     "zmz-5234-rk",
+     45
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0796,
+   "seconds": 2.6,
+   "total_seconds": 5.6,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "refuses": true,
+    "clean": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": "wording",
+   "class": null
+  },
+  {
+   "id": "h5234-drugoy-dvigatel-zmz409",
+   "kind": "refuse",
+   "session": "S-0145",
+   "cited": [],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [],
+   "tickets_sent": 0,
+   "rub": 0.0,
+   "seconds": 0.0,
+   "total_seconds": 1.0,
+   "tools": [
+    "get_diagnosis"
+   ],
+   "error": null,
+   "checks": {
+    "refuses": true,
+    "clean": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": "wording",
+   "class": null
+  },
+  {
+   "id": "h409-head-bolts",
+   "kind": "norm",
+   "session": "S-0164",
+   "cited": [
+    [
+     "zmz-409-rk",
+     180
+    ],
+    [
+     "zmz-409-rk",
+     231
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "zmz-409-rk",
+     180
+    ],
+    [
+     "S2",
+     "zmz-409-rk",
+     231
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.1063,
+   "seconds": 2.5,
+   "total_seconds": 2.5,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h409-crank-endplay",
+   "kind": "norm",
+   "session": "S-0191",
+   "cited": [
+    [
+     "zmz-409-rk",
+     166
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S2",
+     "zmz-409-rk",
+     166
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0493,
+   "seconds": 3.1,
+   "total_seconds": 42.1,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h409-oil-ring-gap",
+   "kind": "norm",
+   "session": "S-0164",
+   "cited": [
+    [
+     "zmz-409-rk",
+     175
+    ],
+    [
+     "zmz-409-rk",
+     176
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S2",
+     "zmz-409-rk",
+     175
+    ],
+    [
+     "S1",
+     "zmz-409-rk",
+     176
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0919,
+   "seconds": 3.3,
+   "total_seconds": 39.3,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h409-oil-gauge-ohms",
+   "kind": "norm",
+   "session": "S-0191",
+   "cited": [
+    [
+     "zmz-409-rk",
+     89
+    ],
+    [
+     "zmz-409-rk",
+     111
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "zmz-409-rk",
+     111
+    ],
+    [
+     "S3",
+     "zmz-409-rk",
+     89
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0943,
+   "seconds": 2.9,
+   "total_seconds": 3.9,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h409-cam-angle-intake",
+   "kind": "norm",
+   "session": "S-0164",
+   "cited": [
+    [
+     "zmz-409-rk",
+     138
+    ],
+    [
+     "zmz-409-rk",
+     141
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "zmz-409-rk",
+     138
+    ],
+    [
+     "S3",
+     "zmz-409-rk",
+     141
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.1033,
+   "seconds": 3.8,
+   "total_seconds": 5.8,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": false,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": false,
+   "banned": [],
+   "refusal": null,
+   "class": "отказ, где ответ есть"
+  },
+  {
+   "id": "h409-thermostat-stroke",
+   "kind": "norm",
+   "session": "S-0191",
+   "cited": [
+    [
+     "zmz-409-rk",
+     151
+    ],
+    [
+     "zmz-409-rk",
+     152
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "zmz-409-rk",
+     152
+    ],
+    [
+     "S2",
+     "zmz-409-rk",
+     151
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0846,
+   "seconds": 2.6,
+   "total_seconds": 4.6,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h409-cam-sprocket-bolts",
+   "kind": "conflict",
+   "session": "S-0164",
+   "cited": [
+    [
+     "zmz-409-rk",
+     178
+    ],
+    [
+     "zmz-409-rk",
+     230
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S2",
+     "zmz-409-rk",
+     230
+    ],
+    [
+     "S1",
+     "zmz-409-rk",
+     178
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0495,
+   "seconds": 3.2,
+   "total_seconds": 9.2,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h409-lifter-knock",
+   "kind": "procedure",
+   "session": "S-0191",
+   "cited": [
+    [
+     "zmz-409-rk",
+     142
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S2",
+     "zmz-409-rk",
+     142
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.102,
+   "seconds": 3.2,
+   "total_seconds": 7.2,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "page": true,
+    "says": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h409-idle-stall",
+   "kind": "procedure",
+   "session": "S-0164",
+   "cited": [
+    [
+     "zmz-409-rk",
+     69
+    ],
+    [
+     "zmz-409-rk",
+     103
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "zmz-409-rk",
+     103
+    ],
+    [
+     "S2",
+     "zmz-409-rk",
+     69
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0859,
+   "seconds": 2.7,
+   "total_seconds": 3.8,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "page": true,
+    "says": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": null,
+   "class": null
+  },
+  {
+   "id": "h409-vent-winter",
+   "kind": "variant",
+   "session": "S-0191",
+   "cited": [
+    [
+     "zmz-409-rk",
+     66
+    ],
+    [
+     "zmz-409-rk",
+     70
+    ],
+    [
+     "zmz-409-rk",
+     94
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S2",
+     "zmz-409-rk",
+     70
+    ],
+    [
+     "S1",
+     "zmz-409-rk",
+     66
+    ],
+    [
+     "S4",
+     "zmz-409-rk",
+     94
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.0879,
+   "seconds": 3.2,
+   "total_seconds": 4.2,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "numbers": true,
+    "page": false,
+    "clean": false,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": false,
+   "banned": [],
+   "refusal": null,
+   "class": "неверная или нет страницы"
+  },
+  {
+   "id": "h409-distributor-gap",
+   "kind": "refuse",
+   "session": "S-0164",
+   "cited": [
+    [
+     "zmz-409-rk",
+     102
+    ],
+    [
+     "zmz-409-rk",
+     103
+    ]
+   ],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "sources",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "usage",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [
+    [
+     "S1",
+     "zmz-409-rk",
+     103
+    ],
+    [
+     "S4",
+     "zmz-409-rk",
+     102
+    ]
+   ],
+   "tickets_sent": 0,
+   "rub": 0.095,
+   "seconds": 3.4,
+   "total_seconds": 3.4,
+   "tools": [
+    "get_diagnosis",
+    "search_manual"
+   ],
+   "error": null,
+   "checks": {
+    "refuses": true,
+    "clean": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": "wording",
+   "class": null
+  },
+  {
+   "id": "h409-diesel-head",
+   "kind": "refuse",
+   "session": "S-0191",
+   "cited": [],
+   "events": [
+    "done",
+    "language",
+    "passport",
+    "speech",
+    "text",
+    "thread",
+    "tool_result",
+    "tool_started",
+    "verification"
+   ],
+   "withdrawn": 0,
+   "withdrawn_claims": [],
+   "sources_all": [],
+   "tickets_sent": 0,
+   "rub": 0.0,
+   "seconds": 0.0,
+   "total_seconds": 37.0,
+   "tools": [
+    "get_diagnosis"
+   ],
+   "error": null,
+   "checks": {
+    "refuses": true,
+    "own_engine": true,
+    "nothing_withdrawn": true
+   },
+   "passed": true,
+   "banned": [],
+   "refusal": "wording",
+   "class": null
+  }
+ ]
+}

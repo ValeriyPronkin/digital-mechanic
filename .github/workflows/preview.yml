@@ -70,6 +70,19 @@ jobs:
           "$YC" config set folder-id "$YC_FOLDER_ID"
           "$YC" version
 
+      # ДЛЯ ВАЛЕРИЯ: материалы задачи не в git (ответ организаторов 27.11, п. 9.1) — ссылка в переменной
+      # репозитория TASK_MATERIALS_URL (Settings → Variables). Без неё образ не собрать: в нём нет парка.
+      - name: Материалы задачи (не в git, п. 9.1) — по ссылке из vars.TASK_MATERIALS_URL
+        env:
+          TASK_MATERIALS_URL: ${{ vars.TASK_MATERIALS_URL }}
+        run: |
+          set -eu
+          if [ -z "$TASK_MATERIALS_URL" ]; then
+            echo "::error::vars.TASK_MATERIALS_URL не задан — без материалов задачи образ превью не собрать"
+            exit 1
+          fi
+          python3 scripts/fetch_materials.py
+
       - name: Сборка и push образа
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}

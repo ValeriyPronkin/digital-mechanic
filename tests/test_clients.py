@@ -90,3 +90,75 @@ def test_ticket_schema_checked_before_send() -> None:
         _ticket(operations=[])
     with pytest.raises(ValueError):
         _ticket(references=[{"manual": "x", "pdf_page": 0}])
+
+
+# ---------- повтор /diagnose и сверка ответа (аудит стенда 27.11: 502 на H142OX78 в 1 из 4 прогонов) ----------
+
+GOOD = {
+    "vehicle_id": "A", "session_id": "B", "status": "normal", "anomaly_type": None, "anomaly_title": None,
+    "anomaly_score": 0.1, "confidence": 0.9, "signal_quality": "good", "description": "ок", "model_version": "m",
+}  # fmt: skip
+
+
+def _flaky(first: httpx.Response | Exception) -> tuple[MLClient, list[int]]:
+    calls: list[int] = []
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        if len(calls) == 1:
+            if isinstance(first, Exception):
+                raise first
+            return first
+        return httpx.Response(200, json=GOOD)
+
+    return MLClient(http=_mock(httpx.MockTransport(handler))), calls
+
+
+@pytest.mark.parametrize(
+    "first", [httpx.Response(502, text="bad gateway"), httpx.Response(503), httpx.ReadTimeout("slow")]
+)
+def test_diagnose_retried_once_on_5xx_or_timeout(first: httpx.Response | Exception) -> None:
+    ml, calls = _flaky(first)
+    assert ml.diagnose("A", "B").status == "normal" and len(calls) == 2
+
+
+def test_diagnose_not_retried_on_404_or_422() -> None:
+    for code in (404, 422):
+        ml, calls = _flaky(httpx.Response(code, json={"detail": "x"}))
+        with pytest.raises(ServiceError):
+            ml.diagnose("A", "B")
+        assert len(calls) == 1
+
+
+def test_diagnose_fails_after_second_5xx() -> None:
+    calls: list[int] = []
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(502)
+
+    with pytest.raises(ServiceError, match="502"):
+        MLClient(http=_mock(httpx.MockTransport(handler))).diagnose("A", "B")
+    assert len(calls) == 2  # один повтор, не больше
+
+
+def test_diagnose_reply_for_other_check_is_rejected() -> None:
+    """Ответ о другой машине или проверке — не наш результат: отказ с объяснением, выводов нет."""
+    for other in ({"vehicle_id": "X"}, {"session_id": "S-9"}):
+        transport = httpx.MockTransport(lambda _, o=other: httpx.Response(200, json={**GOOD, **o}))
+        with pytest.raises(ServiceError, match="другой"):
+            MLClient(http=_mock(transport)).diagnose("A", "B")
+
+
+def test_ticket_is_never_retried() -> None:
+    calls: list[int] = []
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(502)
+
+    with pytest.raises(ServiceError):
+        ToirClient(http=httpx.Client(base_url="http://toir", transport=httpx.MockTransport(handler))).create_ticket(
+            _ticket()
+        )
+    assert len(calls) == 1  # повтор POST /tickets мог бы создать вторую заявку

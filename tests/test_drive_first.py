@@ -31,7 +31,9 @@ def test_no_draft_on_drive_question(ml: MLClient, toir: ToirClient) -> None:
     refused = [m for m in llm.seen[-1] if m["role"] == "tool" and m.get("name") == "draft_ticket"]
     assert refused and TICKET_NOT_ASKED in str(refused[0]["content"])
     first = reply.text.split("\n\n")[0]
-    assert first.startswith("**Ездить нельзя:**") and "не эксплуатировать" in first  # вердикт — кодом, первым
+    # вердикт кода — первым, но рекомендация, а не запрет: запрет — только словами руководства с его страницей
+    assert first.startswith("**Прямого запрета эксплуатации") and "дефектовка до выпуска в рейс" in first
+    assert "нельзя" not in first and "не эксплуатировать" not in first
 
 
 def test_model_verdict_kept(ml: MLClient, toir: ToirClient) -> None:
@@ -72,5 +74,18 @@ def test_card_only_verdict_gets_manual_page(ml: MLClient, toir: ToirClient) -> N
                        prefetch=False)  # fmt: skip
     reply = ag.ask(ag.start(*Q37), QUESTION)
     first = reply.text.split("\n\n")[0]
-    assert "Ограничения эксплуатации в руководстве — стр. 91 [R" in first
+    assert first.startswith("**Нет, ездить нельзя.** [R")  # запрет модели — со страницей руководства
+    assert "По руководству, стр. 91 [R" in first and "не эксплуатировать" in first  # словами руководства
+    assert "Прямого запрета" not in reply.text
     assert (reply.sources[-1]["pdf_page"], reply.sources[-1]["manual"].startswith("ЗМЗ")) == (91, True)
+
+
+def test_no_verdict_gets_manual_words_not_no_ban_line(ml: MLClient, toir: ToirClient) -> None:
+    """Train 27.11: код писал «Прямого запрета эксплуатации… нет» и тут же ссылался на стр. 91, где «двигатель не
+    эксплуатировать». Есть фраза-запрет по теме вопроса на странице ограничений — первой строкой она, со страницей."""
+    ag, _ = make_agent([say("Цепь может быть вытянута.\n\n1. Прослушать натяжитель.")], ml, toir, LimitPages(),
+                       prefetch=False)  # fmt: skip
+    reply = ag.ask(ag.start(*Q37), QUESTION)
+    first = reply.text.split("\n\n")[0]
+    assert first.startswith("**По руководству, стр. 91 [R") and "не эксплуатировать" in first
+    assert "Прямого запрета" not in reply.text

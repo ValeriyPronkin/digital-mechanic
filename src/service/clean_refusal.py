@@ -14,7 +14,8 @@ import re
 from service.sentences import SPLIT
 
 REFUSAL = re.compile(
-    r"не нашёл|не нашел|нет в (?:найденных фрагментах|руководств)|"
+    r"не нашёл|не нашел|не найден\w*\s+в\s+руководств|в\s+руководств\w*\s+не\s+найден|"
+    r"нет в (?:найденных фрагментах|руководств)|"
     r"в (?:найденных фрагментах|руководств\w*)(?: [а-яё\-.\d ]{0,40})? (?:нет|не указан|не привед|не описан)|"
     r"не указан\w* в руководств|руководств\w* не (?:даёт|дает|указыва|приводит|описыва)",
     re.I,
@@ -29,7 +30,10 @@ _LIST = re.compile(r"^(\s*(?:\d+[.)]|[-*•])\s+)")
 NOTE = "Это отказ: значения других деталей с единицами убрал, чтобы их не приняли за ответ."
 
 
-_SERVICE_LINE = re.compile(r"^\s*(?:\**)(?:Понадобится|Безопасность|Инструмент|Источник)\w*\**\s*:", re.I)
+# служебные строки и пометка снятого утверждения («Утверждение снято: число не найдено…») — не прямой ответ
+_SERVICE_LINE = re.compile(
+    r"^\s*(?:\d+[.)]\s+)?(?:\**)(?:Понадобится|Безопасность|Инструмент|Источник|Утверждение снято)\w*\**\s*:", re.I
+)
 
 
 def is_refusal(text: str) -> bool:
@@ -63,13 +67,21 @@ def clean(text: str) -> tuple[str, bool]:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip(), removed
 
 
-_SPECIALIST = re.compile(r"специалист", re.I)
+# «к специалисту», а также отсылка решать к производителю, дилеру, сервису или главному механику (ответ организаторов
+# 27.11: механик сам специалист, нужен конкретный шаг — дефектовка узла или раздел руководства)
+_SPECIALIST = re.compile(
+    r"специалист|(?:обрат|уточн|проконсульт|свяж|запрос|узна)\w*\s+(?:\w+\s+){0,3}?(?:у|к|с|в)\s+"
+    r"(?:\w+\s+)?(?:производител|изготовител|завод|дилер|сервис|главн\w* механик)"
+    r"|(?:сообщ|доложи|передай)\w*\s+(?:\w+\s+){0,2}?(?:производител|изготовител|завод|дилер|главн\w* механик)"
+    r"|через\s+диспетчер",
+    re.I,
+)
 _REF = re.compile(r"\[R\d+\]")
 
 
 def drop_specialist(text: str) -> tuple[str, bool]:
-    """Фразы «к специалисту / уточните у специалиста» без ссылки [R…] — убрать: механик сам специалист.
-    Цитата руководства со ссылкой, где есть слово «специалист», остаётся."""
+    """Фразы «к специалисту / уточните у производителя / обратитесь к главному механику» без ссылки [R…] — убрать:
+    механик сам специалист. Цитата руководства со ссылкой, где есть слово «специалист», остаётся."""
     out, removed = [], False
     for line in text.split("\n"):
         m = _LIST.match(line)
@@ -103,10 +115,63 @@ def complete(text: str, action: str, nearest: str | None) -> tuple[str, list[str
     return f"{text.rstrip()}\n\n" + "\n".join(added), added
 
 
+_STEP_KEEP = re.compile(r"дефектовк|повтор\w*\s+(?:проверк|запис)|раздел|не из руководства|предположени", re.I)
+_NUMBERED = re.compile(r"^(\s*)(\d+)([.)])(\s+)")
+
+
+def drop_unsourced_steps(text: str) -> tuple[str, int]:
+    """Отказ «в руководстве нет»: пункты списка без ссылки [R…] — порядок работ не из руководства — убрать
+    (ответ организаторов 27.11: общие сведения — только с пометкой «не из руководства», без чисел и порядка работ).
+    Конкретный шаг (дефектовка, повторная проверка, раздел руководства) и помеченное предположение остаются.
+    Нумерация после удаления — подряд."""
+    if not is_refusal(text):
+        return text, 0
+    out, removed = [], 0
+    for line in text.split("\n"):
+        if _LIST.match(line) and not _REF.search(line) and not _STEP_KEEP.search(line):
+            removed += 1
+            continue
+        out.append(line)
+    return renumber("\n".join(out)), removed
+
+
+def renumber(text: str) -> str:
+    """Нумерованный список без пропусков: «1. / 3. / 4.» → «1. / 2. / 3.». Список кончается на строке без номера."""
+    out, n = [], 0
+    for line in text.split("\n"):
+        m = _NUMBERED.match(line)
+        if m:
+            n += 1
+            line = f"{m.group(1)}{n}{m.group(3)}{m.group(4)}{line[m.end() :]}"
+        elif line.strip():
+            n = 0
+        out.append(line)
+    return "\n".join(out)
+
+
+def unmark_absence(text: str) -> tuple[str, int]:
+    """Фраза «в руководстве этого нет» — утверждение об отсутствии: ссылок на страницы у неё не бывает (стенд 27.11:
+    четыре посторонние страницы и «(испытания на стенде)» под «давления в шинах в руководстве нет»). Ссылки с такой
+    фразы снимаются; страницы, на которые больше ничто не ссылается, уходят из источников ответа."""
+    out, removed = [], 0
+    for line in text.split("\n"):
+        m = _LIST.match(line)
+        prefix = m.group(1) if m else ""
+        parts = [p for p in _SENT.split(line[len(prefix) :]) if p]
+        fixed = []
+        for p in parts:
+            if REFUSAL.search(p) and _REF.search(p) and not NUM_UNIT.search(p):
+                removed += len(_REF.findall(p))
+                p = re.sub(r"\s*\[R\d+\]", "", p)
+            fixed.append(p)
+        out.append(prefix + " ".join(fixed) if parts else line)
+    return "\n".join(out), removed
+
+
 # Правило заказчика (приёмщик 27.11): часть ответа без ссылки на руководство — не нумерованный шаг. «5. Уточнить …»,
 # «5. … нужна дефектовка» выглядят как шаг процедуры руководства. Такие строки — одной строкой «Что сделать: …» без
 # номера после списка; шаги со ссылкой [R…] остаются шагами, номера после вынутых сдвигаются.
-_NUMBERED = re.compile(r"^(\s*)(\d+)([.)]\s+)(.*)$")
+_STEP_LINE = re.compile(r"^(\s*)(\d+)([.)]\s+)(.*)$")
 _GAP = re.compile(
     REFUSAL.pattern + r"|уточн\w*|не из руководств|мнение помощника|дефектовк|производител|не нашёл|не нашел",
     re.I,
@@ -139,7 +204,7 @@ def unnumber_gaps(text: str, label: str = ACTION_LABEL) -> tuple[str, int]:
             pulled = []
 
     for line in text.split("\n"):
-        m = _NUMBERED.match(line)
+        m = _STEP_LINE.match(line)
         if m and not _REF.search(line) and (every or _GAP.search(m.group(4))):
             pulled.append(m.group(4).strip())
             shift += 1
@@ -150,7 +215,7 @@ def unnumber_gaps(text: str, label: str = ACTION_LABEL) -> tuple[str, int]:
                 line = f"{m.group(1)}{int(m.group(2)) - shift}{m.group(3)}{m.group(4)}"
             out.append(line)
             continue
-        if line.strip() and line[:1].isspace() and out and _NUMBERED.match(out[-1]):
+        if line.strip() and line[:1].isspace() and out and _STEP_LINE.match(out[-1]):
             out.append(line)  # продолжение шага с отступом
             continue
         flush()

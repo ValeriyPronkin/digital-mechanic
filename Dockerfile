@@ -15,6 +15,9 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 COPY data ./data
+# Парк и справочник — материалы задачи, не в git: до сборки — make fetch-materials (TASK_MATERIALS_URL)
+RUN test -f data/vehicles.json && test -f data/fault_types.json \
+    || { echo "нет data/vehicles.json или data/fault_types.json — сначала make fetch-materials" >&2; exit 1; }
 COPY --from=web /web/dist ./web/dist
 RUN uv sync --frozen --no-dev && chown -R app:app /app
 

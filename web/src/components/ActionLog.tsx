@@ -31,7 +31,7 @@ export function ActionLog({
   const issued = onOpen ? Object.values(sources) : [] // with nothing to open a page with, pages are named in words
   return (
     <details className="group text-[13px] text-dim">
-      <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+      <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 hover:text-text [&::-webkit-details-marker]:hidden">
         <svg
           width="12"
           height="12"
@@ -88,15 +88,15 @@ function PassportSection({ passport }: { passport: Passport }) {
   }
   return (
     <li className="space-y-2 pt-2">
-      <span className="block font-semibold text-text">Паспорт запроса</span>
+      <span className="block font-semibold text-text">{copy.passport.title}</span>
       {rows.fragments.length > 0 && (
         <div>
-          <span className="block">Что ушло в модель из руководства</span>
+          <span className="block">{copy.passport.fragments}</span>
           <ul className="mt-0.5 space-y-0.5">
             {rows.fragments.map((f, i) => (
               <li key={i} className={f.used ? 'text-text' : 'text-mute'}>
                 {f.used ? '✓ ' : '— '}
-                {f.label} · {f.tokens} · {f.used ? 'в ответе' : 'не пошло в ответ'}
+                {f.label} · {f.tokens} · {f.used ? copy.passport.used : copy.passport.unused}
               </li>
             ))}
           </ul>
@@ -104,7 +104,7 @@ function PassportSection({ passport }: { passport: Passport }) {
       )}
       {rows.calls.length > 0 && (
         <div>
-          <span className="block">Вызовы модели: токены вход / выход</span>
+          <span className="block">{copy.passport.calls}</span>
           <ul className="mt-0.5 space-y-0.5">
             {rows.calls.map((c, i) => (
               <li key={i}>
@@ -115,7 +115,7 @@ function PassportSection({ passport }: { passport: Passport }) {
         </div>
       )}
       <div>
-        <span className="block">Правила кода</span>
+        <span className="block">{copy.passport.rules}</span>
         <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
           {rows.rules.map((r, i) => (
             <li key={i}>{r}</li>
@@ -131,7 +131,7 @@ function PassportSection({ passport }: { passport: Passport }) {
         ))}
       </dl>
       <button type="button" onClick={download} className="min-h-12 text-accent underline-offset-2 hover:underline">
-        Скачать паспорт (JSON)
+        {copy.passport.download}
       </button>
     </li>
   )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from service import main
@@ -21,6 +22,7 @@ from service.fleet_status import (
 
 client = TestClient(main.app)
 CRITICAL = {"F02", "F03", "F14"}
+HARMLESS = {"F05", "F11"}  # класс 1: двигателю не грозит — не выше среднего
 
 
 def expected_status(v: Vehicle) -> str:
@@ -32,7 +34,8 @@ def expected_status(v: Vehicle) -> str:
         code = last.anomaly_type or ""
         if code and not is_compatible(code, v.engine_model):
             return "quarantine"
-        if code in CRITICAL or (last.anomaly_score or 0) >= 0.85:
+        doubtful = (last.confidence or 0) < 0.6 or last.signal_quality == "warning"
+        if code in CRITICAL or ((last.anomaly_score or 0) >= 0.85 and code not in HARMLESS and not doubtful):
             return "quarantine"
         return "attention"
     if last.signal_quality == "warning" or (last.anomaly_score or 0) >= 0.30:
@@ -40,6 +43,7 @@ def expected_status(v: Vehicle) -> str:
     return "normal"
 
 
+@pytest.mark.materials
 def test_summary_of_50_vehicles_matches_rule() -> None:
     f = fleet()
     s = summary(f)
@@ -50,6 +54,7 @@ def test_summary_of_50_vehicles_matches_rule() -> None:
         assert s["counts"][k] == sum(1 for x in got.values() if x == k)
 
 
+@pytest.mark.materials
 def test_priority_order_and_reasons() -> None:
     s = summary(fleet())
     order = {"quarantine": 0, "attention": 1, "rerecord": 2}
@@ -58,6 +63,7 @@ def test_priority_order_and_reasons() -> None:
     assert all(r["reasons"] for r in s["priority"])  # у каждой строки — почему
 
 
+@pytest.mark.materials
 def test_incompatible_code_is_quarantine() -> None:
     for v in fleet().vehicles:
         last = ordered(v)[-1]
@@ -108,6 +114,7 @@ def test_trend_up_flat_and_failed_check_is_a_gap() -> None:
     assert [p["score"] for p in t["points"]] == [0.30, None, 0.35]  # сбой — разрыв, а не ноль
 
 
+@pytest.mark.materials
 def test_real_vehicle_with_failed_check_in_the_middle() -> None:
     v = fleet().vehicle("A464EP47")
     assert v is not None
@@ -117,6 +124,7 @@ def test_real_vehicle_with_failed_check_in_the_middle() -> None:
     assert t["trend"] == TREND_DOWN  # 0,77 → 0,04 после отклонения — не значит исправно
 
 
+@pytest.mark.materials
 def test_api_summary_vehicle_and_page() -> None:
     s = client.get("/api/fleet").json()
     assert s["total"] == 50 and s["priority"][0]["status"] == "quarantine"
@@ -128,8 +136,8 @@ def test_api_summary_vehicle_and_page() -> None:
     assert v["tickets"] == [] or "ticket_id" in v["tickets"][0]
     assert client.get("/api/fleet/NOPE").status_code == 404
     page = client.get("/fleet")
-    assert page.status_code == 200 and 'href="/"' in page.text and "/api/fleet" in page.text
-    assert 'href="/fleet"' in client.get("/").text  # ссылка с главной
+    assert page.status_code == 200 and 'href="/v1"' in page.text and "/api/fleet" in page.text
+    assert 'href="/fleet"' in client.get("/v1").text  # ссылка с прежней главной
 
 
 def test_agent_tool_returns_same_summary(ml, toir) -> None:  # type: ignore[no-untyped-def]

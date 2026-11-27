@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getFleet, type FleetView } from './api'
 import { FleetList, type Role } from './components/FleetList'
-import { LevelQuestion } from './components/LevelQuestion'
+import { REGISTER, TicketRegister } from './components/TicketRegister'
 import { VehicleScreen } from './components/VehicleScreen'
 import { copy } from './copy'
-import { isLevelChosen } from './lib/level'
+import { tabTitle } from './lib/ui'
 
 const fromHash = () => decodeURIComponent(window.location.hash.replace(/^#\/?/, '')) || null
 const savedRole = (): Role => (localStorage.getItem('role') === 'chief' ? 'chief' : 'mechanic')
@@ -15,8 +15,6 @@ export default function App() {
   const [failed, setFailed] = useState(false)
   const [selected, setSelected] = useState<string | null>(fromHash)
   const [role, setRole] = useState<Role>(savedRole)
-  // the first visit asks a mechanic once how to explain (#17); the chief mechanic reads the fleet, not answers
-  const [askLevel, setAskLevel] = useState(() => !isLevelChosen())
 
   // Also called after a ticket or an outcome: the list shows «заявка создана» and the outcome counts.
   // If that reload fails, the list already on the screen stays; only an empty screen says it failed.
@@ -40,6 +38,11 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHash)
   }, [loadFleet])
 
+  // The tab says which vehicle it shows: a jury member with two tabs open can tell them apart.
+  useEffect(() => {
+    document.title = tabTitle(copy.product, selected === REGISTER ? copy.register.title : selected)
+  }, [selected])
+
   const select = (id: string | null) => {
     window.location.hash = id ? `/${encodeURIComponent(id)}` : ''
   }
@@ -50,7 +53,6 @@ export default function App() {
 
   return (
     <div className="flex h-dvh">
-      {askLevel && role === 'mechanic' && <LevelQuestion onDone={() => setAskLevel(false)} />}
       <aside
         className={`w-full shrink-0 border-line min-[900px]:block min-[900px]:w-[360px] min-[900px]:border-r ${selected ? 'hidden' : ''}`}
       >
@@ -65,7 +67,9 @@ export default function App() {
         />
       </aside>
       <main className={`min-w-0 flex-1 ${selected ? '' : 'hidden min-[900px]:block'}`}>
-        {selected ? (
+        {selected === REGISTER ? (
+          <TicketRegister onBack={() => select(null)} />
+        ) : selected ? (
           <VehicleScreen key={selected} vehicleId={selected} onBack={() => select(null)} onTicketsChanged={loadFleet} />
         ) : (
           <div className="grid h-full place-items-center p-8 text-center">

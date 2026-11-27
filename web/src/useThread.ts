@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   getThread,
+  getVerdict,
   streamChat,
   type Block,
   type ChatEvent,
@@ -12,9 +13,12 @@ import {
   type Passport,
   type SpeechInfo,
   type Verification,
+  type LanguageInfo,
 } from './api'
 import { copy } from './copy'
-import { getLevel, type Level } from './lib/level'
+import type { LevelChoice } from './lib/level'
+import { chatLang, getLang } from './lib/lang'
+import { isVerdictOf, shownVerdict, withVerdict } from './lib/verdict'
 
 export interface AssistantTurn {
   role: 'assistant'
@@ -25,10 +29,13 @@ export interface AssistantTurn {
   verification?: Verification
   passport?: Passport // our request passport (#31): steps, context, tokens, ₽
   speech?: SpeechInfo // the short spoken version (#14) for «Прослушать»
+  language?: LanguageInfo // the language the answer was given in (PR #83)
+  back_translation?: string | null // the answer in Russian when it is in another language: «Показать по-русски»
   progress?: string // the line shown while a tool runs
   error?: string
   reason?: string
   live?: boolean
+  level_used?: string // the level the server answered at (#91); also in a restored transcript
 }
 export type Turn = { role: 'user'; text: string } | AssistantTurn | { role: 'ticket'; ticket: TicketView }
 
@@ -53,14 +60,21 @@ function apply(turn: AssistantTurn, e: ChatEvent): AssistantTurn {
         progress: e.label,
         tools: [...turn.tools, { id: e.id, name: e.name, label: e.label, input: e.input }],
       }
-    case 'tool_result':
+    case 'tool_result': {
+      const block = e.block
       return {
         ...turn,
         tools: turn.tools.map((t) => (t.id === e.id ? { ...t, ok: e.ok } : t)),
-        blocks: e.block ? [...turn.blocks, e.block] : turn.blocks,
+        // the card may already be here from its quick request: the stream's copy takes its place, not a second one
+        blocks: !block
+          ? turn.blocks
+          : isVerdictOf(block, null)
+            ? withVerdict(turn.blocks, block)
+            : [...turn.blocks, block],
       }
+    }
     case 'text':
-      return { ...turn, text: turn.text + e.text, progress: undefined }
+      return { ...turn, text: turn.text + e.text, progress: undefined, level_used: e.level_used ?? turn.level_used }
     case 'verification': // the checked text replaces the streamed one: failed claims are withdrawn
       return {
         ...turn,
@@ -84,6 +98,12 @@ function apply(turn: AssistantTurn, e: ChatEvent): AssistantTurn {
       const { type: _, ...speech } = e
       return { ...turn, speech }
     }
+    case 'language': {
+      const { type: _, ...language } = e
+      return { ...turn, language }
+    }
+    case 'back_translation':
+      return { ...turn, back_translation: e.text }
     case 'error':
       return { ...turn, error: e.message, progress: undefined }
     case 'done': {
@@ -103,6 +123,8 @@ function apply(turn: AssistantTurn, e: ChatEvent): AssistantTurn {
 export function useThread(vehicleId: string, attempt = 0) {
   const [state, setState] = useState<State>(EMPTY)
   const abort = useRef<AbortController | null>(null)
+  const turnsNow = useRef<Turn[]>([]) // the turns of the last render, for `send` to read without a stale closure
+  turnsNow.current = state.turns
 
   useEffect(() => {
     let stale = false
@@ -126,7 +148,7 @@ export function useThread(vehicleId: string, attempt = 0) {
   }, [vehicleId, attempt])
 
   const send = useCallback(
-    async (message: string, options: { sessionId?: string | null; newThread?: boolean; level?: Level } = {}) => {
+    async (message: string, options: { sessionId?: string | null; newThread?: boolean; level?: LevelChoice } = {}) => {
       const live: AssistantTurn = {
         role: 'assistant',
         text: '',
@@ -135,6 +157,30 @@ export function useThread(vehicleId: string, attempt = 0) {
         usage: [],
         live: true,
         progress: copy.thread.working,
+      }
+      // The card of the check, by its own quick request next to the chat: the stand sends the chat only when the
+      // whole answer is ready, the card is ready at once. Asked only when this check has no card on the screen.
+      const sessionId = options.sessionId ?? null
+      const before = options.newThread ? [] : turnsNow.current
+      const at = before.length + 1 // where this answer's turn will stand: after the question
+      if (
+        sessionId &&
+        !shownVerdict(
+          before.map((t) => (t.role === 'assistant' ? t.blocks : [])),
+          sessionId,
+        )
+      ) {
+        getVerdict(vehicleId, sessionId)
+          .then((card) =>
+            setState((s) => {
+              const turn = s.turns[at]
+              if (turn?.role !== 'assistant') return s // the conversation has moved on
+              const turns = [...s.turns]
+              turns[at] = { ...turn, blocks: withVerdict(turn.blocks, card) }
+              return { ...s, turns }
+            }),
+          )
+          .catch(() => {}) // no quick card: the chat brings it as before
       }
       setState((s) => ({
         ...s,
@@ -159,7 +205,8 @@ export function useThread(vehicleId: string, attempt = 0) {
             message,
             session_id: options.sessionId,
             new_thread: options.newThread,
-            level: options.level ?? getLevel(),
+            level: options.level ?? 'auto', // the server picks per question unless the mechanic asked for one
+            lang: chatLang(getLang()),
           },
           onEvent,
           abort.current.signal,

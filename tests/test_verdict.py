@@ -6,7 +6,8 @@ from collections import Counter
 
 import pytest
 
-from service.clients import Diagnosis, MLClient
+from materials import require
+from service.clients import Diagnosis, MLClient, ToirClient
 from service.fleet import fleet
 from service.verdict_policy import (
     BANNER_EARLY_RECHECK,
@@ -16,6 +17,8 @@ from service.verdict_policy import (
     build_card,
     urgency_for,
 )
+
+require()  # парк и справочник читаются при импорте
 
 PAIRS = [(v.vehicle_id, s.session_id) for v in fleet().vehicles for s in v.sessions]
 
@@ -73,7 +76,7 @@ def test_early_recheck_banner(ml: MLClient) -> None:
 def test_title_from_reference_not_from_response(ml: MLClient) -> None:
     diag = ml.diagnose("M333YK47", "S-0005").model_copy(update={"anomaly_title": "Двигатель исправен"})
     card = build_card(diag, fleet().fault_titles)
-    assert card.title == "Неисправность: Дизельная топливоподача"
+    assert card.title == "Вероятно: дизельная топливоподача"
 
 
 @pytest.mark.parametrize("injection", INJECTIONS)
@@ -152,14 +155,16 @@ def test_danger_class_reason_and_class3_on_noisy(ml: MLClient) -> None:
             if card.status != "anomaly" or not card.compatible or not card.fault_code:
                 continue
             cls = danger_class(card.fault_code)
-            assert card.danger_class == cls and f"класс {cls} из 3" in (card.urgency_reason or "")
+            assert card.danger_class == cls
+            assert (cls == 3) == (card.urgency_reason or "").startswith("Опасная неисправность: ")
             if cls == 3:
                 assert card.urgency == "high"
                 if d.signal_quality == "warning":
                     assert BANNER_NOISY in card.banners and BANNER_CONFIRM in card.banners
                     seen_class3_noisy = True
             elif (d.anomaly_score or 0) < 0.85:
-                assert "ниже порога 0,85" in (card.urgency_reason or "") or "уточнить" in (card.urgency_reason or "")
+                reason = card.urgency_reason or ""
+                assert "ниже порога 0,85" in reason or "повторить запись" in reason
     assert seen_class3_noisy  # в данных есть класс 3 на записи с помехами
 
 
@@ -172,15 +177,14 @@ def test_trend_rising_scores() -> None:
         return S(session_id=f"S{i}", checked_at=f"2026-11-0{i}", anomaly_score=score, status=status, signal_quality=q)
 
     h = [sess(1, 0.06), sess(2, 0.20), sess(3, 0.85), sess(4, 0.40)]
-    assert trend_for(h, "S3") == "Оценка отклонения растёт 2-ю проверку подряд: 0,06 → 0,20 → 0,85."
+    assert trend_for(h, "S3") == "Оценка отклонения растёт вторую проверку подряд: 0,06, 0,20, 0,85."
     assert trend_for(h, "S2") is None and trend_for(h, "S4") is None  # один рост — не тенденция; падение — нет
     failed = [sess(1, 0.06), sess(2, 0.0, "check_failed"), sess(3, 0.20), sess(4, 0.85)]
-    assert trend_for(failed, "S4") == "Оценка отклонения растёт 2-ю проверку подряд: 0,06 → 0,20 → 0,85."
+    assert trend_for(failed, "S4") == "Оценка отклонения растёт вторую проверку подряд: 0,06, 0,20, 0,85."
 
 
-def test_trend_in_card_answer(ml: MLClient) -> None:
+def test_trend_in_card_answer(ml: MLClient, toir: ToirClient) -> None:
     """#40 п. 4: на вопрос о карточке ответ агента несёт тенденцию по истории ТС — строкой кода."""
-    from service.clients import ToirClient
     from test_agent import make_agent, say
 
     f = fleet()
@@ -191,11 +195,7 @@ def test_trend_in_card_answer(ml: MLClient) -> None:
         if s.status == "anomaly" and build_card(s, f.fault_titles, v.engine_model, v.sessions).trend
     )
     v, s = target
-    from fastapi.testclient import TestClient
-
-    from conftest import mock_toir_app
-
-    ag, _ = make_agent([say("Отклонение по карточке.")], ml, ToirClient(http=TestClient(mock_toir_app)))
+    ag, _ = make_agent([say("Отклонение по карточке.")], ml, toir)
     reply = ag.ask(ag.start(v.vehicle_id, s.session_id), "Что с двигателем?")
     assert "📈 Оценка отклонения растёт" in reply.text
 

@@ -44,10 +44,10 @@ def answer(name: str, vehicle_id: str, vehicle_engine: str) -> str:
     in_base = canonical_engine(name)
     if in_base is not None and in_base in ENGINES:
         return (
-            f"**Вопрос про {name}, а у машины {vehicle_id} двигатель {vehicle_engine}.** Отвечаю только по "
+            f"**Вопрос про {name}, а у машины {vehicle_id} двигатель {vehicle_engine}.** Ответ только по "
             f"руководствам двигателя этой машины. Чтобы спросить про {in_base}, откройте машину с этим двигателем."
         )
     return (
-        f"**Руководств на {name} в базе нет.** По машине {vehicle_id} (двигатель {vehicle_engine}) могу ответить — "
-        "спросите про её двигатель."
+        f"**Руководств на {name} в базе нет.** По машине {vehicle_id} ответ есть только про её двигатель, "
+        f"{vehicle_engine}: спросите про него."
     )

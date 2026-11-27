@@ -54,6 +54,7 @@ _OP_START = re.compile(
     r"\s(?=(?:Заменить|Отрегулировать|Проверить|Снять|Установить|Затянуть|Промыть|Устранить|Слить|Залить|"
     r"Долить|Отвернуть|Завернуть|Провернуть|Довернуть|Разобрать|Подтянуть)\b)"
 )
+_FAULT_TABLE = re.compile(r"Способ устранения|Метод устранения", re.I)
 PageText = Callable[[str, int], str | None]
 
 
@@ -98,6 +99,8 @@ def tools_for(op: Ref, page_text: str) -> list[str]:
     tail = text[start : start + len(op.quote) + 400]
     nxt = _OP_START.search(tail, len(op.quote))
     scope = tail[: nxt.start()] if nxt else tail
+    if _FAULT_TABLE.search(page_text):  # строка таблицы неисправностей цельная: дальше — уже следующая строка
+        scope = tail[: len(op.quote)]  # (F01 × ЯМЗ-236М2: «манометр» из строки о давлении масла ниже)
     best: dict[str, str] = {}  # основа слова → самая подробная форма («щупом 0,1 мм», а не «щупа»)
     for m in TOOL.finditer(scope):
         t = m.group(0).strip(" ()")

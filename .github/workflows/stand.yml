@@ -132,6 +132,20 @@ jobs:
             curl -sS -m 90 -o /dev/null -w "#$i code=%{http_code} ip=%{remote_ip} tcp=%{time_connect} tls=%{time_appconnect} ttfb=%{time_starttransfer} total=%{time_total}\n" "${URL%/}/health" || true
           done
 
+      # ДЛЯ ВАЛЕРИЯ: материалы задачи не в git (ответ организаторов 27.11, п. 9.1) — ссылка в переменной
+      # репозитория TASK_MATERIALS_URL (Settings → Variables). Без неё образ не собрать: в нём нет парка.
+      - name: Материалы задачи (не в git, п. 9.1) — по ссылке из vars.TASK_MATERIALS_URL
+        if: inputs.logs_minutes == ''
+        env:
+          TASK_MATERIALS_URL: ${{ vars.TASK_MATERIALS_URL }}
+        run: |
+          set -eu
+          if [ -z "$TASK_MATERIALS_URL" ]; then
+            echo "::error::vars.TASK_MATERIALS_URL не задан — без материалов задачи образы стенда и заглушек не собрать"
+            exit 1
+          fi
+          python3 scripts/fetch_materials.py
+
       - name: Сборка и push образов
         if: inputs.logs_minutes == ''
         run: |
@@ -154,8 +168,11 @@ jobs:
         run: |
           set -eu
           . scripts/stand_lib.sh
+          # Квота тёплых экземпляров — 2 на все контейнеры: тёплые — основной и ML; ТОиР всегда 0 (решение Валерия, 27.11).
+          # ТОиР — первым: при переходе с прежних настроек (все три тёплые) он освобождает слот до деплоя остальных.
+          TOIR_URL=$(STAND_MIN_INSTANCES=0 deploy_container "$TOIR_NAME" "$MOCK_IMAGE" 256MB 30s \
+            --environment MOCK_APP=mock_toir.app:app)
           ML_URL=$(deploy_container "$ML_NAME" "$MOCK_IMAGE" 256MB 30s --environment MOCK_APP=mock_ml.app:app)
-          TOIR_URL=$(deploy_container "$TOIR_NAME" "$MOCK_IMAGE" 256MB 30s --environment MOCK_APP=mock_toir.app:app)
           wait_health "$ML_URL"
           wait_health "$TOIR_URL"
           echo "ML_URL=$ML_URL" >> "$GITHUB_ENV"
@@ -259,7 +276,7 @@ jobs:
             echo "- Заглушки: ML ${ML_URL} · ТОиР ${TOIR_URL}"
             echo "- Смоук через Mock ML: С3 → \`$C3\`, С1 → \`$C1\`"
             echo "- Индекс руководств: \`$KB\` · голос: ключ ${VOICE}, озвучка без подписи → ${FORGED}"
-            echo "- Коммит: \`$(printf '%s' "$GITHUB_SHA" | cut -c1-7)\` · контейнер \`${CONTAINER_NAME}\` · тёплых экземпляров: ${STAND_MIN_INSTANCES}"
+            echo "- Коммит: \`$(printf '%s' "$GITHUB_SHA" | cut -c1-7)\` · контейнер \`${CONTAINER_NAME}\` · тёплых экземпляров: ${STAND_MIN_INSTANCES} (основной и ML; ТОиР — 0)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: С1 на настоящей модели
