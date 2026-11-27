@@ -38,7 +38,7 @@ from service.escalation import ContradictionQueue
 from service.fault_matrix import card_explanation, matrix_status
 from service.fleet import fleet
 from service.fleet_api import build_router as build_fleet_router
-from service.llm import provider_from_env
+from service.llm import LazyProvider
 from service.manual_search import default_searcher, manual_pdf
 from service.page_marks import PageMarks
 from service.pages import PageImages
@@ -243,7 +243,7 @@ def agent() -> Agent:
 @lru_cache(maxsize=1)
 def _agent() -> Agent:
     return Agent(
-        provider=provider_from_env(),
+        provider=LazyProvider(),  # без ключа модели карточка, парк и страницы работают
         ml=ml_client(),
         toir=ToirClient(),
         searcher=default_searcher(),

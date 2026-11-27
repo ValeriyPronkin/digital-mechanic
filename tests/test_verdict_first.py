@@ -106,3 +106,37 @@ def test_failed_check_card_by_get(ml: MLClient, toir: ToirClient) -> None:
     ag, _ = make_agent([], ml, toir)
     r = client(ag).get(f"/api/v2/vehicles/{FAILED[0]}/verdict", params={"session_id": FAILED[1]})
     assert r.status_code == 200 and r.json()["case"] == "failed" and r.json()["fault_code"] is None
+
+
+def test_without_a_model_key_the_card_still_comes(
+    ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Запуск жюри без ключа (README: «ключи моделей пока не нужны»), финальная проверка 27.11: карточка —
+    200, чат — карточка, затем «Модель недоступна.» и done. Провайдер создаётся только при вызове модели."""
+    from service.llm import LazyProvider
+
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", "deepseek")
+    ag, _ = make_agent([], ml, toir)
+    ag.provider = LazyProvider()  # то, что строит main._agent()
+    c = client(ag)
+    vid, sid = ANOMALY
+    r = c.get(f"/api/v2/vehicles/{vid}/verdict", params={"session_id": sid})
+    assert r.status_code == 200 and r.json()["kind"] == "verdict"
+    ev = chat(c, "Получить результат диагностики")
+    types = [e["type"] for e in ev]
+    assert len(verdicts(ev)) == 1 and types.index("tool_result") < types.index("error")
+    assert [e["message"] for e in ev if e["type"] == "error"] == ["Модель недоступна."]
+    assert types[-1] == "done"
+
+
+def test_the_app_agent_is_built_without_a_model_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from service.llm import LazyProvider
+
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", "deepseek")
+    main._agent.cache_clear()
+    try:
+        assert isinstance(main._agent().provider, LazyProvider)
+    finally:
+        main._agent.cache_clear()

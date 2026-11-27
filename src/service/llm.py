@@ -300,6 +300,34 @@ class GigaChatProvider:
         return reply
 
 
+_DEFAULT_MODEL = {"deepseek": "deepseek-chat", "gigachat": "GigaChat-2-Max"}
+
+
+class LazyProvider:
+    """Провайдер, который создаётся при первом вызове модели. Карточка проверки, парк и страницы руководства
+    модели не требуют и без ключа работают; без ключа падает только сам вызов — «Модель недоступна.»."""
+
+    def __init__(self) -> None:
+        self.name = os.environ.get("LLM_PROVIDER", "deepseek").strip().lower()
+        self.model = os.environ.get("LLM_MODEL") or _DEFAULT_MODEL.get(self.name, self.name)
+        self._real: LLMProvider | None = None
+
+    def chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec],
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> LLMReply:
+        if self._real is None:
+            try:
+                self._real = provider_from_env()
+            except LLMError as exc:
+                log.warning("модель не подключена: %s", exc.message)
+                raise LLMError("Модель недоступна.") from exc
+        return self._real.chat(messages, tools, max_tokens=max_tokens, temperature=temperature)
+
+
 def provider_from_env() -> LLMProvider:
     name = os.environ.get("LLM_PROVIDER", "deepseek").strip().lower()
     if name == "deepseek":
