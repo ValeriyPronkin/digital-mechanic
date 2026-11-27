@@ -520,6 +520,16 @@ def page_body(text: str) -> str:
     return "\n".join(lines)
 
 
+_NUMBER_WORDS = {"десять": "10", "двадцать": "20", "пятьдесят": "50", "сто": "100", "двести": "200", "тысяч": "1000",
+                 "тысяча": "1000", "тысячу": "1000"}  # fmt: skip
+
+
+def _asked_numbers(question: str) -> set[str]:
+    """Числа из вопроса механика — цифрами и самыми частыми словами («на сто литров»)."""
+    words = re.findall(r"[а-яё]+", question.lower())
+    return numbers(question) | {_NUMBER_WORDS[w] for w in words if w in _NUMBER_WORDS}
+
+
 def _mask_page_labels(line: str, pages: set[int]) -> tuple[str, dict[str, str]]:
     """«стр. 41» той страницы, на которую ссылается строка, — метка, а не число: на время проверки заменяется знаком
     без цифр (иначе деление на фразы после «стр.» оставило бы «41» отдельным числом). Номер другой страницы остаётся."""
@@ -1167,7 +1177,7 @@ class Agent:
                 break
             t0 = time.monotonic()
             try:
-                reply = self.provider.chat(conv.messages, tools(), max_tokens=LEVEL_MAX_TOKENS[level])
+                reply = self.provider.chat(conv.messages, self._tools_for(conv), max_tokens=LEVEL_MAX_TOKENS[level])
             except LLMError:
                 if step == 1 or not self._out_of_time(conv):
                     raise
@@ -1222,6 +1232,8 @@ class Agent:
             conv.passport["answer_lang"] = target
         original = text  # до перевода: если модель ответила по-русски, это и есть «по-русски» без нового вызова
         text = self._fix_language(conv, text, target, request_id, steps)
+        if conv.contradiction is not None:  # известное противоречие: свой блок модели заменит блок кода — его не
+            text, _ = contradictions.check_model_blocks(text, lambda ref: None)  # проверяем и не «снимаем» (eval 27.11)
         final, grounded, notes, cited = self.guard(conv, text)
         withdrawn = list(conv.withdrawn)  # back-перевод ниже снова вызывает guard
         final, cited, more = self._contradiction_text(conv, final, cited)
@@ -1443,6 +1455,12 @@ class Agent:
                     "question": f"Что проверить по неисправности {card.fault_code} «{title}»?"}  # fmt: skip
         return text.rstrip(), followup
 
+    def _tools_for(self, conv: Conversation) -> list[ToolSpec]:
+        """Сбой записи — поиска по руководству у модели нет вовсе (отказ в `_run_tool` — запасной)."""
+        if conv.card is not None and conv.card.status == "check_failed":
+            return [t for t in tools() if t.name not in ("search_manual", "read_pages")]
+        return tools()
+
     def _mismatch_steps(self, conv: Conversation, text: str) -> str:
         """Проверка назвала узел, которого у двигателя нет (код несовместим): в ответе — оба пути, повторить проверку и
         дефектовка (ответ организаторов 27.11: конкретный шаг; golden mismatch-*: на настойчивый вопрос модель
@@ -1631,6 +1649,7 @@ class Agent:
 
         ctx = self._number_context(conv)
         allowed = self._source_numbers(conv, cited)
+        asked = _asked_numbers(_last_question(conv))
         question = _last_question(conv)
         page_text = getattr(self.searcher, "page_text", None)
 
@@ -1671,6 +1690,8 @@ class Agent:
                 # ссылки ни в предложении, ни в строке — как раньше, по всем источникам ответа
                 own = [r for r in _REF.findall(part) if r in conv.sources] or line_refs
                 need = ctx.needs_source(part, {conv.sources[r].pdf_page for r in own})
+                if not own and clean_refusal.REFUSAL.search(part):
+                    need -= asked  # «в руководстве нет … на 100 л» — число вопроса механика, а не со страницы
                 if need - allowed:
                     dropped += 1
                     state = "unverified" if own else "uncited"
@@ -1782,6 +1803,10 @@ class Agent:
             found = _PART_DESIGNATION.findall(" ".join(conv.draft.body.spare_parts))
             labels += found + [re.sub(r"-[А-ЯA-Z0-9]{1,3}$", "", d) for d in found]  # «236-1007118-В» и «236-1007118»
         labels += [d.designation for d in DOCS_BY_ID.values()]
+        # код документа отдельно от полного обозначения: «руководство 536.3902150 РЭ» (heldout h536-max-torque)
+        labels += [
+            code for d in DOCS_BY_ID.values() for code in re.findall(r"\d{3}[.-]\d{7}(?:-[А-ЯA-Z])?", d.designation)
+        ]
         ordered = tuple(sorted({x for x in labels if x}, key=len, reverse=True))
         return NumberContext(ordered, tuple(dates), frozenset(bare), frozenset(percent))
 
@@ -2085,6 +2110,13 @@ class Agent:
             # блок — только под ответом на вопрос о спорной теме (зазоры), а не под диагнозом или «можно ли ехать»
             k = contradictions.match_answer(conv.vehicle.engine_model, text)
             if k is not None and not k.topic.search(_last_question(conv)):
+                # ответ не о спорной теме, но называет спорный срок или значение (B418HK98, текст к черновику заявки:
+                # «не позднее 15 минут после остановки [S2]») — без блока, но вместо одной формулировки — правило
+                page_text = getattr(self.searcher, "page_text", None)
+                quotes = contradictions.verified_quotes(k, page_text)
+                if len(quotes) >= 2:
+                    rule = k.conclusion or contradictions.safe_rule(k, quotes, page_text)
+                    text = contradictions.neutralize(k, text, f"{contradictions.RULE} {rule}")
                 k = None
             if k is not None:
                 quotes = contradictions.verified_quotes(k, getattr(self.searcher, "page_text", None))

@@ -117,10 +117,12 @@ _ADVICE_DUP = re.compile(
 _MODEL_RULE = re.compile(r"^\s*(?:[*\-•]\s*)?\**(?:безопасное правило|вывод)\**\s*:", re.I)
 
 
-def neutralize(k: Known, text: str) -> str:
+def neutralize(k: Known, text: str, safe_line: str | None = None) -> str:
     """Ответ модели рядом с блоком кода: строки, где модель выбрала одну формулировку по спорной теме, — вывод
-    заказчика со ссылкой на блок; «противоречий нет», свой «Вывод:» и повтор совета — убрать."""
+    заказчика со ссылкой на блок; «противоречий нет», свой «Вывод:» и повтор совета — убрать. `safe_line` — чем
+    заменить без блока (ответ не о спорной теме, но называет спорный срок или значение)."""
     out: list[str] = []
+    safe = safe_line or k.safe_line
     for ln in text.split("\n"):
         if _NO_CONTRADICTION.search(ln) or _ADVICE_DUP.search(ln) or _MODEL_RULE.match(ln):
             continue
@@ -130,7 +132,7 @@ def neutralize(k: Known, text: str) -> str:
             # заменяется только фраза о сроке: остальное в строке (значение зазора, ссылка) остаётся
             parts = [p for p in _SENT.split(ln[len(prefix) :]) if p.strip()]
             kept = [p for p in parts if not k.claim.search(p)]
-            safe_seen = any(k.safe_line in o for o in out)
+            safe_seen = any(safe in o for o in out)
             if safe_seen and not kept and not re.match(r"\s*\d", prefix):
                 continue  # вывод уже есть; нумерованный шаг оставляем — нумерация не ломается
             if not prefix and safe_seen:
@@ -138,7 +140,7 @@ def neutralize(k: Known, text: str) -> str:
                     continue  # вне списка вывод — один раз
                 ln = " ".join(kept)
             else:
-                ln = prefix + " ".join([*kept, k.safe_line])
+                ln = prefix + " ".join([*kept, safe])
         out.append(ln)
     return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
 

@@ -194,3 +194,30 @@ def test_safe_line_once_for_bullets(ml: MLClient, toir: ToirClient) -> None:
                        ml, toir, TorquePages())  # fmt: skip
     text = ag.ask(ag.start("M260EH47", "S-0079"), "Какой момент затяжки болтов скоб форсунок?").text
     assert text.count("указан по-разному") == 1 and not text.startswith("\n")
+
+
+def test_model_block_under_known_conflict_is_not_withdrawn(ml: MLClient, toir: ToirClient) -> None:
+    """golden torque-236 (eval 27.11): свои цитаты модели в блоке «Противоречие в документации» с чужими ссылками
+    снимались — а блок всё равно заменяет блок кода. Теперь блок модели убирается до проверки: снятых нет."""
+    answer = (
+        "Затянуть по разделу сборки [R1].\n\nПротиворечие в документации:\n"
+        "- «вертикальные 430-470 (43-47)» [R1]\n- «от 421 до 461 Н·м» [R1]"
+    )
+    ag, _ = make_agent([say(answer)], ml, toir, TorquePages())
+    reply = ag.ask(ag.start("B418HK98", "S-0007"), "С каким моментом тянуть болты крышек коренных подшипников?")
+    assert HEADER in reply.text and "Утверждение снято" not in reply.text and reply.withdrawn == []
+
+
+def test_disputed_timing_outside_the_topic_gets_the_rule_without_block(ml: MLClient, toir: ToirClient) -> None:
+    """B418HK98 (видео), текст к черновику заявки: «регулировка — на холодном или не позднее 15 минут после остановки»
+    по одной странице. Блок противоречия только под вопросом о зазорах, а здесь — правило вместо одной формулировки."""
+    answer = (
+        "Черновик готов: дефектовка клапанного механизма.\n\n"
+        "1. Регулировка — на холодном двигателе или не позднее 15 минут после остановки [R1]."
+    )
+    from test_agent import call
+
+    ag, _ = make_agent([call("search_manual", query="регулировка зазоров"), say(answer)], ml, toir, Manual236())
+    reply = ag.ask(ag.start("B418HK98", "S-0007"), "Создай заявку на дефектовку.")
+    assert "не позднее 15 минут" not in reply.text and HEADER not in reply.text
+    assert "1. Безопасное правило: Регулировать зазоры на холодном двигателе" in reply.text
