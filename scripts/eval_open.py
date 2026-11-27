@@ -100,11 +100,17 @@ def main() -> int:
     ap.add_argument("--label", default=f"{datetime.now():%Y%m%d-%H%M}")
     ap.add_argument("--only", help="номера через запятую, например Q02,Q20")
     ap.add_argument("--show", action="store_true", help="печатать ответы (для разбора; в отчёт не идут)")
-    ap.add_argument("--set", default="open", choices=["open", "multi"], help="multi — многоязычный набор")
+    ap.add_argument(
+        "--set",
+        default="open",
+        choices=["open", "multi", "parts"],
+        help="multi — многоязычный набор; parts — «какой инструмент / какие запчасти»",
+    )
     ap.add_argument("--level", default="auto", help="уровень механика: auto (по вопросу), novice, mechanic, master")
     args = ap.parse_args()
-    default = DEFAULT if args.set == "open" else str(ROOT / ".state" / "questions_multi.jsonl")
-    path = Path(os.environ.get("EVAL_OPEN" if args.set == "open" else "EVAL_MULTI", default)).expanduser()
+    default = DEFAULT if args.set == "open" else str(ROOT / ".state" / f"questions_{args.set}.jsonl")
+    env = {"open": "EVAL_OPEN", "multi": "EVAL_MULTI", "parts": "EVAL_PARTS"}[args.set]
+    path = Path(os.environ.get(env, default)).expanduser()
     questions = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     if args.only:
         questions = [q for q in questions if q["id"] in args.only.split(",")]
@@ -148,8 +154,8 @@ ANSWERS = ROOT / ".state" / "eval"  # ответы для разбора — в�
 
 
 def write(label: str, results: list[dict[str, Any]], kind: str = "open") -> None:
-    out = OUT if kind == "open" else ROOT / "reports" / "eval-multi"
-    md = ROOT / "reports" / ("eval-open.md" if kind == "open" else "eval-multi.md")
+    out = OUT if kind == "open" else ROOT / "reports" / f"eval-{kind}"
+    md = ROOT / "reports" / f"eval-{kind}.md"
     out.mkdir(parents=True, exist_ok=True)
     n = len(results)
     answerable = [r for r in results if r.get("page") is not None]

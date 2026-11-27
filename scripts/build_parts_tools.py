@@ -57,6 +57,7 @@ _NOT_A_PART = re.compile(
     r"прибор$|отремонт|восстанов|выправ)",
     re.I,
 )
+_VERB = re.compile(r"(?:ить|ать|ять|еть|уть)$", re.I)  # «заменить» — обрывок разбора, не деталь
 _WORN = re.compile(r"^(?:неисправн|поврежд|изношен|вышедш|деформирован|данн|эти|этот|эту)\w*$", re.I)
 # специальный инструмент ЗМЗ в перечне: «ЗМ 7853-4418 – Оправка для …», «6999-7679 Съемник подшипника …»
 SPECIAL_ROW = re.compile(
@@ -161,7 +162,7 @@ def _part_name(raw: str) -> str:
             break
     while words and _WORN.match(words[0]):
         words = words[1:]  # «неисправный датчик» → «датчик»: состояние — не название
-    if not words or _ADJ.search(words[-1]) or _NOT_A_PART.match(" ".join(words)):
+    if not words or _ADJ.search(words[-1]) or _NOT_A_PART.match(" ".join(words)) or _VERB.search(words[-1]):
         return ""
     return " ".join(words)
 

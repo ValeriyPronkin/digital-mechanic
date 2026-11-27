@@ -1,4 +1,4 @@
-.PHONY: fetch-materials run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check reset-demo logs spend-probe eval-open eval-golden eval-sweep eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx cost-final index kb-publish kb-fetch pages-render pages-publish
+.PHONY: fetch-materials run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check reset-demo logs spend-probe eval-open eval-parts eval-golden eval-sweep eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx cost-final index kb-publish kb-fetch pages-render pages-publish
 
 PORT ?= 8000
 
@@ -95,6 +95,10 @@ eval-golden: install
 ## до листа подтверждения, без отправки — reports/eval-sweep.md. Сервис — make run (EVAL_URL) или стенд
 eval-sweep: install
 	uv run python scripts/eval_sweep.py --label $(or $(LABEL),$(shell date +%Y%m%d-%H%M)) $(if $(EVAL_URL),--url $(EVAL_URL),) $(EVAL_ARGS)
+
+## Набор «какой инструмент / какие запчасти» (ночь 27→28.11): .state/questions_parts.jsonl — reports/eval-parts.md
+eval-parts: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/eval_open.py --set parts --label $(or $(LABEL),$(shell date +%Y%m%d-%H%M))
 
 ## Стабильность (штурман 26.11): RUNS прогонов eval-open с префиксом PREFIX и сводка по ним
 eval-stability: install
