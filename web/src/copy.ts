@@ -69,7 +69,6 @@ export const copy = {
     recording: 'Запись',
     urgency: 'Приоритет',
     why: 'Почему такой приоритет',
-    recommendation: 'Это рекомендация, а не запрет. Запрет действует, только если он записан в руководстве',
     heard: 'По записи',
     // A result that does not fit the engine: the check's own figures in one small line, not as the card's facts.
     byCheck: 'По данным проверки',
