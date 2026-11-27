@@ -128,3 +128,14 @@ def test_service_ban_is_not_a_drive_verdict() -> None:
     assert _SERVICE_ONLY.search("Буксировка автомобиля с включенной передачей не допускается.")
     oil = "Допускается работа двигателя при давлении масла не ниже 300 кПа."
     assert _DRIVE_CONTEXT.search(oil) and not _SERVICE_ONLY.search(oil)
+
+
+def test_drive_rule_from_below_kept(ml: MLClient, toir: ToirClient) -> None:
+    """Q24: правило руководства со страницей модель написала не первым абзацем — оно остаётся после вердикта."""
+    text = ("Прямого запрета эксплуатации нет.\n\nПонадобится: щуп [R1].\n\n"
+            "1. Заглушить двигатель: при загорании сигнализатора необходимо немедленно заглушить двигатель и до "
+            "устранения неисправности не заводить [R1].")  # fmt: skip
+    ag, _ = make_agent([say(text)] * 2, ml, toir)
+    reply = ag.ask(ag.start(*Q37), QUESTION)
+    first = reply.text.split("\n\n")[0]
+    assert "По руководству:" in first and "немедленно заглушить" in first and "Понадобится" not in reply.text

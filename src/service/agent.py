@@ -2586,11 +2586,29 @@ class Agent:
         if not paras:
             return text
         head = re.sub(r"\s*Рекомендация по проверке:[^.]*\.", "", paras[0]).strip()  # что делать — строкой ниже
+        if not (_REF.search(head) and (_BAN_RULE.search(head) or _OPERATION_RULE.search(head))):
+            rule = self._drive_rule_sentence("\n\n".join(paras[1:]))
+            if rule:  # правило руководства со страницей, которое модель написала ниже (Q24: стр. 23, «заглушить»)
+                head = f"{head} По руководству: {rule[:1].lower()}{rule[1:]}"
         action = self._drive_action(conv)
         failed = conv.card is None or conv.card.status == "check_failed"
         out = [head] if failed and re.search(r"повтор", head, re.I) else [head, action]
         conv.passport["drive_short"] = True
         return "\n\n".join(out)
+
+    @staticmethod
+    def _drive_rule_sentence(text: str) -> str | None:
+        """Первая фраза со ссылкой [R…] — запрет или предел работы двигателя; не «Понадобится», не «Безопасное
+        правило» (вывод кода о другом), не проверка результата."""
+        for ln in text.split("\n"):
+            ln = re.sub(r"^\s*(?:\d+\.|[-•])\s*", "", ln).strip()
+            if not ln or re.match(r"\**(?:Понадобится|Безопасное правило|Проверка результата|Безопасность)", ln, re.I):
+                continue
+            for sent in _SENTENCE.split(ln):
+                if _REF.search(sent) and (_BAN_RULE.search(sent) or _OPERATION_RULE.search(sent)):
+                    if _DRIVE_CONTEXT.search(sent) and not _SERVICE_ONLY.search(sent):
+                        return sent.strip()
+        return None
 
     @staticmethod
     def _drive_action(conv: Conversation) -> str:
