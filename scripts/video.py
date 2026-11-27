@@ -317,7 +317,7 @@ def shoot(d: Director) -> None:
         send = page.locator("dialog.sheet[open]").get_by_role("button", name="Отправить в ТОиР")
         if send.count():
             send.first.click()
-            page.wait_for_function("() => /Заявка TKT-\\S+ создана/.test(document.body.innerText)", timeout=60_000)
+            page.wait_for_function("() => /Заявка TKT-\\S+ создана/.test(document.body.innerText)", timeout=120_000)
             d.mark(page.get_by_text(re.compile(r"Заявка TKT-\S+ создана")).first)
             d.pause(3)
         else:
@@ -336,14 +336,16 @@ def shoot(d: Director) -> None:
         d.mark(lang)
         page.wait_for_timeout(1500)
         d.mark(None)
-    # короткий вопрос без спорной темы (сроки регулировки — противоречие руководств): каким инструментом проверять
-    d.ask("Klapan tirqishini qanday asbob bilan tekshirish kerak?")
+    # короткий вопрос на тему без противоречия руководств: зазоры клапанов (и инструмент к ним) с #201 тянут карточку
+    # противоречия о сроках регулировки на любом языке — для сцены языков берём давление масла
+    d.ask("Moy bosimi qancha bo'lishi kerak?")
     d.pause(2)
-    ru = page.get_by_role("button", name="Показать по-русски")
+    ru = page.locator("summary", has_text="Показать по-русски")  # раскрывающаяся строка под ответом, не кнопка
     if ru.count():
+        ru.last.scroll_into_view_if_needed()
         ru.last.click()
         d.pause(1)
-        d.mark(ru.last.locator("xpath=following::*[1]"))
+        d.mark(ru.last.locator("xpath=.."))  # раскрытый перевод целиком
         d.pause(3)
     else:
         d.take.skipped.append("«Показать по-русски»")
