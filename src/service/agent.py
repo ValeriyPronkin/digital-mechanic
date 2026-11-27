@@ -373,6 +373,8 @@ class Conversation:
     # Паспорт запроса (#31): данные текущего вопроса — план поиска, итоги guard. Не сериализуется в состояние.
     passport: dict[str, Any] = field(default_factory=dict)
     contradiction: Any = None  # известное противоречие в руководствах для текущего вопроса: (Known, [Quote])
+    # снятые guard утверждения последнего ответа (см. `Agent.guard`): {text, state, missing, reason, handles}
+    withdrawn: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -389,6 +391,8 @@ class AgentReply:
     level_reason: str = ""  # почему: «выбран механиком» или по вопросу
     # ответ не на русском — он же по-русски («Показать по-русски»: проверяемость для жюри); цифры проверены guard
     back_translation: str | None = None
+    # утверждения, снятые guard: на их месте в тексте — пометка WITHDRAWN_* и ссылки, которые они называли
+    withdrawn: list[dict[str, Any]] = field(default_factory=list)
 
 
 # ---------- правила вокруг модели ----------
@@ -453,6 +457,13 @@ _FAULT_CODE = re.compile(r"\bF\d{2}\b")
 _PAGE_LABEL = re.compile(r"\b(?:стр\.?|страниц[аеыу]?)\s*(\d+)", re.I)
 
 
+# Пометки на месте снятого утверждения — как их читает интерфейс v2 (`web/src/copy.ts`: thread.withdrawn,
+# thread.withdrawnTail): «Утверждение снято: …. Сверьте со страницей.» и ссылки, которые называло утверждение.
+WITHDRAWN_UNVERIFIED = "Утверждение снято: число не найдено на указанной странице. Сверьте со страницей."
+WITHDRAWN_UNCITED = "Утверждение снято: для числа не указана страница руководства."
+WITHDRAWN_ROW = "Утверждение снято: число со страницы относится к другой строке таблицы. Сверьте со страницей."
+
+_PART_DESIGNATION = re.compile(r"\b\d{2,4}[-.]\d{5,8}(?:-[А-ЯA-Z0-9]{1,3})?(?![\d,])")
 _BARE_LINE = re.compile(r"^\s*\d{1,4}\s*$")
 # колонтитул с номером и заголовком прописными: «22 ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ», «ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ 22»
 _HEAD_NUMBER = re.compile(r"^\s*\d{1,4}\s+(?=[А-ЯЁA-Z][А-ЯЁA-Z\s.,-]+$)|(?<=[А-ЯЁA-Z.])\s+\d{1,4}\s*$")
@@ -1126,6 +1137,7 @@ class Agent:
         original = text  # до перевода: если модель ответила по-русски, это и есть «по-русски» без нового вызова
         text = self._fix_language(conv, text, target, request_id, steps)
         final, grounded, notes, cited = self.guard(conv, text)
+        withdrawn = list(conv.withdrawn)  # back-перевод ниже снова вызывает guard
         final, cited, more = self._contradiction_text(conv, final, cited)
         notes += more
         final, _ = clean_refusal.unmark_absence(final)  # «в руководстве нет» — без ссылок на страницы
@@ -1156,6 +1168,7 @@ class Agent:
                          "section": c.section, "text": c.text}
                         for c in cited
                     ],
+                    "withdrawn": withdrawn,
                 },
             )  # fmt: skip
         final, followup = self._card_link(conv, question, cited, final)
@@ -1185,6 +1198,7 @@ class Agent:
             followup=followup,
             lang=target,
             back_translation=back,
+            withdrawn=withdrawn,
         )
 
     def add_back_translation(self, conv: Conversation, reply: AgentReply) -> AgentReply:
@@ -1415,6 +1429,11 @@ class Agent:
             renumber[s["ref"]] = src.ref
             cited.append(src)
         cached_text = _REF.sub(lambda m: f"[{renumber.get(m.group(1), m.group(1))}]", hit["text"])
+        withdrawn = [
+            {**w, "text": _REF.sub(lambda m: f"[{renumber.get(m.group(1), m.group(1))}]", w["text"]),
+             "handles": [renumber.get(h, h) for h in w.get("handles", [])]}
+            for w in hit.get("withdrawn", [])
+        ]  # fmt: skip
         text, followup = self._card_link(conv, question, cited, cached_text)
         conv.messages.append({"role": "assistant", "content": text})
         trace = {
@@ -1436,6 +1455,7 @@ class Agent:
             draft=None,
             trace=trace,
             followup=followup,
+            withdrawn=withdrawn,
         )
 
     def _spend(self, request_id: str, step: int, reply: LLMReply, ms: int) -> float:
@@ -1513,7 +1533,27 @@ class Agent:
             return [(page_text(s.manual_id, s.pdf_page) if page_text else None) or s.text for s in srcs]
 
         kept: list[str] = []
+        withdrawn: list[dict[str, Any]] = []
         dropped = row_dropped = own_dropped = 0
+
+        def withdraw(part: str, own: list[str], state: str, reason: str, missing: set[str]) -> str:
+            """Снятое утверждение не исчезает молча: на его месте — пометка и ссылки, которые оно называло
+            (интерфейс v2 показывает его зачёркнутым с причиной; «нет в руководстве» за сбой проверки не выдаётся)."""
+            handles = [r for r in dict.fromkeys(_REF.findall(part)) if r in conv.sources]
+            note = {"unverified": WITHDRAWN_UNVERIFIED, "uncited": WITHDRAWN_UNCITED}[state]
+            if reason == "other_row":
+                note = WITHDRAWN_ROW
+            withdrawn.append(
+                {
+                    "text": _unmask(part, labels).strip(),
+                    "state": state,
+                    "missing": sorted(missing),
+                    "reason": reason,
+                    "handles": handles,
+                }
+            )
+            return note + "".join(f" [{r}]" for r in handles)
+
         for line in text.split("\n"):
             mark = _LIST_MARK.match(line)
             prefix = mark.group(0) if mark else ""
@@ -1527,12 +1567,16 @@ class Agent:
                 need = ctx.needs_source(part, {conv.sources[r].pdf_page for r in own})
                 if need - allowed:
                     dropped += 1
+                    state = "unverified" if own else "uncited"
+                    good.append(withdraw(part, own, state, "not_on_page" if own else "no_source", need - allowed))
                     continue
-                if own_source_check() and own and need - self._own_numbers(conv, own):
+                if own_source_check() and own and need - (own_nums := self._own_numbers(conv, own)):
                     own_dropped += 1
+                    good.append(withdraw(part, own, "unverified", "not_on_page", need - own_nums))
                     continue
                 if cited and not row_check.row_ok(part, question, pages_for(part)):
                     row_dropped += 1  # число из строки таблицы про другую деталь
+                    good.append(withdraw(part, own, "unverified", "other_row", set()))
                     continue
                 good.append(part)
             if good:
@@ -1547,9 +1591,10 @@ class Agent:
         if opinions:
             notes.append("Часть выводов — рассуждение помощника, а не руководство: они помечены.")
         if dropped or own_dropped:
-            notes.append("Часть цифр не нашёл в руководстве — убрал их. Точные значения уточнит дефектовка.")
+            notes.append("Часть чисел не подтвердилась на страницах руководства: эти утверждения сняты и отмечены.")
         if row_dropped:
-            notes.append("Цифру из строки таблицы про другую деталь убрал — в руководстве она относится не к этому.")
+            notes.append("Число из строки таблицы про другую деталь снято: на странице оно относится к ней.")
+        conv.withdrawn = withdrawn
 
         grounded = bool(cited)
         conv.passport["guard"] = {
@@ -1557,6 +1602,7 @@ class Agent:
             "own_source_dropped": own_dropped,
             "row_dropped": row_dropped,
             "opinions_marked": opinions,
+            "withdrawn": len(withdrawn),
             "ungrounded": not grounded,
         }
         if not grounded and text:
@@ -1626,6 +1672,9 @@ class Agent:
         if conv.card and conv.card.confidence_pct is not None:
             percent.add(_norm_num(str(conv.card.confidence_pct)))
         labels += [src.manual for src in conv.sources.values()]  # обозначение найденного документа
+        if conv.draft is not None:  # обозначения деталей черновика — со страниц, их сверил код при сборке черновика
+            found = _PART_DESIGNATION.findall(" ".join(conv.draft.body.spare_parts))
+            labels += found + [re.sub(r"-[А-ЯA-Z0-9]{1,3}$", "", d) for d in found]  # «236-1007118-В» и «236-1007118»
         labels += [d.designation for d in DOCS_BY_ID.values()]
         ordered = tuple(sorted({x for x in labels if x}, key=len, reverse=True))
         return NumberContext(ordered, tuple(dates), frozenset(bare), frozenset(percent))

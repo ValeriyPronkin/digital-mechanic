@@ -15,7 +15,7 @@ from test_agent import ANOMALY, FixtureSearch, call, make_agent, say
 
 pytestmark = pytest.mark.usefixtures("without_matrix")  # сценарий C1 — как в CI, без матрицы (conftest)
 
-CUT_NOTE = "Часть цифр не нашёл в руководстве — убрал их. Точные значения уточнит дефектовка."
+CUT_NOTE = "Часть чисел не подтвердилась на страницах руководства: эти утверждения сняты и отмечены."
 
 
 def _answer(ml: MLClient, toir: ToirClient, text: str, *, search: bool = True) -> tuple[str, list[str]]:
