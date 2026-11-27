@@ -132,7 +132,11 @@ def run(base: str, send_ticket: bool) -> Report:
     h = ph.http.get(f"{ph.base}/health").json()
     idx = h.get("manuals_index") or {}
     ok = h.get("status") == "ok" and bool(idx.get("present")) and bool(h.get("llm_key_present"))
-    got = f"{h.get('status')}, индекс {idx.get('version') or '—'} ({idx.get('fragments')}), {h.get('llm_provider')}"
+    build = h.get("build") or {}
+    got = (
+        f"{h.get('status')}, коммит {build.get('git_sha_short', '—')} ({build.get('built_at') or 'время сборки —'}), "
+        f"индекс {idx.get('version') or '—'} ({idx.get('fragments')}), {h.get('llm_provider')}"
+    )
     rep.add("Стенд /health", "ok, индекс есть, ключ модели есть", got, ok)
     v2 = ph.http.get(f"{ph.base}/v2/")
     rep.add("Интерфейс /v2", "200", str(v2.status_code), v2.status_code == 200)
