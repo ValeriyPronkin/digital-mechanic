@@ -72,3 +72,17 @@ def test_without_effort_no_thinking(monkeypatch: pytest.MonkeyPatch) -> None:
     p = _provider([{"content": [{"type": "text", "text": "да"}], "usage": {}, "stop_reason": "max_tokens"}], seen)
     r = p.chat([{"role": "user", "content": "вопрос"}], [], max_tokens=300)
     assert r.truncated and "output_config" not in seen[0] and "tools" not in seen[0] and seen[0]["max_tokens"] == 300
+
+
+def test_code_turn_gets_thinking_note(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_EFFORT", "low")
+    seen: list[dict[str, Any]] = []
+    p = _provider([{"content": [{"type": "text", "text": "ок"}], "usage": {}, "stop_reason": "end_turn"}], seen)
+    msgs: list[dict[str, Any]] = [
+        {"role": "user", "content": "вопрос"},
+        {"role": "assistant", "content": "", "tool_calls": [ToolCall("pre-diag", "get_diagnosis", {})]},
+        {"role": "tool", "tool_call_id": "pre-diag", "name": "get_diagnosis", "content": "{}"},
+    ]
+    p.chat(msgs, [])
+    first = seen[0]["messages"][1]["content"][0]
+    assert first["type"] == "thinking" and first["thinking"]  # предвыборка кода — с пометкой, иначе API отвечает 400

@@ -196,6 +196,9 @@ class DeepSeekProvider:
         )
 
 
+CODE_TURN_NOTE = "Этот ход сделал код сервиса до модели."
+
+
 class DeepSeekAnthropicProvider:
     """DeepSeek через Anthropic-совместимый адрес (`LLM_API=anthropic`): так подключал модель Никита
     (`LLM_BASE_URL=https://api.deepseek.com/anthropic`, docs/economics.md его репозитория). С `LLM_EFFORT`
@@ -234,12 +237,20 @@ class DeepSeekAnthropicProvider:
                 if raw is None:
                     raw = [{"type": "text", "text": m["content"]}] if m.get("content") else []
                     raw += [{"type": "tool_use", "id": c.id, "name": c.name, "input": c.arguments} for c in calls]
-                add("assistant", list(raw))
+                add("assistant", self._with_thinking(raw))
             elif m["role"] == "tool":
                 add("user", [{"type": "tool_result", "tool_use_id": m["tool_call_id"], "content": str(m["content"])}])
             elif m.get("content"):
-                add(m["role"], [{"type": "text", "text": str(m["content"])}])
+                text = [{"type": "text", "text": str(m["content"])}]
+                add(m["role"], self._with_thinking(text) if m["role"] == "assistant" else text)
         return system, out
+
+    def _with_thinking(self, blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """В режиме рассуждения каждый ход модели начинается с блока thinking (иначе 400). У ходов, которые
+        сделал код (предвыборка, ответ кода), своего рассуждения нет — короткая пометка вместо него."""
+        if not self.effort or (blocks and blocks[0].get("type") in ("thinking", "redacted_thinking")):
+            return list(blocks)
+        return [{"type": "thinking", "thinking": CODE_TURN_NOTE, "signature": ""}, *blocks]
 
     def chat(
         self,
