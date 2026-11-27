@@ -661,7 +661,7 @@ def build_router(
                 conv = conv_state.load(thread["state"], get_fleet()) if thread["state"] else None
                 if conv is None:
                     conv = ag.start(v.vehicle_id, session_id)
-                reply = ag.ask(conv, req.message, req.level, req.lang)
+                reply = ag.ask(conv, req.message, req.level, req.lang, back_translate=False)
             except ServiceError as exc:
                 yield _sse({"type": "error", "message": exc.message})
                 yield _sse({"type": "done", "reason": "error"})
@@ -685,11 +685,16 @@ def build_router(
                 )
             text = to_handles(answer_text)
             yield _sse({"type": "text", "text": text, "round": 1})
-            back = to_handles(reply.back_translation) if reply.back_translation else None
-            if back:  # «Показать по-русски»: ответ не на русском — он же по-русски, цифры проверены guard
-                yield _sse({"type": "back_translation", "text": back})
             ver = verification(reply, text)
             yield _sse(ver)
+            # «Показать по-русски» — вслед за ответом, механик его не ждёт; цифры проверены guard
+            try:
+                ag.add_back_translation(conv, reply)
+            except ServiceError:
+                pass
+            back = to_handles(reply.back_translation) if reply.back_translation else None
+            if back:
+                yield _sse({"type": "back_translation", "text": back})
             pending = ticket_pending(conv, parts_source())
             if pending is not None:
                 yield _sse(pending)

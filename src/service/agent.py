@@ -670,8 +670,16 @@ class Agent:
         ]
         return conv
 
-    def ask(self, conv: Conversation, question: str, level: Level = "steps", lang: str | None = None) -> AgentReply:
-        """`lang` — язык ответа, выбранный механиком (ru, uz, uz-cyrl, tg, kk, ky, en); нет — вопроса."""
+    def ask(
+        self,
+        conv: Conversation,
+        question: str,
+        level: Level = "steps",
+        lang: str | None = None,
+        back_translate: bool = True,
+    ) -> AgentReply:
+        """`lang` — язык ответа, выбранный механиком (ru, uz, uz-cyrl, tg, kk, ky, en, hi); нет — вопроса.
+        `back_translate=False` — «по-русски» не считать здесь (/api/v2 шлёт его вслед за ответом)."""
         request_id = uuid.uuid4().hex
         steps: list[dict[str, Any]] = []
         chosen = language.normalize(lang)
@@ -777,9 +785,9 @@ class Agent:
             )  # fmt: skip
         final, followup = self._card_link(conv, question, cited, final)
         back = None
-        if target != "ru":
-            ru = original if original != text else None  # ответ переводили — русский оригинал уже есть
-            back = self._back_translation(conv, final, ru, request_id, steps)
+        conv.passport["ru_original"] = original if original != text else None  # ответ переводили — оригинал есть
+        if target != "ru" and back_translate:
+            back = self._back_translation(conv, final, conv.passport["ru_original"], request_id, steps)
         calls = self.store.llm_calls(request_id)
         trace = {
             "request_id": request_id,
@@ -802,6 +810,22 @@ class Agent:
             lang=target,
             back_translation=back,
         )
+
+    def add_back_translation(self, conv: Conversation, reply: AgentReply) -> AgentReply:
+        """«Показать по-русски» после ответа (/api/v2 шлёт его вслед за текстом, механик не ждёт): то же, что
+        `ask(back_translate=True)`, с расходом в той же записи запроса."""
+        if reply.lang == "ru" or reply.back_translation:
+            return reply
+        request_id = reply.trace["request_id"]
+        steps: list[dict[str, Any]] = reply.trace.setdefault("steps", [])
+        reply.back_translation = self._back_translation(
+            conv, reply.text, conv.passport.get("ru_original"), request_id, steps
+        )
+        calls = self.store.llm_calls(request_id)
+        reply.trace["cost_rub"] = round(sum(c["cost_rub"] for c in calls), 4)
+        reply.trace["tokens_in"] = sum(c["tokens_in"] for c in calls)
+        reply.trace["tokens_out"] = sum(c["tokens_out"] for c in calls)
+        return reply
 
     def _back_translation(
         self, conv: Conversation, final: str, ru: str | None, request_id: str, steps: list[dict[str, Any]]

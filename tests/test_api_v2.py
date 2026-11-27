@@ -202,3 +202,22 @@ def test_urgency_note_names_rule_and_choice() -> None:
     assert urgency_note("high", "medium", "код F01") == (
         "Приоритет выбран механиком: «средний»; по правилу кода — «высокий» (код F01)."
     )
+
+
+def test_back_translation_follows_answer(ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Хинди: ответ — сразу, «по-русски» (back_translation) — следом; язык и голос — событием language."""
+    ag, _ = make_agent([say("मैनोमीटर से तेल का दबाव जाँचें।"), say("Проверьте давление масла манометром.")],
+                       ml, toir, prefetch=False)  # fmt: skip
+    app = main.FastAPI()
+    app.include_router(api_v2.build_router(lambda: ag, lambda: ag.store, main.fleet, lambda r: None,
+                                           api_v2.ThreadStore()))  # fmt: skip
+    vid, sid = ANOMALY
+    r = TestClient(app).post("/api/v2/chat", json={"vehicle_id": vid, "session_id": sid, "new_thread": True,
+                                                   "message": "तेल का दबाव कैसे जाँचें? क्या करना चाहिए?"})  # fmt: skip
+    ev = events(r)
+    kinds = [e["type"] for e in ev]
+    assert kinds.index("text") < kinds.index("back_translation")
+    assert next(e for e in ev if e["type"] == "back_translation")["text"] == "Проверьте давление масла манометром."
+    lang = next(e for e in ev if e["type"] == "language")
+    assert lang["lang"] == "hi" and not lang["voice_output"]
+    assert next(e for e in ev if e["type"] == "speech")["text"].startswith("Озвучки на языке «хинди» нет")
