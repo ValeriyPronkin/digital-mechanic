@@ -118,11 +118,30 @@ function AssistantBlock({
         {String((block as { message: string }).message)}
       </p>
     ) : null
+  // manuals disagree: right under the direct answer («Коротко»), as the code put it there (D-20), and never
+  // folded: Валерий did not see it at the end of a long answer (27.11)
+  const found = turn.blocks.filter((b) => b.kind === 'contradiction')
+  const contradictions = found.length > 0 && (
+    <div className="space-y-3">
+      {found.map((b, i) => (
+        <ContradictionCard
+          key={`c${i}`}
+          block={b as ContradictionBlock}
+          sources={sources}
+          onOpen={(s, quote) => onOpenSource(s, quote)}
+          onQueue={(n) => {
+            window.location.hash = queueHref({ view: 'item', number: n })
+          }}
+        />
+      ))}
+    </div>
+  )
   return (
     <div className="space-y-3">
       {turn.blocks.map((block, i) => (noModel && isGuide(block) ? null : show(block, i)))}
       {turn.text && (
         <Answer
+          afterLead={contradictions || undefined}
           text={turn.text}
           sources={sources}
           verified={new Set(turn.verification?.verified)}
@@ -185,20 +204,8 @@ function AssistantBlock({
       })()}
       {/* the short spoken version: value, document, page — for busy hands (#14) */}
       {!turn.live && turn.speech && <SpeakButton speech={turn.speech} />}
-      {/* manuals disagree: under the direct answer, as the code put it there (D-20) */}
-      {turn.blocks
-        .filter((b) => b.kind === 'contradiction')
-        .map((b, i) => (
-          <ContradictionCard
-            key={`c${i}`}
-            block={b as ContradictionBlock}
-            sources={sources}
-            onOpen={(s, quote) => onOpenSource(s, quote)}
-            onQueue={(n) => {
-              window.location.hash = queueHref({ view: 'item', number: n })
-            }}
-          />
-        ))}
+      {/* no answer text to stand under: the contradiction stands here, as before */}
+      {!turn.text && contradictions}
       {turn.progress && (
         <p className="text-dim" role="status" aria-live="polite">
           {turn.progress}
