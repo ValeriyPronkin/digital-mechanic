@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react'
 import { OUTCOMES_EXPORT, type FleetStatus, type FleetView, type VehicleBrief } from '../api'
 import { copy } from '../copy'
 import { rowBadges } from '../lib/checks'
-import { outcomesPlace, reasonParts } from '../lib/fleet'
+import { outcomesPlace, reasonLine, reasonParts } from '../lib/fleet'
 import { dateRu, plateKey } from '../lib/format'
 
 export type Role = 'mechanic' | 'chief'
@@ -79,7 +79,12 @@ function Row({
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-3">
           <p className="truncate font-semibold">
-            {v.vehicle_id} <span className="text-[13px] font-normal text-mute">{v.garage_no}</span>
+            {v.vehicle_id}{' '}
+            <span className="text-[13px] font-normal text-mute">
+              {v.garage_no}
+              {/* the chief's row has no line for the model: it goes with the garage number */}
+              {role === 'chief' && ` · ${v.model ?? v.make}`}
+            </span>
           </p>
           {v.fleet.status ? (
             <p className={`flex shrink-0 items-center gap-1.5 text-[13px] font-semibold ${statusTone[v.fleet.status]}`}>
@@ -98,7 +103,7 @@ function Row({
           <p className="mt-0.5 -mr-2 flex flex-wrap items-baseline gap-x-1.5 gap-y-1 text-[13px] text-dim">
             <span>
               {instead ??
-                reasonParts(v.fleet.reason).map((part, i) => (
+                reasonParts(reasonLine(v.fleet)).map((part, i) => (
                   <Fragment key={i}>
                     {i > 0 && ' '}
                     <span className={i > 0 ? 'whitespace-nowrap' : undefined}>{part}</span>
@@ -119,7 +124,7 @@ function Row({
         )}
         {labels.length > 0 && role !== 'chief' && (
           <p className="mt-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-1 text-[13px] text-dim">
-            {withReason && <span>{v.fleet.reason}</span>}
+            {withReason && <span>{reasonLine(v.fleet)}</span>}
             {drawn}
           </p>
         )}

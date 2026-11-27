@@ -2,7 +2,7 @@
 // list (#83). Run with `npm test`.
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { outcomesPlace, reasonParts } from '../src/lib/fleet.ts'
+import { outcomesPlace, reasonLine, reasonParts } from '../src/lib/fleet.ts'
 
 const NBSP = ' '
 
@@ -53,4 +53,24 @@ test('under a search or a status filter the outcomes row goes after the last mat
 test('with no match the outcomes row is left out', () => {
   assert.equal(outcomesPlace(0, true), null)
   assert.equal(outcomesPlace(0, false), null)
+})
+
+test('a row names the fault once, with its score and priority, not the trace of the rule', () => {
+  const fleet = {
+    fault_title: 'Перегрев, охлаждающая жидкость в масле',
+    anomaly_score: 0.92,
+    urgency: 'high' as const,
+    reason:
+      'F03 «Перегрев, охлаждающая жидкость в масле»: Перегрев, охлаждающая жидкость в масле — класс 3 из 3 → высокая',
+  }
+  assert.equal(reasonLine(fleet), 'Перегрев, охлаждающая жидкость в масле · оценка 0,92 · приоритет высокий')
+  assert.equal(
+    reasonLine({ ...fleet, fault_title: 'Генератор', anomaly_score: 0.83, urgency: 'low' }),
+    'Генератор · оценка 0,83 · приоритет низкий',
+  )
+  // a failed recording has no fault: the server's line is what there is to say
+  const failed = 'последняя проверка не удалась — выводов о двигателе нет'
+  assert.equal(reasonLine({ fault_title: null, anomaly_score: null, urgency: null, reason: failed }), failed)
+  // nothing to say for a vehicle in norm
+  assert.equal(reasonLine({ fault_title: null, anomaly_score: 0.2, urgency: null, reason: '' }), '')
 })
