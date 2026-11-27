@@ -32,7 +32,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from service import conv_state, language, passport
-from service.agent import Agent, AgentReply, Conversation
+from service.agent import LEVEL_WORD, Agent, AgentReply, Conversation, LevelChoice
 from service.clients import ServiceError, TicketRequest
 from service.fleet import Fleet, Vehicle
 from service.fleet_status import STATUS_LABEL, trend, vehicle_status
@@ -540,7 +540,9 @@ class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     session_id: str | None = None
     new_thread: bool = False
-    level: Literal["expert", "steps"] = "steps"  # уровень механика (#17): формат и длина ответа
+    # уровень механика: auto — по вопросу, на каждый вопрос заново; novice | mechanic | master — выбор механика;
+    # прежние expert («Опытный» → master) и steps («Пошагово» → novice) принимаются
+    level: LevelChoice = "auto"
     # язык ответа, выбранный механиком: ru, uz, uz-cyrl, tg, kk, ky, en; нет или "auto" — язык вопроса
     lang: str | None = Field(default=None, max_length=10)
 
@@ -684,7 +686,12 @@ def build_router(
                     }
                 )
             text = to_handles(answer_text)
-            yield _sse({"type": "text", "text": text, "round": 1})
+            level_info = {
+                "level_used": reply.level_used,
+                "level_word": LEVEL_WORD[reply.level_used],  # type: ignore[index]
+                "level_reason": reply.level_reason,
+            }
+            yield _sse({"type": "text", "text": text, "round": 1, **level_info})
             ver = verification(reply, text)
             yield _sse(ver)
             # «Показать по-русски» — вслед за ответом, механик его не ждёт; цифры проверены guard
@@ -702,7 +709,13 @@ def build_router(
             for u in usage:
                 yield _sse(u)
             # Наши функции, которых пока нет в компонентах v2: интерфейс незнакомые события пропускает (#52 п. 3).
-            pp = passport.build(reply.trace, question=req.message, notes=reply.notes, level=req.level)
+            pp = passport.build(
+                reply.trace,
+                question=req.message,
+                notes=reply.notes,
+                level=reply.level_used,
+                level_reason=reply.level_reason,
+            )
             passport.write(pp, time.time(), put=log_put())  # журнал стенда (#27), как у /api/chat
             yield _sse({"type": "passport", **pp})
             spoken = speech_for(reply.text, conv.sources, reply.lang)
@@ -727,6 +740,7 @@ def build_router(
                 {
                     "role": "assistant",
                     "text": text,
+                    **level_info,
                     "back_translation": back,
                     "blocks": blocks,
                     "tools": [
