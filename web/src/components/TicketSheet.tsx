@@ -12,6 +12,8 @@ import { copy } from '../copy'
 import { CHECKED } from '../lib/ui'
 import { Sheet } from './Sheet'
 import { SourceChip } from './SourceChip'
+import { PartsOffers } from './PartsOffers'
+import { shownOffers } from '../lib/offers'
 
 type Sources = Record<string, SourceItem>
 const urgencyTone = { high: 'text-stop', medium: 'text-warn', low: 'text-text' } as const
@@ -307,6 +309,12 @@ export function TicketSheet({
           <p className="text-dim">{copy.ticket.noParts}</p>
         )}
       </Field>
+      {/* what the suppliers have for the parts still in the ticket; for reference, it is not sent */}
+      {shownOffers(pending.parts_offers, removedParts) && (
+        <Field label={copy.ticket.offers}>
+          <PartsOffers offers={pending.parts_offers} removed={removedParts} />
+        </Field>
+      )}
       <Field label={copy.ticket.conclusion}>{p.conclusion}</Field>
       <Field label={copy.ticket.urgency}>
         {choices.length ? (
