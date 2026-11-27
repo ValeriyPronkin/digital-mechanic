@@ -10,6 +10,8 @@
   `make kb-publish`; ключ не печатается): нити разговора интерфейса v2 `v2/threads/*.json`, у которых `session_id`
   из списка (номера проверок в парке уникальны), и отметки отправленных заявок `v2/tickets/{отпечаток}.json` (PR #104).
   Отпечаток — `agent.fingerprint` заявки из стенограммы этих нитей и из локальной SQLite; чужие отметки не трогаются;
+- общая книга отправленных заявок стенда `v2/sent-tickets.json` (A2, `service.ticket_book`): строки этих
+  проверок — условной записью с ETag, как пишет сам стенд. Без этого новая ревизия стенда снова видела заявку;
 - локальная SQLite (`STATE_DB`, по умолчанию `.state/agent.db`): строки `tickets` и `card_views` этих проверок.
 
 Чего скрипт сделать не может — печатает команду: у каждого экземпляра стенда своя SQLite (`STATE_DB=/tmp/agent.db`)
@@ -319,6 +321,30 @@ def render(plan: Plan, dry: bool, bucket: str | None, db_path: Path | None) -> s
     return "\n".join(out)
 
 
+def book_rows(rows: list[dict[str, Any]], targets: list[Target]) -> list[dict[str, Any]]:
+    """Строки общей книги заявок, относящиеся к проверкам списка (машина и номер проверки)."""
+    want = {(t.vehicle, s) for t in targets for s in t.sessions}
+    return [r for r in rows if (r.get("vehicle_id"), r.get("session_id")) in want]
+
+
+def prune_book(bucket: Any, targets: list[Target], dry: bool) -> list[str]:
+    """Убрать из `v2/sent-tickets.json` заявки проверок списка; вернуть их номера ТОиР. `dry` — только посчитать."""
+    from service.spend import BucketObject
+    from service.ticket_book import KEY, SharedTickets
+
+    book = SharedTickets(BucketObject(bucket, KEY))
+    found = [str(r.get("ticket_id") or r.get("id")) for r in book_rows(book.all(), targets)]
+    if found and not dry:
+
+        def drop(rows: list[dict[str, Any]]) -> bool:
+            gone = book_rows(rows, targets)
+            rows[:] = [r for r in rows if r not in gone]
+            return bool(gone)
+
+        book.change(drop)
+    return found
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="reset_demo", description=__doc__.split("\n")[0])
     ap.add_argument("--only", nargs="+", metavar="МАШИНА[/ПРОВЕРКА]", help="вместо списка по умолчанию")
@@ -366,6 +392,16 @@ def main(argv: list[str] | None = None) -> int:
         if db is not None:
             db.close()
     print(render(plan, args.dry_run, bucket, db_path))
+    if isinstance(objects, S3Objects):
+        try:
+            booked = prune_book(objects.bucket, targets, args.dry_run)
+            verb = "будет убрано" if args.dry_run else "убрано"
+            print(
+                f"Общая книга заявок v2/sent-tickets.json: {verb} {len(booked)}"
+                + (f" ({', '.join(booked)})" if booked else "")
+            )
+        except Exception as exc:  # книга — дополнение к сбросу: её сбой остальное не отменяет
+            print(f"❌ общая книга заявок: {type(exc).__name__}: {exc}", file=sys.stderr)
     if args.dry_run:
         print("\nСухой прогон: ничего не удалено. Удалить — без --dry-run.")
     seen: list[str] = []
