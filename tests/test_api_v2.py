@@ -163,9 +163,11 @@ def test_transcribe_wav(ml: MLClient, toir: ToirClient) -> None:
 def test_quote_line_is_the_line_with_the_number() -> None:
     page = "22 ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ\nРегулировать зазор 0,25-0,30 мм на холодном двигателе.\nПрочее."
     assert api_v2.quote_line("Зазор 0,25–0,30 мм [R1].", "R1", page).startswith("Регулировать зазор")
-    assert api_v2.quote_line("Без чисел [R1].", "R1", page) == "22 ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ"
+    # без числа из ответа строки нет: ни колонтитул с номером страницы, ни первая строка не выдаются за найденное
+    assert api_v2.quote_line("Без чисел [R1].", "R1", page) == ""
+    assert api_v2.quote_line("Момент 22 Н·м [R1].", "R1", page) == ""  # «22» — номер страницы в колонтитуле
     # число из предложения с другой ссылкой не уводит строку этой страницы
-    assert api_v2.quote_line("Момент 22 Н·м [R2]. Без чисел [R1].", "R1", page) == "22 ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ"
+    assert api_v2.quote_line("Момент 22 Н·м [R2]. Без чисел [R1].", "R1", page) == ""
 
 
 def test_contradiction_as_block_and_not_repeated_in_text(ml: MLClient, toir: ToirClient) -> None:

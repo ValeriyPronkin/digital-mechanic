@@ -19,6 +19,7 @@ import os
 import re
 import time
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -422,7 +423,11 @@ def next_ref(conv: Conversation) -> str:
     return f"R{max(used, default=0) + 1}"
 
 
-_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n")
+# Конец фразы — точка, «!» или «?» перед заглавной буквой (или кавычкой, скобкой с ней) и перевод строки.
+# После сокращений («рис.», «стр.», «табл.», «п.», «поз.», «см.», «т. е.», «св.») фраза не кончается: иначе guard
+# снимал «6 [R1]» из «по рис. 6 [R1]» и оставлял обрывок без ссылки (стенд 27.11, eval: «у гаек поз.»).
+_ABBR = ("рис", "стр", "табл", "п", "пп", "поз", "см", "т. е", "т.е", "св", "ср", "гл", "разд", "прил")
+_SENTENCE = re.compile("".join(rf"(?<!\b{re.escape(a)}\.)" for a in _ABBR) + r"(?<=[.!?])\s+(?=[«\"(]?[А-ЯЁA-Z])|\n")
 
 
 def _norm_num(s: str) -> str:
@@ -434,16 +439,118 @@ def _norm_num(s: str) -> str:
     return f"{f:g}"
 
 
-def _date_forms(iso: str) -> str:
-    """«2026-10-27T17:20:00+03:00» → те же цифры, как их пишет модель: 27.10.2026, 27.10, 17:20, 2026-10-27."""
+# Единица после числа: число с ней — величина, и подтверждает её только страница руководства. Строчные «в», «а», «с»,
+# «г» — слова и «год» («в 2 приёма», «2026 г.»), не единицы.
+_UNIT_AFTER = re.compile(
+    r"\s*(?:[°º˚%]|(?:мм|см|мкм|км|м|н\s*[·⋅∙*.]?\s*м|нм|кгс|кпа|мпа|па|бар|атм|об/мин|мин|ч|л|мл|кг|ом|квт|вт|шт)"
+    r"(?![а-яёa-z])|(?:метр|ньютон|оборот|минут|секунд|час|литр|градус|процент|атмосфер|килограм)[а-яё]*|(?-i:[ВА])(?![а-яё]))",
+    re.I,
+)
+_MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября",
+           "декабря")  # fmt: skip
+_MAKE_NAME = re.compile(r"\b(?:ЯМЗ|ЗМЗ|МАЗ|КамАЗ|ГАЗ|УАЗ)[\s‑–-]*\d[\d.]*(?:[А-ЯA-Z]\d*)*", re.I)
+_FAULT_CODE = re.compile(r"\bF\d{2}\b")
+_PAGE_LABEL = re.compile(r"\b(?:стр\.?|страниц[аеыу]?)\s*(\d+)", re.I)
+
+
+_BARE_LINE = re.compile(r"^\s*\d{1,4}\s*$")
+# колонтитул с номером и заголовком прописными: «22 ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ», «ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ 22»
+_HEAD_NUMBER = re.compile(r"^\s*\d{1,4}\s+(?=[А-ЯЁA-Z][А-ЯЁA-Z\s.,-]+$)|(?<=[А-ЯЁA-Z.])\s+\d{1,4}\s*$")
+
+
+def page_body(text: str) -> str:
+    """Текст страницы без её собственного номера: первая и последняя строки из одного числа — колонтитул («57»),
+    у колонтитула с заголовком прописными — его номер. Номер страницы никогда не подтверждает число ответа
+    (стенд 27.11: ✓ у стр. 57 по колонтитулу)."""
+    lines = text.split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if lines and _BARE_LINE.match(lines[0]):
+        lines.pop(0)
+    if lines and _BARE_LINE.match(lines[-1]):
+        lines.pop()
+    for i in {0, len(lines) - 1} if lines else set():
+        if lines[i].strip() and lines[i].strip().upper() == lines[i].strip():
+            lines[i] = _HEAD_NUMBER.sub("", lines[i])
+    return "\n".join(lines)
+
+
+def _mask_page_labels(line: str, pages: set[int]) -> tuple[str, dict[str, str]]:
+    """«стр. 41» той страницы, на которую ссылается строка, — метка, а не число: на время проверки заменяется знаком
+    без цифр (иначе деление на фразы после «стр.» оставило бы «41» отдельным числом). Номер другой страницы остаётся."""
+    labels: dict[str, str] = {}
+
+    def mask(m: re.Match[str]) -> str:
+        if int(m.group(1)) not in pages:
+            return m.group(0)
+        key = chr(0xE000 + len(labels))
+        labels[key] = m.group(0)
+        return key
+
+    return _PAGE_LABEL.sub(mask, line), labels
+
+
+def _unmask(text: str, labels: dict[str, str]) -> str:
+    for key, label in labels.items():
+        text = text.replace(key, label)
+    return text
+
+
+def _date_patterns(iso: str) -> list[re.Pattern[str]]:
+    """«2026-10-27T17:20:00+03:00» → как модель пишет эту дату и время: 27.10.2026, 27.10, 2026-10-27,
+    27 октября 2026 г., 17:20. Только целиком: отдельные день, месяц, час и минута — не факты."""
     m = re.match(r"(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?", iso)
     if not m:
-        return iso
+        return []
     y, mo, d, hh, mm = m.groups()
-    forms = [f"{d}.{mo}.{y}", f"{d}.{mo}", f"{int(d)}", y, f"{y}-{mo}-{d}"]
+    day = rf"0?{int(d)}"
+    out = [
+        rf"(?<![\d.,]){day}\.{mo}(?:\.(?:{y}|{y[2:]}))?(?![\d,]|\.\d)",
+        rf"(?<!\d){y}-{mo}-{d}(?!\d)",
+        rf"(?<!\d){day}\s+{_MONTHS[int(mo) - 1]}(?:\s+{y}(?:\s*(?:г\.|года?|году))?)?",
+    ]
     if hh:
-        forms += [hh, mm]
-    return " ".join(forms)
+        out.append(rf"(?<![\d:]){int(hh):d}:{mm}(?![\d:])|(?<![\d:]){hh}:{mm}(?![\d:])")
+    return [re.compile(x, re.I) for x in out]
+
+
+@dataclass(frozen=True)
+class NumberContext:
+    """Что ответ может написать без страницы руководства (как `Context` в app/verify.py Никиты).
+
+    `labels` — обозначения (машина, гаражный номер, проверки, двигатель, документы): метки, их цифры не числа.
+    `dates` — даты и время проверок машины: факт, только если записаны датой или временем и без единицы.
+    `bare` — числа-факты без единицы: оценки и уверенность как написаны, ответы кода (сводка парка).
+    `percent` — уверенность и оценка в процентах: факт только со знаком % (или без единицы).
+    Число с любой другой единицей — только со страницы руководства. Номер страницы — не факт: «стр. N» снимается
+    как метка, только если фраза ссылается на эту страницу (`pages`)."""
+
+    labels: tuple[str, ...]
+    dates: tuple[re.Pattern[str], ...]
+    bare: frozenset[str]
+    percent: frozenset[str]
+
+    def needs_source(self, text: str, pages: Collection[int] = ()) -> set[str]:
+        t = _REF_BARE.sub(" ", _REF.sub(" ", text))
+        for label in self.labels:
+            t = re.sub(re.escape(label), " ", t, flags=re.I)
+        t = _FAULT_CODE.sub(" ", _MAKE_NAME.sub(" ", t))
+        t = _PAGE_LABEL.sub(lambda m: " " if int(m.group(1)) in pages else m.group(0), t)
+        for pat in self.dates:
+            t = pat.sub(lambda m: m.group(0) if _UNIT_AFTER.match(m.string, m.end()) else " ", t)
+        out: set[str] = set()
+        for m in _NUM.finditer(t):
+            num = _norm_num(m.group())
+            unit = _UNIT_AFTER.match(t, m.end())
+            if unit is None:
+                if num in self.bare or num in self.percent:
+                    continue
+            elif unit.group().strip() == "%" and num in self.percent:
+                continue
+            out.add(num)
+        return out
 
 
 _REF_BARE = re.compile(r"\b[RР]\d+\b")  # ссылка без скобок: «R3 — руководство…»
@@ -1396,7 +1503,8 @@ class Agent:
         cited = [conv.sources[r] for r in refs if r in conv.sources]
         text = _REF.sub(lambda m: m.group(0) if m.group(1) in conv.sources else "", text)
 
-        allowed = self._allowed_numbers(conv, cited)
+        ctx = self._number_context(conv)
+        allowed = self._source_numbers(conv, cited)
         question = _last_question(conv)
         page_text = getattr(self.searcher, "page_text", None)
 
@@ -1406,20 +1514,21 @@ class Agent:
 
         kept: list[str] = []
         dropped = row_dropped = own_dropped = 0
-        context_nums = self._context_numbers(conv) if own_source_check() else set()
         for line in text.split("\n"):
             mark = _LIST_MARK.match(line)
             prefix = mark.group(0) if mark else ""
             good = []
             line_refs = [r for r in _REF.findall(line) if r in conv.sources]
+            line, labels = _mask_page_labels(line, {conv.sources[r].pdf_page for r in line_refs})
             for part in _SENTENCE.split(line[len(prefix) :]):
-                if numbers(part) - allowed:
-                    dropped += 1
-                    continue
                 # число — из источника своего предложения (или своей строки), как в verify.py Никиты; без
                 # ссылки ни в предложении, ни в строке — как раньше, по всем источникам ответа
                 own = [r for r in _REF.findall(part) if r in conv.sources] or line_refs
-                if own_source_check() and own and numbers(part) - (context_nums | self._own_numbers(conv, own)):
+                need = ctx.needs_source(part, {conv.sources[r].pdf_page for r in own})
+                if need - allowed:
+                    dropped += 1
+                    continue
+                if own_source_check() and own and need - self._own_numbers(conv, own):
                     own_dropped += 1
                     continue
                 if cited and not row_check.row_ok(part, question, pages_for(part)):
@@ -1427,7 +1536,7 @@ class Agent:
                     continue
                 good.append(part)
             if good:
-                kept.append(prefix + " ".join(good))
+                kept.append(_unmask(prefix + " ".join(good), labels))
             elif not line.strip():
                 kept.append("")
         text = "\n".join(kept).strip()
@@ -1457,12 +1566,18 @@ class Agent:
                 notes.append("Без ссылки на руководство: это пояснение по результату проверки.")
         return text, grounded, notes, cited
 
-    def _allowed_numbers(self, conv: Conversation, cited: list[Source]) -> set[str]:
-        allowed = self._context_numbers(conv)
+    def _source_numbers(self, conv: Conversation, cited: list[Source]) -> set[str]:
+        """Числа страниц, на которые ссылается ответ (кроме страниц другой модификации)."""
+        allowed: set[str] = set()
         for src in cited:
             if not self._other_variant(conv, src):
-                allowed |= numbers(src.text)
+                allowed |= numbers(page_body(src.text))
         return allowed
+
+    def _unsourced(self, conv: Conversation, text: str, cited: list[Source]) -> set[str]:
+        """Числа текста, которых нет ни в контексте (как он записан), ни на страницах `cited`."""
+        ctx = self._number_context(conv)
+        return ctx.needs_source(text, {s.pdf_page for s in cited}) - self._source_numbers(conv, cited)
 
     def _own_numbers(self, conv: Conversation, refs: list[str]) -> set[str]:
         """Цифры источников, на которые ссылается само предложение, и соседних с ними страниц того же руководства
@@ -1476,7 +1591,7 @@ class Agent:
         out: set[str] = set()
         for src in near:
             if not self._other_variant(conv, src):
-                out |= numbers(src.text)
+                out |= numbers(page_body(src.text))
         return out
 
     def _other_variant(self, conv: Conversation, src: Source) -> bool:
@@ -1487,33 +1602,33 @@ class Agent:
         engine = canonical_engine(conv.vehicle.engine_model) or conv.vehicle.engine_model
         return nk_pages.other_variant(engine, src.manual_id, src.pdf_page) is not None
 
-    def _context_numbers(self, conv: Conversation) -> set[str]:
-        """Цифры-факты из кода и данных: карточка ТС, проверки этой машины, найденные документы.
+    def _number_context(self, conv: Conversation) -> NumberContext:
+        """Факты из кода и данных: карточка ТС, проверки этой машины, найденные документы (см. `NumberContext`).
 
         Не входит описание сервиса диагностики (ml_description) — это непроверенные данные.
         """
         v = conv.vehicle
-        base = " ".join([v.vehicle_id, v.garage_no, v.engine_model, v.model or "", conv.session_id])
-        nums = numbers(base)
+        labels = [v.vehicle_id, v.garage_no, v.engine_model, v.model or "", conv.session_id]
+        dates: list[re.Pattern[str]] = []
+        bare = set(conv.fact_numbers)  # сводка парка и другие ответы кода в этом разговоре
+        percent: set[str] = set()
+        scores: list[float | None] = []
         for s in v.sessions:  # история проверок: номер, дата, оценки
-            nums |= numbers(f"{s.session_id} {_date_forms(s.checked_at)}")
-            for val in (s.anomaly_score, s.confidence):
-                if val is not None:
-                    nums.add(_norm_num(str(val)))
-                    nums.add(_norm_num(str(round(val * 100))))
-        nums |= conv.fact_numbers  # сводка парка и другие ответы кода в этом разговоре
-        for src in conv.sources.values():  # обозначение и страница найденного документа
-            nums |= numbers(f"{src.manual} {src.pdf_page}")
-        if conv.card:
-            if conv.card.confidence_pct is not None:
-                nums.add(_norm_num(str(conv.card.confidence_pct)))
-            if conv.card.fault_code:
-                nums |= numbers(conv.card.fault_code)
+            labels.append(s.session_id)
+            dates += _date_patterns(s.checked_at)
+            scores += [s.anomaly_score, s.confidence]
         if conv.diag:
-            for val in (conv.diag.anomaly_score, conv.diag.confidence):
-                if val is not None:
-                    nums.add(_norm_num(str(val)))
-        return nums
+            scores += [conv.diag.anomaly_score, conv.diag.confidence]
+        for val in scores:
+            if val is not None:
+                bare.add(_norm_num(str(val)))
+                percent.add(_norm_num(str(round(val * 100))))
+        if conv.card and conv.card.confidence_pct is not None:
+            percent.add(_norm_num(str(conv.card.confidence_pct)))
+        labels += [src.manual for src in conv.sources.values()]  # обозначение найденного документа
+        labels += [d.designation for d in DOCS_BY_ID.values()]
+        ordered = tuple(sorted({x for x in labels if x}, key=len, reverse=True))
+        return NumberContext(ordered, tuple(dates), frozenset(bare), frozenset(percent))
 
     # ---- инструменты ----
     def _run_tool(self, conv: Conversation, name: str, args: dict[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -2160,7 +2275,7 @@ class Agent:
             if src is None:
                 why_ref = f"ссылка {ref} не на найденный фрагмент" if ref else "нет ссылки R…"
                 return {"refused": f"У работы «{text}» {why_ref}. Сначала search_manual, затем укажите R… этой работы."}
-            extra = sorted(numbers(text) - self._allowed_numbers(conv, [src]))
+            extra = sorted(self._unsourced(conv, text, [src]))
             if extra:
                 return {
                     "refused": f"В работе «{text}» цифры, которых нет в её фрагменте {ref}: "

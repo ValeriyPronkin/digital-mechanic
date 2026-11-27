@@ -389,27 +389,30 @@ _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 
 def quote_line(answer: str, ref: str, source_text: str) -> str:
     """Строка страницы, на которой нашлось число из предложения ответа со ссылкой [ref] — её интерфейс v2
-    показывает «Найдено на странице». Нет числа или строки — начало фрагмента."""
-    from service.agent import numbers
+    показывает «Найдено на странице». Нет числа из ответа на странице — пусто: ни колонтитул с номером страницы,
+    ни первая строка фрагмента за «найденное число» не выдаются (стенд 27.11: ✓ у стр. 57 по колонтитулу «57»)."""
+    from service.agent import numbers, page_body
 
     wanted: set[str] = set()
     for sentence in _SENTENCE.split(answer):
         if f"[{ref}]" in sentence:
             wanted |= numbers(sentence)
-    lines = [ln.strip() for ln in source_text.splitlines() if ln.strip()]
+    lines = [ln.strip() for ln in page_body(source_text).splitlines() if ln.strip()]
     if wanted:
         best = max(lines, key=lambda ln: len(numbers(ln) & wanted), default="")
         if best and numbers(best) & wanted:
             return best[:240]
-    return (lines[0] if lines else "")[:240]
+    return ""
 
 
 def verification(reply: AgentReply, text: str) -> dict[str, Any]:
     """Что проверил код (`agent.guard`): страницы, на которые опирается ответ, и сколько снято. Наш guard не
-    зачёркивает, а убирает предложение с цифрой не из фрагмента — оно считается снятым."""
+    зачёркивает, а убирает предложение с цифрой не из фрагмента — оно считается снятым. `verified` — только
+    страницы, на которых нашлось число из ответа (так их читает интерфейс: ✓ «на странице найдено число»)."""
     rules = reply.trace.get("rules") or {}
-    verified = [handle(s["ref"]) for s in reply.sources]
-    quotes = {handle(s["ref"]): quote_line(reply.text, s["ref"], s.get("quote") or "") for s in reply.sources}
+    lines = {handle(s["ref"]): quote_line(reply.text, s["ref"], s.get("quote") or "") for s in reply.sources}
+    quotes = {h: line for h, line in lines.items() if line}
+    verified = list(quotes)
     return {
         "type": "verification",
         "text": text,
