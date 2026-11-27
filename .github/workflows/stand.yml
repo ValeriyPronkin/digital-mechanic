@@ -132,6 +132,20 @@ jobs:
             curl -sS -m 90 -o /dev/null -w "#$i code=%{http_code} ip=%{remote_ip} tcp=%{time_connect} tls=%{time_appconnect} ttfb=%{time_starttransfer} total=%{time_total}\n" "${URL%/}/health" || true
           done
 
+      # ДЛЯ ВАЛЕРИЯ: материалы задачи не в git (ответ организаторов 27.11, п. 9.1) — ссылка в переменной
+      # репозитория TASK_MATERIALS_URL (Settings → Variables). Без неё образ не собрать: в нём нет парка.
+      - name: Материалы задачи (не в git, п. 9.1) — по ссылке из vars.TASK_MATERIALS_URL
+        if: inputs.logs_minutes == ''
+        env:
+          TASK_MATERIALS_URL: ${{ vars.TASK_MATERIALS_URL }}
+        run: |
+          set -eu
+          if [ -z "$TASK_MATERIALS_URL" ]; then
+            echo "::error::vars.TASK_MATERIALS_URL не задан — без материалов задачи образы стенда и заглушек не собрать"
+            exit 1
+          fi
+          python3 scripts/fetch_materials.py
+
       - name: Сборка и push образов
         if: inputs.logs_minutes == ''
         run: |

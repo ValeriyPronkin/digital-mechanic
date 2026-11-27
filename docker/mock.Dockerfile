@@ -1,4 +1,4 @@
-# Образ заглушек заказчика (vendor/neurodvs_mock) как есть. Какое приложение — MOCK_APP:
+# Образ заглушек заказчика (vendor/neurodvs_mock) как есть. Их нет в git — до сборки make fetch-materials. Какое приложение — MOCK_APP:
 # mock_ml.app:app (Mock ML) или mock_toir.app:app (Mock ТОиР). Порт — из PORT (Serverless Containers задаёт сам).
 FROM python:3.12-slim
 WORKDIR /mock

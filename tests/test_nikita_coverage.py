@@ -7,9 +7,12 @@ from typing import Any
 
 import pytest
 
+from materials import require
 from service.clients import MLClient, ToirClient
 from service.nikita import coverage
 from test_agent import ANOMALY, INCOMPATIBLE, make_agent, say
+
+require()  # парк и справочник читаются при импорте
 
 
 def _tool(llm: Any, name: str) -> list[dict[str, Any]]:

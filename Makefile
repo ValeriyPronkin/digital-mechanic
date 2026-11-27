@@ -1,9 +1,13 @@
-.PHONY: run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
+.PHONY: fetch-materials run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
 
 PORT ?= 8000
 
 install:
 	uv sync --frozen
+
+## Материалы задачи (заглушки, парк, справочник) — не в git: скачать по TASK_MATERIALS_URL (.env) или MATERIALS=путь
+fetch-materials: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/fetch_materials.py $(MATERIALS)
 
 ## Первый запуск после клона: зависимости и git-хуки (pre-commit — gitleaks, pre-push — запрет push в main)
 setup: install hooks
@@ -28,7 +32,7 @@ index: install
 
 ## Себестоимость по участкам на настоящей модели (issue #16): reports/cost.md + reports/cost/<LABEL>.csv
 LABEL ?= $(shell date +%Y%m%d-%H%M)
-## Пакет для инженера (#40 п. 7): все отклонения и сбои на стенде → reports/engineer-pack-<дата>.html (≈15 мин, ≈11 ₽)
+## Пакет для инженера (#40 п. 7): все отклонения и сбои на стенде → reports/engineer-pack-<дата>.html (не в git: ответы заглушек; ≈15 мин, ≈11 ₽)
 STAND_URL ?= https://bbab8qkqhuhg3ere9dam.containers.yandexcloud.net/
 engineer-pack: install
 	uv run python scripts/engineer_pack.py $(STAND_URL) $(PACK_ARGS)
