@@ -167,6 +167,16 @@ def find_injection(description: str) -> str | None:
     return None
 
 
+def heard_text(description: str) -> str:
+    """Описание сервиса без постороннего текста (`find_injection`): это механику показывают как «сообщение
+    сервиса» и это получает модель. Посторонний текст — только отдельной пометкой на экране."""
+    parts = [p for p in re.split(r"(?<=[.!?;])\s+", (description or "").strip()) if p]
+    for i, part in enumerate(parts):
+        if _INJECTION.search(part):
+            return " ".join(parts[:i])
+    return (description or "").strip()
+
+
 def build_card(
     diag: Diagnosis, fault_titles: dict[str, str], engine: str | None = None, history: list[Any] | None = None
 ) -> VerdictCard:
