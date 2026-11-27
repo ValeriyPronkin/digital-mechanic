@@ -25,13 +25,3 @@ def ml() -> MLClient:
 @pytest.fixture
 def toir() -> ToirClient:
     return ToirClient(http=TestClient(mock_toir_app))
-
-
-@pytest.fixture
-def without_matrix(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Как в CI: матрицы «код × двигатель» нет. Тесты поиска, заявки и проверки цифр на сценарии C1 (T792HO98, F02)
-    написаны под ответ из фикстуры поиска; с настоящей матрицей ячейка F02 × ЯМЗ-236М2 подтверждена (реестр
-    покрытия), и страницы и работы приходят из неё. Совместимость без матрицы — из её источника, как в CI."""
-    from service import fault_matrix
-
-    monkeypatch.setattr(fault_matrix, "matrix_path", lambda: tmp_path / "fault_matrix.json")

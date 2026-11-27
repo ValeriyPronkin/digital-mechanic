@@ -25,8 +25,6 @@ from service.llm import LLMReply, Message, ToolCall, ToolSpec
 from service.manual_search import ManualHit
 from service.store import Store
 
-pytestmark = pytest.mark.usefixtures("without_matrix")  # сценарий C1 — как в CI, без матрицы (conftest)
-
 FRAGMENT = (
     "Проверка давления масла. Давление масла в прогретом двигателе на номинальной частоте "
     "должно быть 0,4–0,7 МПа, на холостом ходу не менее 0,1 МПа. Проверьте датчик и масляный насос."

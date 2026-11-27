@@ -7,13 +7,9 @@
 
 from __future__ import annotations
 
-import pytest
-
 from service.clients import MLClient, ToirClient
 from service.fleet import fleet
 from test_agent import ANOMALY, FixtureSearch, call, make_agent, say
-
-pytestmark = pytest.mark.usefixtures("without_matrix")  # сценарий C1 — как в CI, без матрицы (conftest)
 
 CUT_NOTE = "Часть чисел не подтвердилась на страницах руководства: эти утверждения сняты и отмечены."
 

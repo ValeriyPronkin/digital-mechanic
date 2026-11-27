@@ -6,7 +6,6 @@ import json
 from typing import Any
 
 import httpx
-import pytest
 
 from matrix_fixture import needs_matrix
 from service.agent import _page_window
@@ -50,7 +49,6 @@ def test_page_window_reaches_value_in_neighbouring_fragment() -> None:
     assert "0,20…0,30" in w and len(w) <= 600
 
 
-@pytest.mark.usefixtures("without_matrix")
 def test_model_sees_window_and_number_passes_check(ml: MLClient, toir: ToirClient) -> None:
     search = PageSearch()
     ag, llm = make_agent([say("Зазор 0,20…0,30 мм на холодном двигателе [R1].")], ml, toir, search)
@@ -127,7 +125,6 @@ def _guarded(ml: MLClient, toir: ToirClient, text: str) -> str:
     return ag.ask(ag.start(*ANOMALY), "Как проверить натяжение ремня?").text
 
 
-@pytest.mark.usefixtures("without_matrix")
 def test_unsourced_diagnosis_is_marked(ml: MLClient, toir: ToirClient) -> None:
     """Проверка с телефона: «Ремень здесь ни при чём: цокот в головках — это клапанный узел» — рассуждение модели."""
     answer = "Прогиб ремня 0,20…0,30 мм [R1].\nРемень здесь ни при чём: цокот в головках — это клапанный узел."

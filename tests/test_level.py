@@ -12,8 +12,6 @@ from service.agent import LEVEL_MAX_TOKENS, LEVEL_PROMPT, LEVELS, resolve_level
 from service.clients import MLClient, ToirClient
 from test_agent import ANOMALY, call, make_agent, say
 
-pytestmark = pytest.mark.usefixtures("without_matrix")  # сценарий C1 — как в CI, без матрицы (conftest)
-
 
 @pytest.mark.parametrize("level", LEVELS)
 def test_level_sets_format_and_max_tokens(ml: MLClient, toir: ToirClient, level: Any) -> None:
