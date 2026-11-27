@@ -17,6 +17,7 @@ import { copy } from '../copy'
 import { checkLook } from '../lib/checks'
 import { dateShortRu, dateTimeRu } from '../lib/format'
 import { mergeTickets, withTicket } from '../lib/tickets'
+import { CHECKED, scrollsFurther } from '../lib/ui'
 import { useThread, type AssistantTurn, type Turn } from '../useThread'
 import { ActionLog } from './ActionLog'
 import { Answer } from './Answer'
@@ -41,7 +42,8 @@ function SessionPicker({
 }) {
   return (
     <div
-      className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4"
+      // on a wide screen the checks wrap: a mouse wheel cannot scroll a row sideways
+      className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 min-[900px]:flex-wrap"
       role="radiogroup"
       aria-label={copy.vehicle.checks}
     >
@@ -54,7 +56,7 @@ function SessionPicker({
             role="radio"
             aria-checked={selected === s.session_id}
             onClick={() => onSelect(s.session_id)}
-            className="flex min-h-12 shrink-0 items-center gap-2 rounded-lg border border-line px-3 text-[13px] text-dim aria-checked:border-accent aria-checked:bg-surface-2 aria-checked:text-text"
+            className={`flex min-h-12 shrink-0 items-center gap-2 rounded-lg border border-line px-3 text-[13px] text-dim ${CHECKED}`}
           >
             <span className={`size-2 rounded-full ${look.dot}`} aria-hidden />
             <span>
@@ -233,6 +235,25 @@ export function VehicleScreen({
     el.style.height = `${el.scrollHeight + 2}px`
   }, [draft])
   const micShown = voiceSupported && !draft.trim()
+  // The quick replies scroll sideways on a phone. While there is more to the right the row fades at its
+  // right edge; at its end, and when it fits or wraps (a wide screen), it does not.
+  const quickRow = useRef<HTMLDivElement>(null)
+  const [quickMore, setQuickMore] = useState(false)
+  const measureQuick = () => {
+    const row = quickRow.current
+    setQuickMore(row !== null && scrollsFurther(row.scrollLeft, row.scrollWidth, row.clientWidth))
+  }
+  useLayoutEffect(measureQuick) // after every render: «Создать заявку» comes and goes, the row hides while typing
+  useEffect(() => {
+    window.addEventListener('resize', measureQuick)
+    return () => window.removeEventListener('resize', measureQuick)
+  }, [])
+  // Where focus goes when the ticket sheet is gone and the button that opened it is gone too: «Открыть
+  // заявку» when the draft still waits, else the question field. Not the field on a touch screen: the
+  // keyboard would come up over the ticket.
+  const openTicket = useRef<HTMLButtonElement>(null)
+  const afterTicket = () =>
+    openTicket.current ?? (window.matchMedia('(pointer: coarse)').matches ? null : input.current)
   // Tickets of this vehicle as the server has them now: made in any thread, with their outcomes.
   const [tickets, setTickets] = useState<TicketView[]>([])
   // Tickets saved or sent on this screen since the list was asked for: newer than their copies in it.
@@ -377,7 +398,12 @@ export function VehicleScreen({
   const pendingBar = thread.pending && !ticketOpen && (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-accent/50 bg-surface px-4 py-3">
       <p>{copy.ticket.pending}</p>
-      <button type="button" onClick={() => setDismissed(null)} className="min-h-12 shrink-0 font-semibold text-accent">
+      <button
+        ref={openTicket}
+        type="button"
+        onClick={() => setDismissed(null)}
+        className="min-h-12 shrink-0 font-semibold text-accent"
+      >
         {copy.ticket.open}
       </button>
     </div>
@@ -453,7 +479,11 @@ export function VehicleScreen({
               the screen, and the answer above needs the room. «Создать заявку» is not one of them: it
               stays whatever is in the field (ТЗ F7). */}
           {(canTicket || !typing) && (
-            <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 min-[900px]:flex-wrap">
+            <div
+              ref={quickRow}
+              onScroll={measureQuick}
+              className={`no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 min-[900px]:flex-wrap ${quickMore ? 'fade-right' : ''}`}
+            >
               {canTicket && (
                 <button
                   type="button"
@@ -584,6 +614,7 @@ export function VehicleScreen({
             thread.ticketCreated(ticket)
           }}
           onOpenSource={openSource}
+          focusAfter={afterTicket}
         />
       )}
       {source && (

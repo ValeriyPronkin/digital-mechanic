@@ -5,6 +5,7 @@ import { LevelQuestion } from './components/LevelQuestion'
 import { VehicleScreen } from './components/VehicleScreen'
 import { copy } from './copy'
 import { isLevelChosen } from './lib/level'
+import { tabTitle } from './lib/ui'
 
 const fromHash = () => decodeURIComponent(window.location.hash.replace(/^#\/?/, '')) || null
 const savedRole = (): Role => (localStorage.getItem('role') === 'chief' ? 'chief' : 'mechanic')
@@ -39,6 +40,11 @@ export default function App() {
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [loadFleet])
+
+  // The tab says which vehicle it shows: a jury member with two tabs open can tell them apart.
+  useEffect(() => {
+    document.title = tabTitle(copy.product, selected)
+  }, [selected])
 
   const select = (id: string | null) => {
     window.location.hash = id ? `/${encodeURIComponent(id)}` : ''

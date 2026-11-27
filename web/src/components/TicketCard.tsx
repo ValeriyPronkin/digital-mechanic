@@ -3,6 +3,7 @@ import { setOutcome, type Outcome, type TicketView } from '../api'
 import { copy } from '../copy'
 import { dateTimeRu, sourceLabel } from '../lib/format'
 import { noteChanged as differs, typedAfterSave } from '../lib/tickets'
+import { around, PRESSED } from '../lib/ui'
 
 const OUTCOMES: Outcome[] = ['confirmed', 'not_confirmed', 'other_fault']
 
@@ -55,11 +56,17 @@ export function TicketCard({ ticket, onChange }: { ticket: TicketView; onChange:
     }
   })
 
+  const [before, number, rest] = around(copy.ticket.created(ticket.ticket_id), ticket.ticket_id)
   return (
     <section className="relative overflow-hidden rounded-xl border border-line bg-surface">
       <div className="absolute inset-y-0 left-0 w-1 bg-accent" aria-hidden />
       <div className="space-y-2 pt-4 pr-4 pb-1 pl-5">
-        <h2 className="text-[17px] font-semibold">{copy.ticket.created(ticket.ticket_id)}</h2>
+        {/* one click takes the whole number: a double click on «TKT-0001» selected «0001» */}
+        <h2 className="text-[17px] font-semibold">
+          {before}
+          <span className="select-all">{number}</span>
+          {rest}
+        </h2>
         <p className="text-[13px] text-dim">
           {dateTimeRu(ticket.created_at)} · {copy.ticket.urgency.toLowerCase()}: {copy.urgency[p.urgency]}
           {/* the mechanic sent it with another priority than the server proposed */}
@@ -80,7 +87,7 @@ export function TicketCard({ ticket, onChange }: { ticket: TicketView; onChange:
                 disabled={saving}
                 aria-pressed={ticket.outcome === o}
                 onClick={() => save(o)}
-                className="min-h-12 grow rounded-lg border border-line px-3 text-[13px] text-dim aria-pressed:border-accent aria-pressed:bg-surface-2 aria-pressed:text-text disabled:opacity-50"
+                className={`min-h-12 grow rounded-lg border border-line px-3 text-[13px] text-dim disabled:opacity-50 ${PRESSED}`}
               >
                 {copy.ticket.outcome[o]}
               </button>

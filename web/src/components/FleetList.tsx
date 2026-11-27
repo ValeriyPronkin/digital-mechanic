@@ -1,15 +1,17 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useMemo, useRef, useState } from 'react'
 import { OUTCOMES_EXPORT, type FleetStatus, type FleetView, type VehicleBrief } from '../api'
 import { copy } from '../copy'
 import { rowBadges } from '../lib/checks'
 import { outcomesPlace, reasonParts } from '../lib/fleet'
 import { dateRu, plateKey } from '../lib/format'
+import { CHECKED, nextChoice, PRESSED_STATUS } from '../lib/ui'
 
 export type Role = 'mechanic' | 'chief'
 
 const statusTone = { normal: 'text-ok', attention: 'text-warn', quarantine: 'text-stop' } as const
 const dot = { normal: 'bg-ok', attention: 'bg-warn', quarantine: 'bg-stop' } as const
 const STATUSES: FleetStatus[] = ['quarantine', 'attention', 'normal']
+const ROLES: Role[] = ['mechanic', 'chief']
 // a badge drawn as a label: «заявка создана», «результат не подходит двигателю» (lib/checks.ts, rowBadges)
 const BADGE_LABEL = 'inline-block rounded-md border border-line px-1.5 py-px leading-none whitespace-nowrap text-dim'
 
@@ -128,6 +130,45 @@ function Row({
   )
 }
 
+/** Mechanic or chief mechanic: one segmented control. The track is the container, the chosen segment is
+ *  inset in it, both segments are 32 px high and the track 38 px, so the control is no heavier than the
+ *  title beside it; each segment still takes a tap 48 px high (a layer 8 px above and below it). One tab
+ *  stop: the arrow keys move the choice, as in a group of radio buttons. */
+function RoleSwitch({ role, onRole }: { role: Role; onRole: (role: Role) => void }) {
+  const segments = useRef<(HTMLButtonElement | null)[]>([])
+  return (
+    <div
+      className="flex rounded-lg border border-line p-0.5 text-[13px]"
+      role="radiogroup"
+      aria-label={copy.role.label}
+      onKeyDown={(e) => {
+        const to = nextChoice(ROLES.indexOf(role), e.key, ROLES.length)
+        if (to === null) return
+        e.preventDefault()
+        onRole(ROLES[to])
+        segments.current[to]?.focus()
+      }}
+    >
+      {ROLES.map((r, i) => (
+        <button
+          key={r}
+          ref={(el) => {
+            segments.current[i] = el
+          }}
+          type="button"
+          role="radio"
+          aria-checked={role === r}
+          tabIndex={role === r ? 0 : -1}
+          onClick={() => onRole(r)}
+          className={`relative h-8 rounded-md border border-transparent px-2.5 whitespace-nowrap text-dim before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] ${CHECKED}`}
+        >
+          {copy.role[r]}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 /** The fleet. Mechanic: find a vehicle by plate or garage number. Chief mechanic (B3): counts by status
  *  that filter the list, and the list in the order to deal with the vehicles. */
 export function FleetList({
@@ -174,30 +215,16 @@ export function FleetList({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* 8 px between the blocks, 12 px above them, 8 px below and a role switch without its inner
-          padding: with 48 px controls and the legend the list would otherwise start lower than it did, and
-          lose a row at 320×568. */}
-      <div className="space-y-2 border-b border-line px-4 pt-3 pb-2">
-        <p className="text-[13px] leading-none text-dim">{copy.product}</p>
-        <div className="flex items-center justify-between gap-3">
-          <h1 className="text-[22px] leading-[1.15] font-semibold">{copy.fleet.title}</h1>
-          <div
-            className="flex rounded-lg border border-line text-[13px]"
-            role="radiogroup"
-            aria-label={copy.role.label}
-          >
-            {(['mechanic', 'chief'] as const).map((r) => (
-              <button
-                key={r}
-                type="button"
-                role="radio"
-                aria-checked={role === r}
-                onClick={() => onRole(r)}
-                className="min-h-12 rounded-[7px] px-2.5 whitespace-nowrap text-dim aria-checked:bg-surface-2 aria-checked:text-text"
-              >
-                {copy.role[r]}
-              </button>
-            ))}
+      {/* One left edge and one step: 12 px above the header, between its blocks and below it; the product
+          line and the title are a pair, 8 px apart. The header is 16 px shorter than it was with 8 px steps
+          and 48 px tall controls drawn at full height, so the list still shows its first three rows at
+          320×568. */}
+      <div className="space-y-3 border-b border-line px-4 py-3">
+        <div className="space-y-2">
+          <p className="text-[13px] leading-none text-dim">{copy.product}</p>
+          <div className="flex items-center justify-between gap-3">
+            <h1 className="text-[22px] leading-[1.15] font-semibold">{copy.fleet.title}</h1>
+            <RoleSwitch role={role} onRole={onRole} />
           </div>
         </div>
 
@@ -209,12 +236,16 @@ export function FleetList({
                 type="button"
                 aria-pressed={only === s}
                 onClick={() => setOnly(only === s ? null : s)}
-                // pressed: the card surface, not the input one, where «карантин» in red measured 4,44:1
-                className="rounded-lg border border-line px-3 py-2 text-left aria-pressed:border-text aria-pressed:bg-surface"
+                // The content starts at the top, so the three numbers stand on one line and the three labels
+                // start on one line whichever of them wraps; a button would centre it, and the two short
+                // cards used to hang lower than the long one.
+                className={`flex flex-col items-start rounded-lg border border-line px-3 py-2 text-left ${PRESSED_STATUS}`}
               >
-                <span className="block text-[22px] leading-[1.15] font-semibold">{fleet.counts[s]}</span>
-                <span className={`flex items-center gap-1.5 text-[12px] ${statusTone[s]}`}>
-                  <span className={`size-2 shrink-0 rounded-full ${dot[s]}`} aria-hidden />
+                <span className="text-[22px] leading-[1.15] font-semibold">{fleet.counts[s]}</span>
+                {/* two lines are kept for the label («требует внимания» wraps in a narrow card), so the cards
+                    are one height at every width; the dot belongs to the first line */}
+                <span className={`flex min-h-[30px] items-start gap-1.5 text-[12px] leading-[15px] ${statusTone[s]}`}>
+                  <span className={`mt-[3.5px] size-2 shrink-0 rounded-full ${dot[s]}`} aria-hidden />
                   {copy.fleetStatus[s]}
                 </span>
               </button>
@@ -223,11 +254,12 @@ export function FleetList({
         )}
         {fleet && (
           <details className="text-[13px] text-dim">
-            {/* a 48 px target in a 40 px line: it reaches 4 px into the gaps above and below */}
-            <summary className="-my-1 flex min-h-12 cursor-pointer list-none items-center text-accent [&::-webkit-details-marker]:hidden">
+            {/* a 44 px target in a 20 px line: it reaches up to the block above and down to the one below,
+                and into neither */}
+            <summary className="-my-3 flex min-h-11 cursor-pointer list-none items-center text-accent [&::-webkit-details-marker]:hidden">
               {copy.chief.legendTitle}
             </summary>
-            <p className="pb-1">{copy.chief.legend}</p>
+            <p className="pt-3">{copy.chief.legend}</p>
           </details>
         )}
 
@@ -257,8 +289,24 @@ export function FleetList({
           </div>
         )}
         {fleet !== null && shown.length === 0 && <p className="p-4 text-dim">{copy.fleet.empty}</p>}
-        {role === 'chief' && shown.length > 0 && (
-          <p className="px-4 pt-1.5 pb-0.5 text-[13px] text-mute">{only ? copy.fleetStatus[only] : copy.chief.first}</p>
+        {role === 'chief' && shown.length > 0 && !only && (
+          <p className="px-4 pt-1.5 pb-0.5 text-[13px] text-mute">{copy.chief.first}</p>
+        )}
+        {/* A pressed counter filters the list: the line above it says so and takes the filter off. The
+            line is 32 px and «Сбросить» takes a tap 44 px high, up into the header's own 12 px. */}
+        {role === 'chief' && only && (
+          <p className="flex min-h-8 items-center justify-between gap-3 px-4 text-[13px] text-mute">
+            <span>
+              {copy.chief.shown}: {copy.fleetStatus[only]}
+            </span>
+            <button
+              type="button"
+              onClick={() => setOnly(null)}
+              className="relative shrink-0 text-accent before:absolute before:-inset-x-3 before:-top-3 before:bottom-0 before:content-['']"
+            >
+              {copy.chief.reset}
+            </button>
+          </p>
         )}
         <ul className="divide-y divide-line">
           {shown.map((v, i) => (
