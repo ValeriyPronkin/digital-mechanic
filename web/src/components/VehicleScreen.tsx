@@ -181,12 +181,47 @@ function AssistantBlock({
       ))}
     </div>
   )
+  // An answer in another language, in Russian: for the one who checks it (PR #86). Its numbers were checked
+  // by the server; the chips are the same pages. Right under «Коротко», with the contradiction: at the end
+  // of a long answer it was not found (27.11).
+  const russian = !turn.live && turn.back_translation && offersRussian(turn) && (
+    <details className="group">
+      <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 text-[13px] text-accent [&::-webkit-details-marker]:hidden">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          className="shrink-0 transition-transform group-open:rotate-90"
+          aria-hidden
+        >
+          <path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+        {copy.lang.showRu}
+      </summary>
+      <div className="border-l-2 border-line pl-3">
+        <Answer
+          text={turn.back_translation}
+          sources={sources}
+          verified={new Set(turn.verification?.verified)}
+          scanned={new Set(turn.verification?.scanned)}
+          onOpen={onOpenSource}
+        />
+      </div>
+    </details>
+  )
   return (
     <div className="space-y-3">
       {turn.blocks.map((block, i) => (noModel && isGuide(block) ? null : show(block, i)))}
       {turn.text && (
         <Answer
-          afterLead={contradictions || undefined}
+          afterLead={
+            russian || contradictions ? (
+              <>
+                {russian}
+                {contradictions}
+              </>
+            ) : undefined
+          }
           text={turn.text}
           spans={turn.spans}
           sources={sources}
@@ -195,33 +230,6 @@ function AssistantBlock({
           verification={turn.verification}
           onOpen={onOpenSource}
         />
-      )}
-      {/* An answer in another language, in Russian: for the one who checks it (PR #86). Its numbers were
-          checked by the server; the chips are the same pages. */}
-      {!turn.live && turn.back_translation && offersRussian(turn) && (
-        <details className="group">
-          <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 text-[13px] text-accent [&::-webkit-details-marker]:hidden">
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 12 12"
-              className="shrink-0 transition-transform group-open:rotate-90"
-              aria-hidden
-            >
-              <path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-            {copy.lang.showRu}
-          </summary>
-          <div className="border-l-2 border-line pl-3">
-            <Answer
-              text={turn.back_translation}
-              sources={sources}
-              verified={new Set(turn.verification?.verified)}
-              scanned={new Set(turn.verification?.scanned)}
-              onOpen={onOpenSource}
-            />
-          </div>
-        </details>
       )}
       {/* the level the server chose for this question, and the same question again a level down or up (#91);
           quiet, like the quick replies: «Создать заявку» stays the one accent action under an answer */}
