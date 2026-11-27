@@ -7,6 +7,7 @@ import pytest
 
 from service.agent import _DRIVE_ASK, TICKET_NOT_ASKED
 from service.clients import MLClient, ToirClient
+from service.manual_search import ManualHit
 from test_agent import DRAFT, call, make_agent, say
 
 Q37 = ("Y815BM178", "S-0153")  # F14 цепь ГРМ, срочность высокая
@@ -51,3 +52,25 @@ def test_yes_after_offer_builds_draft(ml: MLClient, toir: ToirClient) -> None:
 def test_explicit_request_builds_draft(ml: MLClient, toir: ToirClient) -> None:
     ag, _ = make_agent([call("draft_ticket", **DRAFT), say("Черновик готов [R1].")], ml, toir)
     assert ag.ask(ag.start(*Q37), "Оформи заявку на дефектовку").draft is not None
+
+
+class LimitPages:
+    available = True
+
+    def search(self, query: str, engine: str, k: int = 5) -> list[ManualHit]:
+        return []
+
+    def page_text(self, manual_id: str, pdf_page: int) -> str | None:
+        if (manual_id, pdf_page) == ("zmz-409-rk", 91):
+            return "При появлении в работающем двигателе стуков двигатель не эксплуатировать."
+        return None
+
+
+def test_card_only_verdict_gets_manual_page(ml: MLClient, toir: ToirClient) -> None:
+    """«Нельзя» только по карточке, без ссылки — код добавляет страницу ограничений эксплуатации (Q37: стр. 91)."""
+    ag, _ = make_agent([say("**Нет, ездить нельзя.** По карточке срочность высокая.")], ml, toir, LimitPages(),
+                       prefetch=False)  # fmt: skip
+    reply = ag.ask(ag.start(*Q37), QUESTION)
+    first = reply.text.split("\n\n")[0]
+    assert "Ограничения эксплуатации в руководстве — стр. 91 [R" in first
+    assert (reply.sources[-1]["pdf_page"], reply.sources[-1]["manual"].startswith("ЗМЗ")) == (91, True)

@@ -1731,13 +1731,29 @@ class Agent:
     def _drive_verdict(
         self, conv: Conversation, question: str, text: str, cited: list[Source]
     ) -> tuple[str, list[Source]]:
-        """«Можно ли ехать» — первым ответ «да/нет» (приёмщик 27.11, Q37). Модель его не дала — строка кода по
-        результату проверки (правило срочности, D-6) и страница ограничений эксплуатации руководства."""
+        """«Можно ли ехать» — первым ответ «да/нет» со страницей руководства (приёмщик 27.11, Q37). Нет вердикта —
+        строка кода по результату проверки (правило срочности, D-6); нет ссылки на руководство в первом абзаце —
+        страница ограничений эксплуатации этого двигателя (реестр Никиты), та, где больше слов вопроса."""
         if not _DRIVE_ASK.search(question) or (conv.passport.get("answer_lang") or "ru") != "ru":
             return text, cited  # ответ не по-русски — строку кода по-русски не вставляем (указание модели — то же)
-        first = next((p for p in text.split("\n\n") if p.strip()), "")
-        if _VERDICT.search(first):
+        paras = text.split("\n\n")
+        k = next((i for i, p in enumerate(paras) if p.strip()), 0)
+        first = paras[k] if paras else ""
+        has_verdict, has_ref = bool(_VERDICT.search(first)), bool(_REF.search(first))
+        if has_verdict and has_ref:
             return text, cited
+        limit_src = self._limit_source(conv, question)
+        tail = ""
+        if limit_src is not None:
+            tail = f" Ограничения эксплуатации в руководстве — стр. {limit_src.pdf_page} [{limit_src.ref}]."
+        if limit_src is not None and limit_src not in cited:
+            cited = [*cited, limit_src]
+        if has_verdict:
+            if not tail:
+                return text, cited
+            paras[k] = first.rstrip() + tail
+            conv.passport["drive_page_by_code"] = True
+            return "\n\n".join(paras), cited
         card = conv.card
         if card is None or card.status == "check_failed":
             line = "**Решить по проверке нельзя:** запись не годится — повторите проверку; до неё следите за приборами."
@@ -1746,27 +1762,37 @@ class Agent:
         elif card.urgency == "high":
             line = "**Ездить нельзя:** срочность по проверке высокая — до дефектовки машину не эксплуатировать."
         else:
-            line = (
-                "**Однозначного «можно» нет:** по проверке нужна дефектовка в ближайшее время — ехать только до "
-                "места ремонта, следя за приборами."
-            )
-        engine = canonical_engine(conv.vehicle.engine_model) or conv.vehicle.engine_model
-        page_text = getattr(self.searcher, "page_text", None)
-        limit = next(iter(nk_coverage.limits_for(engine)), None)
-        if limit is not None and page_text is not None and (full := page_text(limit.manual, limit.page)):
-            src = next((s for s in conv.sources.values() if s.manual_id == limit.manual and s.pdf_page == limit.page),
-                       None)  # fmt: skip
-            if src is None:
-                doc = DOCS_BY_ID.get(limit.manual)
-                name = doc.designation if doc else limit.manual
-                src = Source(ref=next_ref(conv), manual_id=limit.manual, manual=name, pdf_page=limit.page,
-                             section="", text=str(full)[:6000])  # fmt: skip
-                conv.sources[src.ref] = src
-            line += f" Ограничения эксплуатации в руководстве — стр. {limit.page} [{src.ref}]."
-            if src not in cited:
-                cited = [*cited, src]
+            line = ("**Однозначного «можно» нет:** по проверке нужна дефектовка в ближайшее время — ехать только до "
+                    "места ремонта, следя за приборами.")
         conv.passport["drive_verdict_by_code"] = True
-        return f"{line}\n\n{text}".strip(), cited
+        return f"{line}{tail}\n\n{text}".strip(), cited
+
+    def _limit_source(self, conv: Conversation, question: str) -> Source | None:
+        """Страница ограничений эксплуатации руководства этого двигателя — источником разговора."""
+        page_text = getattr(self.searcher, "page_text", None)
+        if page_text is None:
+            return None
+        engine = canonical_engine(conv.vehicle.engine_model) or conv.vehicle.engine_model
+        want = set(tokenize(question))
+        best: tuple[int, int, Any, str] | None = None
+        for n, limit in enumerate(nk_coverage.limits_for(engine)):
+            full = str(page_text(limit.manual, limit.page) or "")
+            if not full:
+                continue
+            score = len(want.intersection(tokenize(full)))
+            if best is None or score > best[0]:
+                best = (score, n, limit, full)
+        if best is None:
+            return None
+        _, _, limit, full = best
+        src = next((s for s in conv.sources.values() if s.manual_id == limit.manual and s.pdf_page == limit.page), None)
+        if src is None:
+            doc = DOCS_BY_ID.get(limit.manual)
+            name = doc.designation if doc else limit.manual
+            src = Source(ref=next_ref(conv), manual_id=limit.manual, manual=name, pdf_page=limit.page,
+                         section="", text=full[:6000])  # fmt: skip
+            conv.sources[src.ref] = src
+        return src
 
     def _draft_ticket(self, conv: Conversation, args: dict[str, Any]) -> dict[str, Any]:
         conv.draft = None
