@@ -366,7 +366,7 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
     return block, rest
 
 
-_ESC_NUMBER = re.compile(r"\(№ (\d+)\)")
+_ESC_NUMBER = re.compile(r"\(№ (\d+)[);]")  # «(№ 3)» — передано, «(№ 3; источник: …)» — решено
 
 
 def escalation_view(line: str) -> dict[str, Any]:

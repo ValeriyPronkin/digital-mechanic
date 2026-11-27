@@ -298,6 +298,10 @@ export const copy = {
   contradiction: {
     title: (what: string) => `Противоречие в документации — ${what}`,
     label: 'Противоречие в документации',
+    // #93: the hand-over to the chief mechanic, by its number in his queue
+    open: (n: number | null) => (n === null ? 'У главного механика' : `№ ${n} · у главного механика`),
+    resolved: (n: number | null) => (n === null ? 'Решено' : `№ ${n} · решено`),
+    openQueue: 'Открыть очередь противоречий',
   },
   // «Прослушать» (#14): the short spoken version of the answer.
   speech: {
