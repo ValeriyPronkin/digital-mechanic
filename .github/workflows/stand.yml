@@ -175,7 +175,12 @@ jobs:
             --environment MOCK_TIMEOUT=30 \
             --environment STATE_DB=/tmp/agent.db \
             --environment INDEX_DIR=/tmp/index \
-            --environment TTS_CACHE_BUCKET=1
+            --environment TTS_CACHE_BUCKET=1 \
+            --environment V2_STATE_BUCKET=1 \
+            --environment PASSPORT_LOG=bucket
+          # V2_STATE_BUCKET — нити разговора v2 в бакете `v2/threads/` (запросы механика приходят на разные
+          # экземпляры); PASSPORT_LOG — копия паспорта без ПДн в `logs/<дата>/passport/` (#31). Оба — по IAM и
+          # только при заданном S3_BUCKET (код проверяет сам). Решение Валерия, 27.11.
           if [ -n "${S3_BUCKET:-}" ]; then
             set -- "$@" --environment "S3_BUCKET=${S3_BUCKET}"
           else
