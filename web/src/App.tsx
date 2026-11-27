@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getFleet, type FleetView } from './api'
 import { FleetList, type Role } from './components/FleetList'
+import { REGISTER, TicketRegister } from './components/TicketRegister'
 import { VehicleScreen } from './components/VehicleScreen'
 import { copy } from './copy'
 import { tabTitle } from './lib/ui'
@@ -39,7 +40,7 @@ export default function App() {
 
   // The tab says which vehicle it shows: a jury member with two tabs open can tell them apart.
   useEffect(() => {
-    document.title = tabTitle(copy.product, selected)
+    document.title = tabTitle(copy.product, selected === REGISTER ? copy.register.title : selected)
   }, [selected])
 
   const select = (id: string | null) => {
@@ -66,7 +67,9 @@ export default function App() {
         />
       </aside>
       <main className={`min-w-0 flex-1 ${selected ? '' : 'hidden min-[900px]:block'}`}>
-        {selected ? (
+        {selected === REGISTER ? (
+          <TicketRegister onBack={() => select(null)} />
+        ) : selected ? (
           <VehicleScreen key={selected} vehicleId={selected} onBack={() => select(null)} onTicketsChanged={loadFleet} />
         ) : (
           <div className="grid h-full place-items-center p-8 text-center">
