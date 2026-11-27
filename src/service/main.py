@@ -517,5 +517,6 @@ app.include_router(
         lambda: speech(),
         lambda: page_images(),
         lambda: page_marks(),
+        lambda: slog.put if (slog := journal()) is not None else None,
     )
 )

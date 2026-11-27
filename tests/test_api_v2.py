@@ -84,11 +84,23 @@ def test_c1_through_v2(v2: tuple[TestClient, Any, Store]) -> None:
     pending = next(e for e in events(r2) if e["type"] == "ticket_pending")
     assert pending["payload"]["urgency"] == "high" and pending["operations"][0]["text"].startswith("Замерить")
 
-    bad = c.post(f"/api/v2/tickets/{pending['pending_id']}/approve", json={"vehicle_id": vid, "urgency": "low"})
-    assert bad.status_code == 409 and "D-6" in bad.json()["detail"]  # приоритет — правило кода
-    ok = c.post(f"/api/v2/tickets/{pending['pending_id']}/approve", json={"vehicle_id": vid, "keep_operations": [0]})
+    # приоритет предлагает правило кода, механик может выбрать другой (#60): все три, предложенный отмечен
+    choices = pending["urgency_choices"]
+    assert [ch["level"] for ch in choices] == ["high", "medium", "low"]
+    assert [ch["level"] for ch in choices if ch["proposed"]] == ["high"]
+    ok = c.post(
+        f"/api/v2/tickets/{pending['pending_id']}/approve",
+        json={"vehicle_id": vid, "keep_operations": [0], "urgency": "low"},
+    )
     view = ok.json()
     assert ok.status_code == 200 and view["ticket_id"].startswith("TKT-") and view["urgency_proposed"] == "high"
+    assert view["payload"]["urgency"] == "low"  # в ТОиР ушёл выбор механика
+    note = view["urgency_note"]
+    assert "выбран механиком: «низкий»" in note and "по правилу кода — «высокий»" in note
+    assert view["urgency_note"] in view["payload"]["conclusion"]  # и в заключении заявки — видно в ТОиР
+    restored = c.get(f"/api/v2/threads/current?vehicle_id={vid}").json()
+    rules = restored["transcript"][-2]["passport"]["rules"]  # паспорт ответа, предложившего заявку
+    assert rules[-1] == f"Заявка {view['ticket_id']}. {view['urgency_note']}"
     again = c.post(f"/api/v2/tickets/{pending['pending_id']}/approve", json={"vehicle_id": vid})
     assert again.status_code == 409  # черновик погашен — повторно не уходит
 
@@ -179,3 +191,14 @@ def test_contradiction_as_block_and_not_repeated_in_text(ml: MLClient, toir: Toi
     assert rest == "Прямой ответ.\n\nДальше по шагам." and contradictions.HEADER not in rest
     conv.contradiction = None
     assert api_v2.contradiction_block(conv, text) == (None, text)
+
+
+def test_urgency_note_names_rule_and_choice() -> None:
+    from service.api_v2 import urgency_note
+
+    assert urgency_note("high", "high", "код F01.") == (
+        "Приоритет по правилу кода — «высокий» (код F01); механик оставил его."
+    )
+    assert urgency_note("high", "medium", "код F01") == (
+        "Приоритет выбран механиком: «средний»; по правилу кода — «высокий» (код F01)."
+    )
