@@ -128,3 +128,16 @@ def test_absent_quotes_on_their_pages_in_real_index() -> None:
     page_text = getattr(default_searcher(), "page_text", None)
     for a in items():
         assert verified(a, page_text), a.id
+
+
+def test_code_answer_translated_only_with_same_numbers(ml: MLClient, toir: ToirClient) -> None:
+    """Ответ кода на казахском вопросе: перевод моделью — только если цифры (страницы) в нём те же."""
+    q = "Турбокомпрессор роторының саңылауын қалай тексеруге болады?"
+    ag, _ = make_agent([], ml, toir, Pages())
+    ru = ag.ask(ag.start(*YAMZ236), q, lang="ru").text
+    ok = "ЯМЗ-236М2 нұсқаулықтарында турбокомпрессор жоқ. " + ru  # цифры те же
+    ag, llm = make_agent([say(ok)], ml, toir, Pages())
+    reply = ag.ask(ag.start(*YAMZ236), q)
+    assert reply.lang == "kk" and reply.text == ok and len(llm.seen) == 1
+    ag, _ = make_agent([say("**ЯМЗ-236М2 нұсқаулықтарында турбокомпрессор жоқ**, 999-бет.")], ml, toir, Pages())
+    assert ag.ask(ag.start(*YAMZ236), q).text == ru  # перевод изменил цифры — остаётся русский ответ кода

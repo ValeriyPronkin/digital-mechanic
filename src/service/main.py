@@ -17,7 +17,17 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
-from service import IMPORT_STARTED, INSTANCE_ID, __version__, api_v2, conv_state, kb_store, passport, stand_log
+from service import (
+    IMPORT_STARTED,
+    INSTANCE_ID,
+    __version__,
+    api_v2,
+    conv_state,
+    kb_store,
+    language,
+    passport,
+    stand_log,
+)
 from service import parts_supplier as parts_supplier_mod
 from service.agent import Agent, Level
 from service.clients import MLClient, ServiceError, ToirClient
@@ -39,9 +49,10 @@ from service.voice import (
     SpeechKit,
     TtsCache,
     choose_tts_api,
-    for_tts,
     pcm_from_wav,
     speech_for,
+    speech_lang,
+    spoken_text,
     stt_cost_rub,
     timed,
     tts_cost_rub,
@@ -341,6 +352,7 @@ class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     level: Level = "steps"  # уровень механика (#17): «Опытный» / «Пошагово»
     stt_id: int | None = None  # вопрос голосом: запись журнала распознавания (#31 — паспорт запроса)
+    lang: str | None = Field(default=None, max_length=10)  # язык ответа: ru, uz, uz-cyrl, tg, kk, ky, en; нет — вопроса
     state: str | None = Field(default=None, max_length=400_000)  # подписанное состояние разговора
 
 
@@ -354,11 +366,11 @@ def chat(req: ChatIn, request: Request) -> dict[str, Any]:
         conv = conv_state.load(req.state, fleet()) if req.state else None
         if conv is None or conv.vehicle.vehicle_id != req.vehicle_id or conv.session_id != req.session_id:
             conv = ag.start(req.vehicle_id, req.session_id)
-        reply = ag.ask(conv, req.message, req.level)
+        reply = ag.ask(conv, req.message, req.level, req.lang)
     except ServiceError as exc:
         raise HTTPException(exc.http_status, exc.message) from exc
     log_steps(reply.trace)
-    spoken = speech_for(reply.text, conv.sources)
+    spoken = speech_for(reply.text, conv.sources, reply.lang)
     stt = store().voice_call(req.stt_id) if req.stt_id else None
     stt = stt if stt and stt.get("kind") == "stt" else None
     pp = passport.build(
@@ -377,19 +389,20 @@ def chat(req: ChatIn, request: Request) -> dict[str, Any]:
         "state": conv_state.dump(conv),
         **reply.__dict__,
         # Короткая версия для ответа вслух (#14): собрана кодом, цифры сверены с фрагментом; синтез — по подписи.
-        "speech": {"text": spoken.text, "sig": conv_state.sign_text(spoken.text)},
+        "speech": {"text": spoken.text, "sig": conv_state.sign_text(spoken.text), "lang": speech_lang(reply.lang)},
         "passport": pp,  # «?» у ответа (#31): шаги, контекст, токены, ₽
     }
 
 
 @app.post("/api/voice/recognize")
-async def voice_recognize(request: Request) -> dict[str, Any]:
-    """Вопрос голосом: WAV 16 кГц моно (до 30 с) → текст. Текст механик видит и может поправить до отправки."""
+async def voice_recognize(request: Request, lang: str = "ru") -> dict[str, Any]:
+    """Вопрос голосом: WAV 16 кГц моно (до 30 с) → текст. Текст механик видит и может поправить до отправки.
+    `?lang=uz|kk|en` — язык распознавания (выбор механика); по умолчанию и без распознавания на языке — русский."""
     _rate_limit(request)
     body = await request.body()
     try:
         pcm, seconds = pcm_from_wav(body)
-        text, ms = timed(speech().recognize, pcm)
+        text, ms = timed(speech().recognize, pcm, language.normalize(lang) or "ru")
     except ServiceError as exc:
         raise HTTPException(exc.http_status, exc.message) from exc
     cost = stt_cost_rub(seconds)
@@ -404,6 +417,7 @@ async def voice_recognize(request: Request) -> dict[str, Any]:
 class SpeakIn(BaseModel):
     text: str = Field(min_length=1, max_length=600)
     sig: str = Field(min_length=64, max_length=64)
+    lang: str | None = Field(default=None, max_length=10)  # язык ответа из `speech.lang`; нет — по буквам текста
 
 
 @app.post("/api/voice/speak")
@@ -412,18 +426,19 @@ def voice_speak(req: SpeakIn, request: Request) -> Response:
     _rate_limit(request)
     if not conv_state.verify_text(req.text, req.sig):
         raise HTTPException(400, "Этот текст сервер не готовил к озвучке.")
-    chars = len(for_tts(req.text))  # тарифицируется текст, который уходит в синтез (единицы — словами)
+    lang = speech_lang(language.normalize(req.lang) or language.detect(req.text))
+    chars = len(spoken_text(req.text, lang))  # тарифицируется текст, который уходит в синтез (единицы — словами)
     t0 = time.monotonic()
-    audio = tts_cache().get(req.text)
+    audio = tts_cache().get(req.text, lang)
     if audio is not None:  # одинаковая фраза уже синтезирована — 0 ₽
         store().log_voice("tts_cache", chars, 0.0, int((time.monotonic() - t0) * 1000))
         return Response(content=audio, media_type="audio/mpeg", headers={"Cache-Control": "no-store", "X-TTS": "cache"})
     api = choose_tts_api(chars)
     try:
-        audio, ms = timed(speech().synthesize, req.text, api)
+        audio, ms = timed(speech().synthesize, req.text, api, lang)
     except ServiceError as exc:
         raise HTTPException(exc.http_status, exc.message) from exc
-    tts_cache().put(req.text, audio)
+    tts_cache().put(req.text, audio, lang)
     store().log_voice("tts", chars, tts_cost_rub(chars, api), ms)
     if (slog := journal()) is not None:
         slog.event("step", step="tts", ms=ms)

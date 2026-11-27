@@ -171,10 +171,10 @@ class FakeSpeech:
     def __init__(self, heard: str = "какой тепловой зазор клапанов") -> None:
         self.heard, self.spoken = heard, []  # type: list[str]
 
-    def recognize(self, pcm: bytes) -> str:
+    def recognize(self, pcm: bytes, lang: str = "ru") -> str:
         return self.heard
 
-    def synthesize(self, text: str, api: str = "v1") -> bytes:
+    def synthesize(self, text: str, api: str = "v1", lang: str = "ru") -> bytes:
         self.spoken.append(text)
         return b"ID3fake-mp3"
 

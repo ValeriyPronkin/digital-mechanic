@@ -102,10 +102,10 @@ def _wav(seconds: float = 1.0) -> bytes:
 
 
 class _FakeSpeech:
-    def recognize(self, pcm: bytes) -> str:
+    def recognize(self, pcm: bytes, lang: str = "ru") -> str:
         return "какое давление масла"
 
-    def synthesize(self, text: str, api: str = "v1") -> bytes:
+    def synthesize(self, text: str, api: str = "v1", lang: str = "ru") -> bytes:
         return b"ID3"
 
 

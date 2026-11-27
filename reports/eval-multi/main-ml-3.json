@@ -1,0 +1,290 @@
+{
+ "label": "main-ml-3",
+ "at": "2026-11-27 09:43",
+ "passed": 5,
+ "total": 14,
+ "page_found": 13,
+ "values_in_answer": 11,
+ "answerable": 13,
+ "foreign": 0,
+ "lang_ok": 7,
+ "lang_total": 14,
+ "rub_per_question": 0.0936,
+ "median_ms": 4989,
+ "results": [
+  {
+   "ok": false,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": false,
+   "found_pages": [
+    31,
+    33,
+    269,
+    276
+   ],
+   "ms": 5368,
+   "id": "M01",
+   "type": "Ч",
+   "tags": [
+    "разговорный"
+   ],
+   "rub": 0.1062,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    272,
+    302,
+    320,
+    584
+   ],
+   "ms": 4491,
+   "id": "M02",
+   "type": "Ч",
+   "tags": [
+    "тз"
+   ],
+   "rub": 0.0602,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    192,
+    581,
+    585
+   ],
+   "ms": 4913,
+   "id": "M03",
+   "type": "З",
+   "tags": [],
+   "rub": 0.1129,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    4,
+    103
+   ],
+   "ms": 3810,
+   "id": "M04",
+   "type": "О",
+   "tags": [
+    "тз",
+    "своим_ходом"
+   ],
+   "rub": 0.1064,
+   "calls": 2
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": false,
+   "found_pages": [
+    31,
+    33,
+    269,
+    270,
+    276
+   ],
+   "ms": 5296,
+   "id": "M05",
+   "type": "И",
+   "tags": [],
+   "rub": 0.0733,
+   "calls": 2
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": false,
+   "found_pages": [
+    20,
+    21,
+    129
+   ],
+   "ms": 5065,
+   "id": "M06",
+   "type": "П",
+   "tags": [],
+   "rub": 0.1274,
+   "calls": 2
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": false,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    117,
+    118,
+    137
+   ],
+   "ms": 5723,
+   "id": "M07",
+   "type": "Ч",
+   "tags": [
+    "тз"
+   ],
+   "rub": 0.0819,
+   "calls": 2
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": false,
+   "found_pages": [
+    135,
+    136,
+    138,
+    141
+   ],
+   "ms": 8876,
+   "id": "M08",
+   "type": "И",
+   "tags": [
+    "разговорный"
+   ],
+   "rub": 0.1058,
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    91,
+    107,
+    116,
+    147
+   ],
+   "ms": 5461,
+   "id": "M09",
+   "type": "О",
+   "tags": [],
+   "rub": 0.1189,
+   "calls": 2
+  },
+  {
+   "ok": false,
+   "page": null,
+   "values": null,
+   "foreign": false,
+   "refused": true,
+   "lang": false,
+   "ms": 1,
+   "id": "M10",
+   "type": "Н",
+   "tags": [],
+   "rub": 0.0,
+   "calls": 0
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    272,
+    320,
+    584
+   ],
+   "ms": 4509,
+   "id": "M11",
+   "type": "Ч",
+   "tags": [
+    "тз"
+   ],
+   "rub": 0.1015,
+   "calls": 2
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": false,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    35,
+    113,
+    162,
+    177,
+    180,
+    230
+   ],
+   "ms": 5897,
+   "id": "M12",
+   "type": "З",
+   "tags": [],
+   "rub": 0.188,
+   "calls": 3
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": false,
+   "found_pages": [
+    173,
+    411,
+    416
+   ],
+   "ms": 3318,
+   "id": "M13",
+   "type": "Ч",
+   "tags": [
+    "язык:uz"
+   ],
+   "rub": 0.0708,
+   "calls": 2
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": false,
+   "found_pages": [
+    39,
+    164,
+    230
+   ],
+   "ms": 3573,
+   "id": "M14",
+   "type": "Ч",
+   "tags": [
+    "язык:tj",
+    "тз"
+   ],
+   "rub": 0.0573,
+   "calls": 2
+  }
+ ]
+}
