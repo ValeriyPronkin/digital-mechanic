@@ -1244,8 +1244,12 @@ class Agent:
         if refusal_cleaned:
             notes.append(clean_refusal.NOTE)
         final, _ = clean_refusal.drop_specialist(final)  # механик сам специалист (правило заказчика 27.11)
-        final, cited = self._drive_verdict(conv, question, final, cited)
         final, _ = clean_refusal.drop_unsourced_steps(final)  # отказ — без порядка работ не из руководства
+        label = clean_refusal.ACTION_LABEL if target == "ru" else ""  # «Что сделать:» — только в русском ответе
+        final, unnumbered = clean_refusal.unnumber_gaps(final, label)  # совет без [R…] — не шаг руководства
+        if unnumbered:
+            conv.passport["unnumbered_steps"] = unnumbered
+        final, cited = self._drive_verdict(conv, question, final, cited)
         final = plain_words(final, conv.card.fault_title if conv.card else None)  # без служебных слов и кодов
         final = mark_risk(section_heads(final))  # заголовки — строкой; последствие без страницы — с пометкой
         final, bans = unsourced_bans(final, conv.card.urgency if conv.card else None)  # запрет — только со страницей

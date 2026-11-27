@@ -68,6 +68,6 @@ def test_no_data_answer_gives_a_step_not_an_order_of_works(ml: MLClient, toir: T
     text = ag.ask(ag.start(*ANOMALY), "Какое давление в шинах?").text
     assert text.startswith("В руководстве этого двигателя нет данных")
     assert "табличку" not in text and "манометр" not in text and "МАЗ" not in text and "производител" not in text
-    assert "1. При износе протектора — дефектовка шин." in text  # конкретный шаг, нумерация подряд
+    assert "Что сделать: при износе протектора — дефектовка шин." in text  # конкретный шаг — без номера (#151)
     for thou in ("Смотри", "Открой", "проверь", "Запроси"):
         assert thou not in text
