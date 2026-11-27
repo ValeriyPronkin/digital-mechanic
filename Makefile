@@ -1,4 +1,4 @@
-.PHONY: run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check logs spend-probe eval-open eval-golden eval-sweep eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx cost-final index kb-publish kb-fetch pages-render pages-publish
+.PHONY: run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check reset-demo logs spend-probe eval-open eval-golden eval-sweep eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx cost-final index kb-publish kb-fetch pages-render pages-publish
 
 PORT ?= 8000
 
@@ -33,8 +33,15 @@ STAND_URL ?= https://bbab8qkqhuhg3ere9dam.containers.yandexcloud.net/
 engineer-pack: install
 	uv run python scripts/engineer_pack.py $(STAND_URL) $(PACK_ARGS)
 
-demo-check: install  ## сценарий видео на стенде /v2 перед дублем: таблица шагов, код 0 = готово (заявку не шлёт)
+## Маршрут дубля на стенде /v2 (B418HK98/S-0009, H142OX78/S-0113, запасная M739BA198/S-0104): таблица шагов
+## и секунд; код 0 = «готово к дублю», 3 = только «ждёт PR #N», 1 = ❌. Заявку не шлёт. ARGS=--help — параметры
+demo-check: install
 	uv run python scripts/demo_check.py $(or $(STAND),$(STAND_URL)) $(ARGS)
+
+## Сброс демо-машин перед повторным дублем: нити v2 и отметки заявок в бакете (статический ключ из .env), заявки
+## в локальной SQLite; стенд только читает. Сначала ARGS=--dry-run. Перезапуск стенда — команда в конце вывода
+reset-demo: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/reset_demo.py --stand $(or $(STAND),$(STAND_URL)) $(ARGS)
 
 cost: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/cost_report.py --label $(LABEL)
