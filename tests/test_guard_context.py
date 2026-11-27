@@ -83,7 +83,8 @@ def test_ticket_conclusion_number_needs_its_page(ml: MLClient, toir: ToirClient)
     ag, conv = _conv(ml, toir)
     ops = [{"text": "Подтянуть гайки", "ref": "R1"}]
     res = ag._draft_ticket(conv, {"conclusion": "Подтянуть гайки моментом 40 Н·м [R1].", "operations": ops})
-    assert "refused" in res and "40" in res["refused"]
+    # заключение модели в заявку не идёт (#136): заключение пишет сервер, числа без страницы в нём нет
+    assert "refused" not in res and "40" not in res["draft"]["conclusion"]
 
 
 GENERATOR_57 = (
