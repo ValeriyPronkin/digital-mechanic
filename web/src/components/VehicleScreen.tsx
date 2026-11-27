@@ -37,6 +37,7 @@ import { TicketSheet } from './TicketSheet'
 import { VerdictCard } from './VerdictCard'
 import { queueHref } from '../lib/contradictions'
 import { Explain } from './Explain'
+import { VersionFooter } from './VersionFooter'
 
 function SessionPicker({
   sessions,
@@ -667,6 +668,8 @@ export function VehicleScreen({
             </div>
           )}
           {lastExchange.length === 0 && pendingBar}
+          {/* the version the jury looks at (§7), at the very end of the thread, out of the way */}
+          <VersionFooter className="pt-2" />
         </div>
       </div>
 

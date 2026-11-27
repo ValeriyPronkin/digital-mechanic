@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import { getBuild } from '../api'
 import { versionLine } from '../lib/version'
 
-/** «версия 2ce108f · 27.11 13:30» at the end of the fleet list (docs/api-v2-web.md §7): the jury can check
+/** «версия 2ce108f · 27.11 13:30» at the end of the fleet list and of the vehicle's thread (docs/api-v2-web.md §7): the jury can check
  *  which build it sees against main. Asked once; no answer reads «версия неизвестна». The full commit is in
  *  the tooltip, to copy. */
-export function VersionFooter() {
+export function VersionFooter({ className = 'px-4 pt-4 pb-6' }: { className?: string }) {
   const [line, setLine] = useState<string | null>(null)
   const [sha, setSha] = useState<string | undefined>()
   useEffect(() => {
@@ -23,7 +23,7 @@ export function VersionFooter() {
   }, [])
   if (line === null) return null
   return (
-    <p className="px-4 pt-4 pb-6 text-[12px] text-mute" title={sha}>
+    <p className={`${className} text-[12px] text-mute`} title={sha}>
       {line}
     </p>
   )
