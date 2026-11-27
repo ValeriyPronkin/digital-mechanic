@@ -121,3 +121,24 @@ def test_abbreviation_does_not_end_a_sentence(ml: MLClient, toir: ToirClient) ->
               "Момент у гаек поз. 5 — 40 Н·м [R4].")  # fmt: skip
     text, *_ = ag.guard(conv, answer)
     assert "по рис. 6 [R4]." in text and "у гаек поз. 5 — 40 Н·м [R4]." in text
+
+
+def test_part_designations_of_the_shown_draft_are_labels(ml: MLClient, toir: ToirClient) -> None:
+    """Видео-машина B418HK98 (27.11): после черновика «В заявку включены втулка коромысла (236-1007118)…» снималось —
+    обозначения деталей черновика код уже сверил со страницами. Чужое обозначение по-прежнему требует страницы."""
+    ag, conv = _conv(ml, toir)
+    conv.sources["R5"] = Source(ref="R5", manual_id="yamz-236-re", manual="РЭ", pdf_page=169, section="",
+                                text="Втулка коромысла 236-1007118-В 12 0,03 0,36")  # fmt: skip
+    args = {
+        "conclusion": "Дефектовка клапанного механизма [R5].",
+        "operations": [{"text": "Втулка коромысла", "ref": "R5"}],
+        "spare_parts": [{"text": "Втулка коромысла 236-1007118-В", "ref": "R5"}],
+    }
+    res = ag._draft_ticket(conv, args)
+    assert "draft" in res, res
+    parts = " ".join(conv.draft.body.spare_parts)
+    assert "236-1007118" in parts
+    text, *_ = ag.guard(conv, "В заявку включена втулка коромысла (236-1007118).")
+    assert "236-1007118" in text
+    text, *_ = ag.guard(conv, "В заявку включена втулка (236-1007999).")
+    assert "236-1007999" not in text

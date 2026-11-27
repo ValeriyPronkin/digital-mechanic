@@ -424,6 +424,7 @@ WITHDRAWN_UNVERIFIED = "Утверждение снято: число не на�
 WITHDRAWN_UNCITED = "Утверждение снято: для числа не указана страница руководства."
 WITHDRAWN_ROW = "Утверждение снято: число со страницы относится к другой строке таблицы. Сверьте со страницей."
 
+_PART_DESIGNATION = re.compile(r"\b\d{2,4}[-.]\d{5,8}(?:-[А-ЯA-Z0-9]{1,3})?(?![\d,])")
 _BARE_LINE = re.compile(r"^\s*\d{1,4}\s*$")
 # колонтитул с номером и заголовком прописными: «22 ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ», «ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ 22»
 _HEAD_NUMBER = re.compile(r"^\s*\d{1,4}\s+(?=[А-ЯЁA-Z][А-ЯЁA-Z\s.,-]+$)|(?<=[А-ЯЁA-Z.])\s+\d{1,4}\s*$")
@@ -1473,6 +1474,9 @@ class Agent:
         if conv.card and conv.card.confidence_pct is not None:
             percent.add(_norm_num(str(conv.card.confidence_pct)))
         labels += [src.manual for src in conv.sources.values()]  # обозначение найденного документа
+        if conv.draft is not None:  # обозначения деталей черновика — со страниц, их сверил код при сборке черновика
+            found = _PART_DESIGNATION.findall(" ".join(conv.draft.body.spare_parts))
+            labels += found + [re.sub(r"-[А-ЯA-Z0-9]{1,3}$", "", d) for d in found]  # «236-1007118-В» и «236-1007118»
         labels += [d.designation for d in DOCS_BY_ID.values()]
         ordered = tuple(sorted({x for x in labels if x}, key=len, reverse=True))
         return NumberContext(ordered, tuple(dates), frozenset(bare), frozenset(percent))
