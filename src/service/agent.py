@@ -100,7 +100,7 @@ operations и spare_parts — они подставятся из матрицы)
 матрицы. Своё рассуждение без источника не пиши, а если без него нельзя — пометь «мнение помощника, не из руководства».
 8. Если в найденных фрагментах этого двигателя инструкции противоречат друг другу (цифры, условия, порядок) — \
 не выбирай одну как бесспорную: строка «Противоречие в документации:», затем каждая формулировка дословно в кавычках \
-«…» со ссылкой [R…], и совет уточнить у специалиста или производителя для модификации двигателя. Если в результате \
+«…» со ссылкой [R…], и совет уточнить у производителя двигателя для своей модификации. Если в результате \
 поиска есть contradiction — блок с цитатами покажет код, а ответ строй на его выводе. \
 9. Фрагмент с context «испытания на стенде» — нормы и действия при обкатке и испытаниях двигателя на стенде после \
 ремонта (например, аварийная защита стенда), а не поведение машины в эксплуатации: так и скажи, не выдавай за норму \
@@ -436,6 +436,11 @@ _CARD_ASK = re.compile(
 _DOC_SHORT = {"re": "РЭ", "rk": "РК"}
 
 
+def _manual_kind(manual: str) -> str:
+    """«… Руководство по ремонту …» → «руководство по ремонту»; иначе — «руководство по эксплуатации»."""
+    return "руководство по ремонту" if "ремонт" in manual.lower() else "руководство по эксплуатации"
+
+
 def _short(op: str, limit: int = 110) -> str:
     """Работа из матрицы — коротко: до запятой во второй половине лимита, без обрыва посреди слова."""
     op = op.strip().rstrip(".;")
@@ -507,12 +512,12 @@ def _mark_bench(text: str, sources: dict[str, Any]) -> str:
     return "\n".join(out)
 
 
-OPINION_GENERIC = f"Точную причину определит дефектовка или специалист {OPINION_MARK}."
-_GENERIC_ADVICE = re.compile(r"специалист|дефектовк|производител", re.I)
+OPINION_GENERIC = f"Точную причину покажет дефектовка этого узла {OPINION_MARK}."
+_GENERIC_ADVICE = re.compile(r"дефектовк|производител", re.I)  # «к специалисту» — нет: механик сам специалист
 
 
 def _restrict_opinions(text: str) -> str:
-    """«Мнение помощника» — только общий совет (специалист, дефектовка), без работ, деталей и цифр (приёмка v2:
+    """«Мнение помощника» — только общий совет (дефектовка, производитель), без работ, деталей и цифр (приёмка v2:
     под пометкой модель советовала работы с узлом, которого нет). Иное мнение — заменяется общим советом, один раз."""
     out: list[str] = []
     generic_used = False
@@ -767,6 +772,8 @@ class Agent:
         final, refusal_cleaned = clean_refusal.clean(final)  # отказ — без чисел с единицами (независимый прогон, п. 5)
         if refusal_cleaned:
             notes.append(clean_refusal.NOTE)
+        final, _ = clean_refusal.drop_specialist(final)  # механик сам специалист (правило заказчика 27.11)
+        final, cited = self._complete_refusal(conv, question, final, cited)
         if conv.card is not None and conv.card.trend and _CARD_ASK.search(question) and conv.card.trend not in final:
             final = f"{final.rstrip()}\n\n📈 {conv.card.trend}"  # тенденция по истории ТС — кодом (#40 п. 4)
         if cache_key and conv.draft is None and final:
@@ -858,6 +865,34 @@ class Agent:
         if saved is not None:
             conv.passport["guard"] = saved
         return checked or None
+
+    def _complete_refusal(
+        self, conv: Conversation, question: str, text: str, cited: list[Source]
+    ) -> tuple[str, list[Source]]:
+        """Отказ «в руководстве нет» — с конкретным действием (правило заказчика 27.11): дефектовка узла по
+        неисправности из карточки (или узла из вопроса) и ближайшая страница руководства этого двигателя,
+        которую нашёл поиск этого вопроса. Строки пишет код, страница — из источников разговора."""
+        card = conv.card
+        about_card = bool(_CARD_ASK.search(question) or _DRIVE_ASK.search(question))
+        if about_card and card is not None and card.status == "anomaly" and card.compatible and card.fault_code:
+            title = card.fault_title or card.fault_code
+            action = f"Что сделать: дефектовка узла по неисправности «{title}» ({card.fault_code})."
+        else:
+            action = "Что сделать: дефектовка узла, о котором вопрос."
+        before = conv.passport.get("refs_before") or set()
+        found = [s for ref, s in conv.sources.items() if ref not in before]
+        near = next((s for s in found if s.section), found[0] if found else None)
+        nearest = None
+        if near is not None:
+            engine = conv.vehicle.engine_model
+            where = f"«{near.section.strip()}»" if near.section.strip() else _manual_kind(near.manual)
+            nearest = f"Ближе всего в руководстве на {engine}: {where}, стр. {near.pdf_page} [{near.ref}]."
+        text, added = clean_refusal.complete(text, action, nearest)
+        if nearest in added and near is not None and near not in cited:
+            cited = [*cited, near]
+        if added:
+            conv.passport["refusal_completed"] = added
+        return text, cited
 
     def _code_reply_in(self, reply: AgentReply, conv: Conversation, target: str | None, request_id: str) -> AgentReply:
         """Ответ кода (без модели) — на языке вопроса: перевод моделью, но только если цифры в нём те же."""

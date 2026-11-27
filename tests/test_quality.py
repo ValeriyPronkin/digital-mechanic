@@ -128,7 +128,7 @@ def test_unsourced_diagnosis_is_marked(ml: MLClient, toir: ToirClient) -> None:
     text = _guarded(ml, toir, answer)
     assert "Прогиб ремня 0,20…0,30 мм [R1]." in text  # со ссылкой — как есть
     # мнение — только общий совет: деталь из рассуждения модели не остаётся (приёмка v2)
-    assert "клапанный узел" not in text and f"дефектовка или специалист {OPINION}" in text
+    assert "клапанный узел" not in text and f"дефектовка этого узла {OPINION}" in text
 
 
 def test_sourced_cause_is_kept_as_is(ml: MLClient, toir: ToirClient) -> None:
@@ -138,7 +138,7 @@ def test_sourced_cause_is_kept_as_is(ml: MLClient, toir: ToirClient) -> None:
 
 def test_unsourced_cause_in_list_is_marked(ml: MLClient, toir: ToirClient) -> None:
     text = _guarded(ml, toir, "Нажать на ветвь с усилием 40 Н [R1].\n- Скорее всего, ремень вытянулся.")
-    assert "вытянулся" not in text and f"дефектовка или специалист {OPINION}" in text
+    assert "вытянулся" not in text and f"дефектовка этого узла {OPINION}" in text
 
 
 def test_plain_steps_without_diagnosis_are_not_marked(ml: MLClient, toir: ToirClient) -> None:
@@ -256,5 +256,7 @@ def test_opinion_with_work_part_or_number_is_cut(ml: MLClient, toir: ToirClient)
 
 
 def test_generic_opinion_advice_is_kept(ml: MLClient, toir: ToirClient) -> None:
-    text = _guarded(ml, toir, "Нажать на ветвь [R1].\nСкорее всего, нужна дефектовка у специалиста.")
-    assert "нужна дефектовка у специалиста" in text
+    text = _guarded(ml, toir, "Нажать на ветвь [R1].\nСкорее всего, нужна дефектовка натяжителя.")
+    assert "нужна дефектовка натяжителя" in text
+    text = _guarded(ml, toir, "Нажать на ветвь [R1].\nСкорее всего, лучше обратиться к специалисту.")
+    assert "специалист" not in text  # механик сам специалист (правило заказчика 27.11)
