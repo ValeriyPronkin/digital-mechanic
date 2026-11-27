@@ -29,7 +29,7 @@ BANNER_EARLY_RECHECK = "Норма, но повторите проверку р�
 
 Urgency = Literal["low", "medium", "high"]
 URGENCY_RU = {"high": "высокая", "medium": "средняя", "low": "низкая"}
-BANNER_CONFIRM = "Подтвердите повторной записью. Срочность остаётся высокой: класс опасности 3."
+BANNER_CONFIRM = "Подтвердите повторной записью. Приоритет остаётся высоким: неисправность опасна для двигателя."
 _DANGER = json.loads((Path(__file__).resolve().parents[2] / "data" / "danger_classes.json").read_text(encoding="utf-8"))
 SCORE_HIGH = float(_DANGER["score_high"])
 CONFIDENCE_LOW = float(_DANGER["confidence_low"])
@@ -51,23 +51,24 @@ def _num(x: float) -> str:
 
 
 def urgency_for(diag: Diagnosis) -> tuple[Urgency, str]:
-    """Срочность — правило в коде, с основанием: «<неисправность> — класс N из 3 → <приоритет>; оценка X — порог Y».
-    Одно и то же для карточки, заявки и сводки парка (issue #40 п. 1)."""
+    """Срочность — правило в коде, с основанием простыми словами: на чём основан предложенный приоритет.
+    Одно и то же для карточки, заявки и сводки парка (issue #40 п. 1). Название неисправности здесь не
+    повторяется: оно стоит рядом, в заголовке карточки и в строке парка."""
     code = diag.anomaly_type or ""
     cls = danger_class(code) or 2
-    head = f"{_TITLES.get(code, code or 'отклонение')} — класс {cls} из 3"
     score = diag.anomaly_score or 0
     if cls == 3:
-        return "high", f"{head} → высокая: {CRITICAL_CODES[code]}"
+        return "high", f"Опасная неисправность: {CRITICAL_CODES[code]}"
     if score >= SCORE_HIGH:
-        return "high", f"{head}; оценка {_num(score)} — не ниже порога {_num(SCORE_HIGH)} → высокая"
+        return "high", f"Оценка отклонения {_num(score)}, порог высокого приоритета {_num(SCORE_HIGH)}"
     if (diag.confidence or 0) < CONFIDENCE_LOW or diag.signal_quality == "warning":
-        pct = round((diag.confidence or 0) * 100)
-        why = "запись с помехами" if diag.signal_quality == "warning" else f"уверенность {pct}%"
-        return "low", f"{head}; {why} — сначала уточнить дефектовкой или повторной записью → низкая"
+        pct, low = round((diag.confidence or 0) * 100), round(CONFIDENCE_LOW * 100)
+        noisy = diag.signal_quality == "warning"
+        why = "Запись с помехами" if noisy else f"Уверенность модели {pct}\u00a0%, порог {low}\u00a0%"
+        return "low", f"{why}: сначала повторить запись или провести дефектовку"
     if cls == 1:
-        return "low", f"{head}; оценка {_num(score)} — ниже порога {_num(SCORE_HIGH)} → низкая: плановая дефектовка"
-    return "medium", f"{head}; оценка {_num(score)} — ниже порога {_num(SCORE_HIGH)} → средняя"
+        return "low", f"Оценка отклонения {_num(score)} ниже порога {_num(SCORE_HIGH)}, двигателю узел не грозит"
+    return "medium", f"Оценка отклонения {_num(score)} ниже порога {_num(SCORE_HIGH)}"
 
 
 def trend_for(history: list[Any], session_id: str) -> str | None:
@@ -92,14 +93,17 @@ def trend_for(history: list[Any], session_id: str) -> str | None:
             break
     if len(run) < 3:
         return None
-    seq = " → ".join(_num(x) for x in run)
-    return f"Оценка отклонения растёт {len(run) - 1}-ю проверку подряд: {seq}."
+    seq = ", ".join(_num(x) for x in run)
+    times = {2: "вторую", 3: "третью", 4: "четвёртую"}.get(len(run) - 1, f"{len(run) - 1}-ю")
+    return f"Оценка отклонения растёт {times} проверку подряд: {seq}."
 
 
 URGENCY_ACTION = {
-    "high": "Срочно: до дефектовки машину не эксплуатировать. Оформите заявку.",
-    "medium": "Нужна дефектовка в ближайшее время — оформите заявку.",
-    "low": "Уточните дефектовкой или повторите запись: уверенность снижена. Заявку можно оформить.",
+    # Значения приоритетов — ответ организаторов 26.11. Запрет эксплуатации здесь не пишется: он бывает только
+    # словами руководства на этот двигатель и со страницей.
+    "high": "Поставить на дефектовку до выпуска в рейс. Оформите заявку.",
+    "medium": "Дефектовка на ближайшем ТО, до него машина работает под наблюдением. Оформите заявку.",
+    "low": "Машина работает, узел проверить на следующей проверке. Заявку можно оформить.",
 }
 
 
@@ -247,7 +251,7 @@ def _build_card(diag: Diagnosis, fault_titles: dict[str, str], engine: str | Non
     return VerdictCard(
         status="anomaly",
         color="red",
-        title=f"Неисправность: {title}" if known else "Неисправность неизвестного типа",
+        title=f"Вероятно: {title}" if known else "Неисправность неизвестного типа",
         action=URGENCY_ACTION[urgency]
         if urgency
         else "Тип неисправности не распознан. Повторите проверку; заявку по такому результату не оформляем.",

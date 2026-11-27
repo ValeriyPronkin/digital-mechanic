@@ -69,7 +69,7 @@ def vehicle_status(v: Vehicle, fault_titles: dict[str, str] | None = None) -> Ve
     if last.status == "anomaly":
         code = last.anomaly_type or ""
         title = titles.get(code, "")
-        name = f"{code} «{title}»" if title else code or "отклонение"
+        name = title or code or "отклонение"  # код F.. механику не нужен: он есть в карточке
         compat = compat_check(code, v.engine_model) if code else None
         if compat is not None and not compat.ok:
             return VehicleStatus(
@@ -77,6 +77,7 @@ def vehicle_status(v: Vehicle, fault_titles: dict[str, str] | None = None) -> Ve
             )
         urgency, why = urgency_for(last)
         why = _ru(why.removeprefix(f"{code}: "))
+        why = why[:1].lower() + why[1:]  # «Клапанный механизм: оценка отклонения 0,93, …» — одна строка
         if urgency == "high":
             return VehicleStatus("quarantine", [f"{name}: {why}"], last)
         reasons = [f"{name}: {why}"]
