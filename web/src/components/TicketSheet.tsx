@@ -9,6 +9,7 @@ import {
   type Urgency,
 } from '../api'
 import { copy } from '../copy'
+import { CHECKED } from '../lib/ui'
 import { Sheet } from './Sheet'
 import { SourceChip } from './SourceChip'
 
@@ -130,6 +131,7 @@ export function TicketSheet({
   onClose,
   onCreated,
   onOpenSource,
+  focusAfter,
 }: {
   pending: TicketPending
   sources: Sources
@@ -138,6 +140,7 @@ export function TicketSheet({
   onClose: () => void
   onCreated: (ticket: TicketView) => void
   onOpenSource: (s: SourceItem) => void
+  focusAfter?: () => HTMLElement | null // where focus goes when the sheet is gone and its opener too
 }) {
   const [removedOps, setRemovedOps] = useState<Set<number>>(new Set())
   const [removedParts, setRemovedParts] = useState<Set<number>>(new Set())
@@ -203,6 +206,7 @@ export function TicketSheet({
   return (
     <Sheet
       open={!hidden}
+      focusAfter={focusAfter}
       onClose={() => {
         if (!hidden) onClose() // closing it to show a page over it is not the mechanic closing it
       }}
@@ -314,7 +318,7 @@ export function TicketSheet({
                 role="radio"
                 aria-checked={urgency === c.level}
                 onClick={() => setUrgency(c.level)}
-                className="min-h-12 flex-1 rounded-lg border border-line px-1 text-dim aria-checked:border-accent aria-checked:bg-surface-2 aria-checked:text-text"
+                className={`min-h-12 flex-1 rounded-lg border border-line px-1 text-dim ${CHECKED}`}
               >
                 <span className="block leading-tight">{c.word}</span>
                 {c.level === pending.urgency.level && (

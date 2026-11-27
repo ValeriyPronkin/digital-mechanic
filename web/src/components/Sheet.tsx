@@ -1,10 +1,31 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { copy } from '../copy'
+import { focusable } from '../lib/ui'
+
+// The control that was pressed last, anywhere on the page. A sheet opens some time after the press
+// that asked for it, and not every browser gives focus to a button that is clicked (Safari does not),
+// so `document.activeElement` alone does not say what opened the sheet.
+let pressed: HTMLElement | null = null
+if (typeof document !== 'undefined') {
+  document.addEventListener(
+    'pointerdown',
+    (e) => {
+      const at =
+        e.target instanceof Element ? e.target.closest<HTMLElement>('button, a, input, textarea, summary') : null
+      if (!at?.closest('dialog')) pressed = at // a press inside a sheet did not open it
+    },
+    true,
+  )
+}
 
 /** A native modal dialog: focus trap and Escape come from the browser. Bottom sheet on a phone, side panel on a wide screen.
  *  `open` can go false and true again while the sheet stays mounted (the ticket under an opened manual
  *  page): its content is kept, and it comes back at the scroll offset it had, with focus on the control
- *  that was used last. Neither is left to the browser: not every one keeps the offset of a closed dialog. */
+ *  that was used last. Neither is left to the browser: not every one keeps the offset of a closed dialog.
+ *
+ *  When the sheet is gone for good (Esc, the cross, a tap outside, its own buttons: every way ends in its
+ *  unmounting), focus goes back to the control that opened it. If that control is gone too («Создать
+ *  заявку» is, once there is a draft), `focusAfter` names the next best place. */
 export function Sheet({
   open,
   onClose,
@@ -12,6 +33,7 @@ export function Sheet({
   subtitle,
   children,
   footer,
+  focusAfter,
 }: {
   open: boolean
   onClose: () => void
@@ -19,16 +41,28 @@ export function Sheet({
   subtitle?: ReactNode
   children: ReactNode
   footer?: ReactNode
+  focusAfter?: () => HTMLElement | null
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const offset = useRef(0) // where the content was scrolled to when the sheet was last hidden
   const used = useRef<HTMLElement | null>(null) // the control tapped last, e.g. the chip that opened a page
+  // What had focus, or was pressed, when the sheet first opened; `undefined` until then. A sheet that comes
+  // back from under a page keeps the opener it had.
+  const opener = useRef<HTMLElement | null | undefined>(undefined)
+  const after = useRef(focusAfter)
+  useEffect(() => {
+    after.current = focusAfter
+  })
 
   useEffect(() => {
     const dialog = ref.current
     if (!dialog) return
     if (open && !dialog.open) {
+      if (opener.current === undefined) {
+        const focused = document.activeElement
+        opener.current = focused instanceof HTMLElement && focused !== document.body ? focused : pressed
+      }
       dialog.showModal()
       if (scroller.current) scroller.current.scrollTop = offset.current
       // Back from under a page: focus returns to the control that opened it. A first opening focuses the
@@ -41,6 +75,14 @@ export function Sheet({
       dialog.close()
     }
   }, [open])
+
+  useEffect(
+    () => () => {
+      const to = focusable([opener.current, after.current?.()])
+      to?.focus({ preventScroll: true })
+    },
+    [],
+  )
 
   return (
     <dialog

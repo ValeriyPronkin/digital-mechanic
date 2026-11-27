@@ -6,6 +6,9 @@
   --color-surface: #141518;
   --color-surface-2: #1c1e22;
   --color-line: #2a2d33;
+  /* The border of what is selected, checked or pressed: at least 3:1 on the page, a card and an input
+     (3,94, 3,68 and 3,36:1). Never the accent: a cyan line around a control is the focus ring. */
+  --color-edge: #6b707b;
   --color-text: #f4f4f5;
   --color-dim: #a1a1aa;
   --color-accent: #22d3ee;
@@ -133,6 +136,12 @@ dialog.sheet[open] {
 
 .no-scrollbar {
   scrollbar-width: none;
+}
+/* A row that scrolls sideways and has more to the right: its last 40 px fade out, so a chip that ends
+   exactly at the edge of the screen does not make the row look complete. Taken off at the row's end. */
+.fade-right {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
 }
 .no-scrollbar::-webkit-scrollbar {
   display: none;
