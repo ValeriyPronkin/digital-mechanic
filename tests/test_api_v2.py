@@ -180,7 +180,9 @@ def test_contradiction_as_block_and_not_repeated_in_text(ml: MLClient, toir: Toi
     conv.contradiction = (k, quotes)
     pages = {(q.doc, q.page) for q in quotes}
     refs = {(s.manual_id, s.pdf_page): s.ref for s in conv.sources.values() if (s.manual_id, s.pdf_page) in pages}
-    blk = contradictions.block(k, quotes, refs)
+    blk = contradictions.block(
+        k, quotes, refs, "Передано главному механику на решение (№ 3). Пока — безопасное правило: x."
+    )
     first = blk.split("\n")[1]
     marked = blk.replace(first, first + " (испытания на стенде)")  # пометку дописывает код после вставки
     text = "Прямой ответ.\n\n" + marked + "\n\nДальше по шагам."
@@ -188,7 +190,8 @@ def test_contradiction_as_block_and_not_repeated_in_text(ml: MLClient, toir: Toi
     assert block is not None and block["kind"] == "contradiction" and len(block["items"]) >= 2
     assert all(i["quote"] and i["handle"].startswith("S") for i in block["items"])
     assert block["items"][0]["note"] == "испытания на стенде" and block["items"][1]["note"] is None
-    assert block["advice"] == contradictions.ADVICE and block["conclusion"]
+    assert block["advice"].startswith("Передано главному механику") and block["conclusion"]
+    assert block["escalation"] == {"line": block["advice"], "number": 3, "resolved": False}
     assert rest == "Прямой ответ.\n\nДальше по шагам." and contradictions.HEADER not in rest
     conv.contradiction = None
     assert api_v2.contradiction_block(conv, text) == (None, text)
