@@ -141,3 +141,22 @@ def renumber(text: str) -> str:
             n = 0
         out.append(line)
     return "\n".join(out)
+
+
+def unmark_absence(text: str) -> tuple[str, int]:
+    """Фраза «в руководстве этого нет» — утверждение об отсутствии: ссылок на страницы у неё не бывает (стенд 27.11:
+    четыре посторонние страницы и «(испытания на стенде)» под «давления в шинах в руководстве нет»). Ссылки с такой
+    фразы снимаются; страницы, на которые больше ничто не ссылается, уходят из источников ответа."""
+    out, removed = [], 0
+    for line in text.split("\n"):
+        m = _LIST.match(line)
+        prefix = m.group(1) if m else ""
+        parts = [p for p in _SENT.split(line[len(prefix) :]) if p]
+        fixed = []
+        for p in parts:
+            if REFUSAL.search(p) and _REF.search(p) and not NUM_UNIT.search(p):
+                removed += len(_REF.findall(p))
+                p = re.sub(r"\s*\[R\d+\]", "", p)
+            fixed.append(p)
+        out.append(prefix + " ".join(fixed) if parts else line)
+    return "\n".join(out), removed

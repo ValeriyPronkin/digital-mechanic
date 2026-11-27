@@ -952,6 +952,7 @@ class Agent:
         final, grounded, notes, cited = self.guard(conv, text)
         final, cited, more = self._contradiction_text(conv, final, cited)
         notes += more
+        final, _ = clean_refusal.unmark_absence(final)  # «в руководстве нет» — без ссылок на страницы
         final = _mark_bench(final, conv.sources)
         final, refusal_cleaned = clean_refusal.clean(final)  # отказ — без чисел с единицами (независимый прогон, п. 5)
         if refusal_cleaned:
@@ -966,6 +967,7 @@ class Agent:
         final, cited = self._complete_refusal(conv, question, final, cited)
         if conv.card is not None and conv.card.trend and _CARD_ASK.search(question) and conv.card.trend not in final:
             final = f"{final.rstrip()}\n\n📈 {conv.card.trend}"  # тенденция по истории ТС — кодом (#40 п. 4)
+        cited = [c for c in cited if f"[{c.ref}]" in final]  # источник — только страница, на которую ссылается текст
         if cache_key and conv.draft is None and final:
             self.store.save_answer(
                 cache_key,

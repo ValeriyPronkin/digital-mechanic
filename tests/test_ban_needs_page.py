@@ -104,3 +104,15 @@ def test_prompt_sections_match_the_interface() -> None:
     assert "Чем это грозит" in names
     for name in names:
         assert f"«{name}" in SYSTEM_PROMPT or f"{name}»" in SYSTEM_PROMPT or f" {name} " in SYSTEM_PROMPT, name
+
+
+def test_absence_claim_carries_no_page_chips(ml: MLClient, toir: ToirClient) -> None:
+    """Стенд 27.11: «давления в шинах в руководстве нет [R1][R2]» с посторонними страницами и «(испытания на стенде)».
+    Утверждение об отсутствии — без ссылок; страницы, на которые ничто не ссылается, уходят из источников."""
+    from service.clean_refusal import unmark_absence
+
+    text, removed = unmark_absence("Давления в шинах в руководстве этого двигателя нет [R1] [R2].\n\n1. Шаг [R3].")
+    assert removed == 2 and text == "Давления в шинах в руководстве этого двигателя нет.\n\n1. Шаг [R3]."
+    ag, _ = make_agent([say("В руководстве этого двигателя нет данных о шинах [R1].")], ml, toir)
+    reply = ag.ask(ag.start(*ANOMALY), "Какое давление в шинах?")
+    assert "[R1]" not in reply.text.split("\n\n")[0] and "испытания на стенде" not in reply.text.split("\n\n")[0]
