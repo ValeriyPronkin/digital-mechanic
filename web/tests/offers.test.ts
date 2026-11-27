@@ -34,9 +34,24 @@ test('no parts in the draft, or a draft saved before the field: nothing is shown
   assert.equal(shownOffers(undefined, new Set()), null)
 })
 
-test('no supplier connected: the server’s note, said plainly, and no offers', () => {
+test('no supplier connected: nothing is shown, not the server’s note either', () => {
   const off = { connected: false, note: 'Каталог поставщика не подключён', items: [] }
-  assert.deepEqual(shownOffers(off, new Set()), { note: 'Каталог поставщика не подключён', items: [] })
+  assert.equal(shownOffers(off, new Set()), null)
+})
+
+test('suppliers connected but none has any of the parts: nothing is shown', () => {
+  const none = connected([item(0, { offers: [], note: 'нет у поставщиков' }), item(1, { offers: [] })])
+  assert.equal(shownOffers(none, new Set()), null)
+  assert.equal(shownOffers(connected([], 'нет запчастей'), new Set()), null)
+})
+
+test('one part with offers: the list is shown, the part without offers keeps its note', () => {
+  const some = connected([item(0), item(1, { offers: [], note: 'нет у поставщиков' })])
+  assert.deepEqual(
+    shownOffers(some, new Set())?.items.map((i) => i.index),
+    [0, 1],
+  )
+  assert.equal(shownOffers(some, new Set([0])), null) // the part with offers removed: nothing left to offer
 })
 
 test('a part the mechanic removed from the ticket loses its offers; all removed — nothing is shown', () => {
