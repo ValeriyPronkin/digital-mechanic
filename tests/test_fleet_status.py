@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from service import main
@@ -40,6 +41,7 @@ def expected_status(v: Vehicle) -> str:
     return "normal"
 
 
+@pytest.mark.materials
 def test_summary_of_50_vehicles_matches_rule() -> None:
     f = fleet()
     s = summary(f)
@@ -50,6 +52,7 @@ def test_summary_of_50_vehicles_matches_rule() -> None:
         assert s["counts"][k] == sum(1 for x in got.values() if x == k)
 
 
+@pytest.mark.materials
 def test_priority_order_and_reasons() -> None:
     s = summary(fleet())
     order = {"quarantine": 0, "attention": 1, "rerecord": 2}
@@ -58,6 +61,7 @@ def test_priority_order_and_reasons() -> None:
     assert all(r["reasons"] for r in s["priority"])  # у каждой строки — почему
 
 
+@pytest.mark.materials
 def test_incompatible_code_is_quarantine() -> None:
     for v in fleet().vehicles:
         last = ordered(v)[-1]
@@ -108,6 +112,7 @@ def test_trend_up_flat_and_failed_check_is_a_gap() -> None:
     assert [p["score"] for p in t["points"]] == [0.30, None, 0.35]  # сбой — разрыв, а не ноль
 
 
+@pytest.mark.materials
 def test_real_vehicle_with_failed_check_in_the_middle() -> None:
     v = fleet().vehicle("A464EP47")
     assert v is not None
@@ -117,6 +122,7 @@ def test_real_vehicle_with_failed_check_in_the_middle() -> None:
     assert t["trend"] == TREND_DOWN  # 0,77 → 0,04 после отклонения — не значит исправно
 
 
+@pytest.mark.materials
 def test_api_summary_vehicle_and_page() -> None:
     s = client.get("/api/fleet").json()
     assert s["total"] == 50 and s["priority"][0]["status"] == "quarantine"

@@ -9,9 +9,12 @@ from pathlib import Path
 
 import pytest
 
+from materials import require
 from service.compat import check, is_compatible
 from service.fault_matrix import MATRIX_PATH, Cell, Ref, normalize, verify_cell
 from service.manuals.catalog import ENGINES, documents_for_engine
+
+require()  # парк и справочник читаются при импорте
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = json.loads(MATRIX_PATH.read_text(encoding="utf-8"))

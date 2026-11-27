@@ -26,7 +26,21 @@ jobs:
         run: |
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
             | sudo tar -xz -C /usr/local/bin gitleaks
-      - run: make install check
+      - run: make install
+      - name: Материалы задачи (не в git, п. 9.1) — по ссылке из vars.TASK_MATERIALS_URL
+        id: materials
+        env:
+          TASK_MATERIALS_URL: ${{ vars.TASK_MATERIALS_URL }}
+        run: |
+          set -eu
+          if [ -z "$TASK_MATERIALS_URL" ]; then
+            echo "::warning::vars.TASK_MATERIALS_URL не задан — тесты с заглушками и парком пропускаются (в итоге pytest — строка «ВНИМАНИЕ: пропущено …»)"
+            echo "present=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 scripts/fetch_materials.py
+          echo "present=1" >> "$GITHUB_OUTPUT"
+      - run: make check
 
   web:
     name: Интерфейс v2 — тесты и сборка
@@ -48,4 +62,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: make smoke
+      - name: Материалы задачи (не в git, п. 9.1) — по ссылке из vars.TASK_MATERIALS_URL
+        id: materials
+        env:
+          TASK_MATERIALS_URL: ${{ vars.TASK_MATERIALS_URL }}
+        run: |
+          set -eu
+          if [ -z "$TASK_MATERIALS_URL" ]; then
+            echo "::warning::vars.TASK_MATERIALS_URL не задан — смоук пропущен: образам нужны заглушки и парк"
+            echo "present=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 scripts/fetch_materials.py
+          echo "present=1" >> "$GITHUB_OUTPUT"
+      - if: steps.materials.outputs.present == '1'
+        run: make smoke

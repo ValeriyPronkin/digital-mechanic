@@ -78,6 +78,7 @@ def test_bucket_failure_keeps_events() -> None:
     assert [r["kind"] for r in b.lines("logs/2026-11-28/inst1.jsonl")] == ["error", "step"]
 
 
+@pytest.mark.materials
 def test_middleware_logs_route_template_not_values(monkeypatch: pytest.MonkeyPatch) -> None:
     b, now = FakeBucket(), [TS]
     slog = _log(b, now)
@@ -161,6 +162,7 @@ def test_flush_from_request_path_first_then_each_minute_errors_at_once() -> None
     assert slog.due() and slog.maybe_flush() and len(puts) == 3 and "ValueError" in puts[-1]
 
 
+@pytest.mark.materials
 def test_middleware_flushes_on_first_request(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi.testclient import TestClient
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
@@ -33,10 +34,17 @@ BANNER_CONFIRM = "Подтвердите повторной записью. Ср
 _DANGER = json.loads((Path(__file__).resolve().parents[2] / "data" / "danger_classes.json").read_text(encoding="utf-8"))
 SCORE_HIGH = float(_DANGER["score_high"])
 CONFIDENCE_LOW = float(_DANGER["confidence_low"])
-_TITLES = {
-    f["code"]: f["title"]
-    for f in json.loads((Path(__file__).resolve().parents[2] / "data" / "fault_types.json").read_text(encoding="utf-8"))
-}
+_FAULT_TYPES = Path(__file__).resolve().parents[2] / "data" / "fault_types.json"
+
+
+@lru_cache(maxsize=1)
+def _titles() -> dict[str, str]:
+    """Справочник — из материалов задачи (`make fetch-materials`), читается при первом вызове, а не при импорте."""
+    if not _FAULT_TYPES.exists():
+        return {}
+    return {f["code"]: f["title"] for f in json.loads(_FAULT_TYPES.read_text(encoding="utf-8"))}
+
+
 # Класс 3 — работа двигателя грозит разрушением: срочность высокая независимо от оценки (data/danger_classes.json).
 CRITICAL_CODES = {c: v["basis"] for c, v in _DANGER["classes"].items() if v["class"] == 3}
 
@@ -55,7 +63,7 @@ def urgency_for(diag: Diagnosis) -> tuple[Urgency, str]:
     Одно и то же для карточки, заявки и сводки парка (issue #40 п. 1)."""
     code = diag.anomaly_type or ""
     cls = danger_class(code) or 2
-    head = f"{_TITLES.get(code, code or 'отклонение')} — класс {cls} из 3"
+    head = f"{_titles().get(code, code or 'отклонение')} — класс {cls} из 3"
     score = diag.anomaly_score or 0
     if cls == 3:
         return "high", f"{head} → высокая: {CRITICAL_CODES[code]}"
