@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { SourceItem, TicketLine } from '../src/api.ts'
-import { itemSource, lineSource, pagesByManual, sheetLines, worksWithPages } from '../src/lib/sheet.ts'
+import { itemSource, lineSource, pagesByManual, sheetLines, verdictWord, worksWithPages } from '../src/lib/sheet.ts'
 
 const NBSP = ' '
 const RK = 'ЯМЗ-236, ЯМЗ-238. Руководство по ремонту'
@@ -37,7 +37,7 @@ test('a sent ticket that keeps its lines shows every work and part with its own 
   const sheet = sheetLines(TICKET, LINES)
   assert.deepEqual(
     sheet.works.map((w) => w.page),
-    [page(RK, 269), page(RE, 53)],
+    [page('РК ЯМЗ-236', 269), page('РЭ ЯМЗ-236', 53)], // the manual by its short name, as on a chip
   )
   assert.deepEqual(sheet.pages, []) // the pages are not listed again
   assert.deepEqual(sheet.works[0].source, {
@@ -108,4 +108,16 @@ test('the chip on the ticket sheet: the cited source when the answer has it, els
   // a draft saved before pages: no chip
   assert.equal(itemSource({ text: 'Работа', source: '', quote: '', scanned: false }, {}), undefined)
   assert.equal(lineSource({ manual_id: 'yamz-236-rk', manual: RK, pdf_page: null }), null)
+})
+
+test('the verdict word of the conclusion is cut off to be printed in bold', () => {
+  assert.deepEqual(
+    verdictWord('Вероятно: клапанный механизм. Акустическая проверка S-0009 от 17 ноября 2026. Требуется дефектовка.'),
+    ['Вероятно', 'клапанный механизм. Акустическая проверка S-0009 от 17 ноября 2026. Требуется дефектовка.'],
+  )
+  assert.deepEqual(verdictWord('Предварительно: коробка передач'), ['Предварительно', 'коробка передач'])
+  // a conclusion the model wrote before the server did (#136) is printed as it is
+  for (const text of ['По результату акустической проверки: клапанный механизм.', 'оценка: 0,92', '']) {
+    assert.deepEqual(verdictWord(text), ['', text])
+  }
 })

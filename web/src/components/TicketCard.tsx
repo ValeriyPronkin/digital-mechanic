@@ -1,11 +1,13 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { setOutcome, type Outcome, type SourceItem, type TicketView } from '../api'
+import { createPortal } from 'react-dom'
+import { setOutcome, type Outcome, type SourceItem, type TicketView, type VehicleDetail } from '../api'
 import { copy } from '../copy'
 import { dateTimeRu } from '../lib/format'
 import { sheetLines, type SheetLine } from '../lib/sheet'
 import { noteChanged as differs, typedAfterSave } from '../lib/tickets'
 import { around, PRESSED } from '../lib/ui'
 import { SourceChip } from './SourceChip'
+import { TicketPrint } from './TicketPrint'
 
 const OUTCOMES: Outcome[] = ['confirmed', 'not_confirmed', 'other_fault']
 
@@ -42,10 +44,12 @@ export function TicketCard({
   ticket,
   onChange,
   onOpenSource,
+  vehicle = null,
 }: {
   ticket: TicketView
   onChange: (t: TicketView) => void
   onOpenSource?: (s: SourceItem) => void // opens a page of the manual: the chips under the works and parts
+  vehicle?: VehicleDetail | null // for the printed sheet: the garage number, the model, the engine, the check's date
 }) {
   const [saving, setSaving] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -91,6 +95,25 @@ export function TicketCard({
       focusSaved.current = false
     }
   })
+
+  // Printing: the sheet is put on the page, the page is marked so that only the sheet is printed (print.css),
+  // and the browser's own print is called. The sheet and the mark stay until the next touch or key in the app,
+  // not until `afterprint`: where the print dialog does not hold the page (a phone), that event is not a sure
+  // sign that the pages are drawn. A number, not a flag: each tap prints.
+  const [printRun, setPrintRun] = useState(0)
+  useEffect(() => {
+    if (printRun === 0) return
+    const done = () => setPrintRun(0)
+    document.documentElement.dataset.print = 'ticket'
+    window.addEventListener('pointerdown', done)
+    window.addEventListener('keydown', done)
+    window.print()
+    return () => {
+      window.removeEventListener('pointerdown', done)
+      window.removeEventListener('keydown', done)
+      delete document.documentElement.dataset.print
+    }
+  }, [printRun])
 
   // The works and the parts each with its own page (lib/sheet.ts): the record's lines only when they are what
   // was sent. A ticket stored without them has its pages in one line, as before.
@@ -176,48 +199,61 @@ export function TicketCard({
           )}
         </div>
 
-        <details className="group border-t border-line">
-          <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 text-[13px] text-dim [&::-webkit-details-marker]:hidden">
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 12 12"
-              className="transition-transform group-open:rotate-90"
-              aria-hidden
-            >
-              <path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-            {copy.ticket.contents}
-          </summary>
-          <div className="space-y-2 pb-3">
-            <ul className="list-disc space-y-1 pl-5 marker:text-mute">
-              {sent.works.map((w, i) => (
-                <Line key={i} line={w} onOpen={onOpenSource} />
-              ))}
-            </ul>
-            {sent.parts.length > 0 &&
-              (sent.parts.some((part) => part.page) ? (
-                <div className="text-[13px] text-dim">
-                  <p>{copy.ticket.parts}:</p>
-                  <ul className="list-disc space-y-1 pl-5 marker:text-mute">
-                    {sent.parts.map((part, i) => (
-                      <Line key={i} line={part} onOpen={onOpenSource} />
-                    ))}
-                  </ul>
-                </div>
-              ) : (
+        {/* «Распечатать» stands at the end of the row that opens what was sent: the card is no taller for it,
+            and the outcomes above stay where they are. Not inside the summary, which would fold and unfold
+            under it: it lies over the row's right end, and the summary keeps clear of it. */}
+        <div className="relative border-t border-line">
+          <button
+            type="button"
+            onClick={() => setPrintRun((n) => n + 1)}
+            className="absolute top-0 right-0 z-10 min-h-12 pl-4 text-[13px] text-accent hover:underline"
+          >
+            {copy.print.action}
+          </button>
+          <details className="group">
+            <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 pr-24 text-[13px] text-dim [&::-webkit-details-marker]:hidden">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                className="transition-transform group-open:rotate-90"
+                aria-hidden
+              >
+                <path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              {copy.ticket.contents}
+            </summary>
+            <div className="space-y-2 pb-3">
+              <ul className="list-disc space-y-1 pl-5 marker:text-mute">
+                {sent.works.map((w, i) => (
+                  <Line key={i} line={w} onOpen={onOpenSource} />
+                ))}
+              </ul>
+              {sent.parts.length > 0 &&
+                (sent.parts.some((part) => part.page) ? (
+                  <div className="text-[13px] text-dim">
+                    <p>{copy.ticket.parts}:</p>
+                    <ul className="list-disc space-y-1 pl-5 marker:text-mute">
+                      {sent.parts.map((part, i) => (
+                        <Line key={i} line={part} onOpen={onOpenSource} />
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-[13px] text-dim">
+                    {copy.ticket.parts}: {sent.parts.map((part) => part.text).join('; ')}
+                  </p>
+                ))}
+              {sent.pages.length > 0 && (
                 <p className="text-[13px] text-dim">
-                  {copy.ticket.parts}: {sent.parts.map((part) => part.text).join('; ')}
+                  {copy.ticket.sources}: {sent.pages.join(' · ')}
                 </p>
-              ))}
-            {sent.pages.length > 0 && (
-              <p className="text-[13px] text-dim">
-                {copy.ticket.sources}: {sent.pages.join(' · ')}
-              </p>
-            )}
-          </div>
-        </details>
+              )}
+            </div>
+          </details>
+        </div>
       </div>
+      {printRun > 0 && createPortal(<TicketPrint ticket={ticket} vehicle={vehicle} />, document.body)}
     </section>
   )
 }
