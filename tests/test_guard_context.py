@@ -143,3 +143,26 @@ def test_part_designations_of_the_shown_draft_are_labels(ml: MLClient, toir: Toi
     assert "236-1007118" in text
     text, *_ = ag.guard(conv, "В заявку включена втулка (236-1007999).")
     assert "236-1007999" not in text
+
+
+def test_figure_table_and_item_numbers_are_references(ml: MLClient, toir: ToirClient) -> None:
+    """Eval 27.11 (ЗМЗ-5234, датчик температуры): «собрать схему по рис. 48 [S1]» снималось — номер рисунка не величина.
+    Величина рядом по-прежнему проверяется."""
+    ag, conv = _conv(ml, toir)
+    text, *_ = ag.guard(conv, "Собрать схему по рис. 48, табл. 10, п. 5.2.9 [R1].")
+    assert "рис. 48, табл. 10, п. 5.2.9 [R1]" in text
+    text, *_ = ag.guard(conv, "Собрать схему по рис. 48 с сопротивлением 100 Ом [R1].")
+    assert "100 Ом" not in text  # 100 Ом на странице R1 нет
+
+
+def test_engine_variant_and_position_lists_are_labels(ml: MLClient, toir: ToirClient) -> None:
+    """Eval 27.11: «ЯМЗ-53642-20: 1130 Н·м» снималось за «42» и «20» из обозначения, «гайки поз. 11 и 12 —
+    24,5…29,4 Н·м» — за номер позиции «12». Величина после перечня («по рис. 5 и 20 Н·м») по-прежнему проверяется."""
+    ag, conv = _conv(ml, toir)
+    conv.sources["R5"] = Source(ref="R5", manual_id="yamz-236-rk", manual="РК", pdf_page=130, section="",
+                                text="Максимальный крутящий момент 1130 (115). Гайки 24,5…29,4 Н·м")  # fmt: skip
+    answer = "ЯМЗ-53642-20: 1130 Н·м (115 кгс·м) [R5].\nГайки поз. 11 и 12 — 24,5…29,4 Н·м [R5]."
+    text, *_ = ag.guard(conv, answer)
+    assert "ЯМЗ-53642-20: 1130 Н·м" in text and "поз. 11 и 12 — 24,5…29,4 Н·м" in text
+    text, *_ = ag.guard(conv, "Затянуть по рис. 5 и 20 Н·м [R5].")
+    assert "20 Н·м" not in text
