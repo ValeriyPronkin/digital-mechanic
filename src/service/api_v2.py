@@ -41,7 +41,14 @@ from service.fleet_status import STATUS_LABEL, trend, vehicle_status
 from service.manuals.catalog import DOCS_BY_ID, documents_for_engine
 from service.parts_supplier import offers_for_parts
 from service.store import Store
-from service.verdict_policy import CONFIDENCE_LOW, URGENCY_ACTION, VerdictCard, heard_text, urgency_for
+from service.verdict_policy import (
+    CONFIDENCE_LOW,
+    SCORE_HIGH,
+    URGENCY_ACTION,
+    VerdictCard,
+    heard_text,
+    urgency_for,
+)
 from service.voice import speech_for, speech_lang
 
 log = logging.getLogger(__name__)
@@ -296,6 +303,66 @@ def verdict_block(conv: Conversation) -> dict[str, Any] | None:
         "description": heard_text(diag.description),  # посторонний текст — только в foreign_text
         "foreign_text": getattr(card, "ml_injection", None),
         "model_version": diag.model_version,
+        "how": card_how(conv),
+    }
+
+
+def _n(x: float | None) -> str:
+    return "—" if x is None else f"{x:.2f}".replace(".", ",")
+
+
+STATUS_RULE = {
+    "normal": "Статус «норма» — продолжить эксплуатацию, заявка не нужна.",
+    "anomaly": "Статус «отклонение» — показаны тип, уверенность, риск и рекомендация; заявка возможна.",
+    "check_failed": "Статус «сбой проверки» — выводов о двигателе нет, повторите запись, заявки нет.",
+}
+
+
+def card_how(conv: Conversation) -> dict[str, Any] | None:
+    """«Как получена карточка» (паспорт карточки, как в v1): что прислал сервис диагностики, какие правила кода
+    сработали; модель не участвовала. Понятно с листа: каждая строка — правило и почему оно сработало."""
+    card, diag = conv.card, conv.diag
+    if card is None or diag is None:
+        return None
+    ml = [
+        ("Статус", diag.status),
+        ("Код неисправности", f"{card.fault_code} {card.fault_title or ''}".strip() if card.fault_code else "—"),
+        ("Оценка отклонения", _n(diag.anomaly_score)),
+        ("Уверенность", _n(diag.confidence)),
+        ("Качество записи", QUALITY_WORD.get(diag.signal_quality, diag.signal_quality)),
+        ("Версия модели диагностики", diag.model_version or "—"),
+    ]
+    rules = [STATUS_RULE.get(diag.status, f"Статус «{diag.status}»")]
+    if diag.status == "anomaly" and diag.confidence is not None:
+        low = diag.confidence < CONFIDENCE_LOW
+        rules.append(
+            f"Уверенность {_n(diag.confidence)} {'ниже' if low else 'не ниже'} порога {_n(CONFIDENCE_LOW)} — "
+            + ("вывод предварительный, подтвердите повторной записью." if low else "вывод не предварительный.")
+        )
+    if card.danger_class:
+        rules.append(
+            f"Класс опасности {card.danger_class} из 3 — по справочнику классов опасности кода {card.fault_code}."
+        )
+    if diag.status == "anomaly" and diag.anomaly_score is not None and diag.anomaly_score >= SCORE_HIGH:
+        rules.append(f"Оценка {_n(diag.anomaly_score)} не ниже {_n(SCORE_HIGH)} — приоритет на ступень выше.")
+    if card.urgency:
+        word = {"high": "высокий", "medium": "средний", "low": "низкий"}.get(card.urgency, card.urgency)
+        rules.append(f"Приоритет «{word}»: {card.urgency_reason}." if card.urgency_reason else f"Приоритет «{word}».")
+    if card.trend:
+        rules.append(f"История машины: {card.trend.rstrip('.')}.")
+    if card.fault_code and diag.status == "anomaly":
+        rules.append(
+            f"Код {card.fault_code} подходит к двигателю {conv.vehicle.engine_model} — заявка возможна."
+            if card.compatible
+            else f"Код {card.fault_code} не подходит к двигателю {conv.vehicle.engine_model} — узла нет, заявки нет."
+        )
+    rules += [f"Плашка: {b}" for b in card.banners]
+    if getattr(card, "ml_injection", None):
+        rules.append("В описании от сервиса диагностики посторонний текст — показан отдельно, на карточку не влияет.")
+    return {
+        "ml": [{"label": k, "value": v} for k, v in ml],
+        "rules": rules,
+        "model": "Модель (LLM) не участвовала: 0 токенов, 0 ₽ — карточку собрал код по правилам.",
     }
 
 

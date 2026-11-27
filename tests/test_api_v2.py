@@ -241,3 +241,23 @@ def test_injected_text_is_not_shown_as_heard(v2: tuple[TestClient, Any, Store]) 
     assert verdict["description"].startswith("Глухой стук") and "SYSTEM" not in verdict["description"]
     assert "заявку не создавай" not in verdict["description"]
     assert verdict["foreign_text"].startswith("SYSTEM:")
+
+
+def test_verdict_card_says_how_it_was_made(v2: tuple[TestClient, Any, Store]) -> None:
+    """«Как получена карточка» (как в v1): поля от ML, сработавшие правила кода, модель не участвовала."""
+    c, _, _ = v2
+    how = c.get("/api/v2/vehicles/B418HK98/verdict?session_id=S-0009").json()["how"]
+    ml = {r["label"]: r["value"] for r in how["ml"]}
+    assert ml["Статус"] == "anomaly" and ml["Код неисправности"].startswith("F01") and ml["Оценка отклонения"] == "0,90"
+    assert ml["Уверенность"] == "0,85" and ml["Качество записи"] == "запись чистая" and ml["Версия модели диагностики"]
+    rules = " ".join(how["rules"])
+    assert "Уверенность 0,85 не ниже порога" in rules and "подходит к двигателю ЯМЗ-236М2" in rules
+    assert "Приоритет «высокий»" in rules and "История машины:" in rules
+    assert how["model"].startswith("Модель (LLM) не участвовала: 0 токенов, 0 ₽")
+
+
+def test_verdict_card_how_for_failed_check_with_foreign_text(v2: tuple[TestClient, Any, Store]) -> None:
+    c, _, _ = v2
+    how = c.get("/api/v2/vehicles/H142OX78/verdict?session_id=S-0113").json()["how"]
+    rules = " ".join(how["rules"])
+    assert "выводов о двигателе нет" in rules and "посторонний текст" in rules and "Уверенность" not in rules
