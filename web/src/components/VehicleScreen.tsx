@@ -491,38 +491,46 @@ export function VehicleScreen({
           {/* While the mechanic types, the ready-made questions step aside: the keyboard has taken half
               the screen, and the answer above needs the room. «Создать заявку» is not one of them: it
               stays whatever is in the field (ТЗ F7). */}
-          {(canTicket || !typing) && (
-            <div
-              ref={quickRow}
-              data-waits
-              onScroll={measureQuick}
-              className={`no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 min-[900px]:flex-wrap ${quickMore ? 'fade-right' : ''}`}
-            >
-              {canTicket && (
-                <button
-                  type="button"
-                  disabled={thread.busy}
-                  onClick={() => send(copy.thread.createTicketMessage)}
-                  className="min-h-12 shrink-0 rounded-lg border border-accent px-3 font-semibold text-accent enabled:hover:bg-accent/10 disabled:opacity-50"
-                >
-                  {copy.thread.createTicket}
-                </button>
-              )}
-              {!typing &&
-                copy.thread.quick.map((q) => (
+          {/* On a laptop the ready-made questions and «Как объяснять» share one row of 36 px controls, and the
+              questions scroll sideways (the wheel too) instead of wrapping: four of them in two rows, the level
+              and the field took about 200 of 694 px and covered the card. On a phone — as before. */}
+          <div className="space-y-2 min-[900px]:flex min-[900px]:items-center min-[900px]:gap-3 min-[900px]:space-y-0">
+            {(canTicket || !typing) && (
+              <div
+                ref={quickRow}
+                data-waits
+                onScroll={measureQuick}
+                onWheel={(e) => {
+                  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY
+                }}
+                className={`no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 min-[900px]:mx-0 min-[900px]:min-w-0 min-[900px]:flex-1 min-[900px]:px-0 ${quickMore ? 'fade-right' : ''}`}
+              >
+                {canTicket && (
                   <button
-                    key={q}
                     type="button"
                     disabled={thread.busy}
-                    onClick={() => send(q)}
-                    className="min-h-12 shrink-0 rounded-lg border border-line px-3 text-[13px] text-dim hover:text-text disabled:opacity-50"
+                    onClick={() => send(copy.thread.createTicketMessage)}
+                    className="min-h-12 shrink-0 rounded-lg border border-accent px-3 font-semibold text-accent enabled:hover:bg-accent/10 disabled:opacity-50 min-[900px]:pointer-fine:min-h-9 min-[900px]:pointer-fine:text-[13px]"
                   >
-                    {q}
+                    {copy.thread.createTicket}
                   </button>
-                ))}
-            </div>
-          )}
-          <LevelSwitch />
+                )}
+                {!typing &&
+                  copy.thread.quick.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      disabled={thread.busy}
+                      onClick={() => send(q)}
+                      className="min-h-12 shrink-0 rounded-lg border border-line px-3 text-[13px] text-dim hover:text-text disabled:opacity-50 min-[900px]:pointer-fine:min-h-9"
+                    >
+                      {q}
+                    </button>
+                  ))}
+              </div>
+            )}
+            <LevelSwitch />
+          </div>
           {voice.error && (
             <p role="status" className="text-[13px] text-warn">
               {voice.error}
@@ -659,7 +667,12 @@ function LevelSwitch() {
     set(l)
   }
   return (
-    <div data-waits role="group" aria-label="Как объяснять" className="flex items-center gap-2 text-[13px] text-dim">
+    <div
+      data-waits
+      role="group"
+      aria-label="Как объяснять"
+      className="flex items-center gap-2 text-[13px] text-dim min-[900px]:shrink-0"
+    >
       <span className="shrink-0">Как объяснять:</span>
       {(['expert', 'steps'] as const).map((l) => (
         <button
@@ -667,7 +680,7 @@ function LevelSwitch() {
           type="button"
           aria-pressed={level === l}
           onClick={() => pick(l)}
-          className="min-h-12 flex-1 rounded-lg border border-line px-2 aria-pressed:border-accent aria-pressed:bg-surface-2 aria-pressed:text-text"
+          className="min-h-12 flex-1 rounded-lg border border-line px-2 aria-pressed:border-accent aria-pressed:bg-surface-2 aria-pressed:text-text min-[900px]:flex-none min-[900px]:px-3 min-[900px]:pointer-fine:min-h-9"
         >
           {l === 'expert' ? 'Коротко' : 'По шагам'}
         </button>
