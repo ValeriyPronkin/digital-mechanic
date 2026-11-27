@@ -29,7 +29,7 @@ def _template(path: Path) -> None:
 
 def _run(cost_dir: Path) -> dict:
     run = {"label": "t1", "at": "2026-11-26 16:00", "repeat": 2, "provider": "deepseek", "model": "deepseek-chat",
-           "scenarios": {"С1": {"rub": 0.07}, "С3": {"rub": 0.01}}}  # fmt: skip
+           "scenarios": {"С1": {"rub": 0.07}, "С3": {"rub": 0.01}, "Р1": {"rub": 0.05}}}  # fmt: skip
     rows = []
     for _ in range(2):
         rows += [
@@ -92,5 +92,8 @@ def test_embedding_row_and_layered_comment(tmp_path: Path, monkeypatch: pytest.M
     emb_row = next(r for r in range(9, 13) if ws[f"A{r}"].value == cost_xlsx.EMB_NAME)
     assert (ws[f"C{emb_row}"].value, ws[f"D{emb_row}"].value, ws[f"E{emb_row}"].value) == (1.0, 12, 0)
     assert ws[f"H{emb_row}"].value == "₽" and ws[f"F{emb_row}"].value == pytest.approx(0.0101 / 1.22 * 1000, rel=1e-3)
-    assert "Голос — опция" in ws["A18"].value and "0.67" in ws["A18"].value and "локально" in ws["A18"].value
-    assert "Постоянные в месяц" in ws["A19"].value
+    # ответ организаторов 26.11: разовая индексация отдельной строкой, пересчёт на парк, голос — опция
+    assert "индексация руководств" in ws["A18"].value and "OCR 41 стр." in ws["A18"].value
+    assert "Голос — опция" in ws["A18"].value and "0.2666" in ws["A18"].value and "локально" in ws["A18"].value
+    assert "Парк в месяц" in ws["A19"].value and "50 машин" in ws["A19"].value
+    assert all(len(ws[c].value) <= 500 for c in ("A17", "A18", "A19"))  # «до 3 строк» в ячейке A:J

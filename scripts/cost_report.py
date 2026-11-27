@@ -31,7 +31,16 @@ from fastapi.testclient import TestClient  # noqa: E402
 from mock_ml.app import app as mock_ml_app  # noqa: E402
 from mock_toir.app import app as mock_toir_app  # noqa: E402
 
-from cost_layers import ASSUMPTIONS, LOCAL_VOICE, monthly_fixed, voice_option  # noqa: E402
+from cost_layers import (  # noqa: E402
+    ASSUMPTIONS,
+    INDEX,
+    LOCAL_VOICE,
+    fleet_month,
+    monthly_fixed,
+    one_time_index,
+    other,
+    voice_option,
+)
 from service.agent import Agent, AgentReply  # noqa: E402
 from service.clients import MLClient, ToirClient  # noqa: E402
 from service.fleet import fleet  # noqa: E402
@@ -346,23 +355,62 @@ def render_md() -> None:
         lines.append(
             f"| {key} — {sc['title']} | {sc['llm_calls']} | {toks} | {before.get('rub', '—')} | {sc['rub']} | {q} |"
         )
-    # слои: запрос (выше) / голос — опция / постоянные в месяц на парк
+    # слои по ответу организаторов 26.11: запрос / разово — индексация / голос — опция / парк в месяц
     fixed = monthly_fixed(last)
     voice = voice_option(last)
-    a = ASSUMPTIONS
+    idx = one_time_index()
+    fleet = fleet_month(last)
+    a, i = ASSUMPTIONS, INDEX
+    c1, r1 = last["scenarios"]["С1"], last["scenarios"]["Р1"]
+    emb_k = round(other("embedding"), 5)
     lines += [
+        "",
+        "## Что входит в расчёт (ответ организаторов 26.11)",
+        "",
+        "> «Эмбеддинги запроса тоже входят. Разовую индексацию руководств посчитайте отдельной строкой. Кроме "
+        "стоимости одного сценария, покажите разбивку по шагам и пересчёт на парк. Пример допущения для пересчёта: "
+        "50 машин, проверка раз в две недели, два-три вопроса механика на проверку. Допущения назовите явно.»",
+        "",
+        "| Строка | Количество | Цена без НДС | ₽ | Откуда количество |",
+        "|---|---|---|---|---|",
+        f"| Запрос С1: модель (шаги — строки 9–11 шаблона) | {c1['llm_calls']} вызова, {c1['tokens_in']} токенов "
+        f"на входе ({c1['tokens_cached']} из кэша), {c1['tokens_out']} на выходе | тариф DeepSeek ниже | "
+        f"{c1['rub_llm']} | замер `{last['label']}`, среднее {last['repeat']} прогонов |",
+        f"| Запрос С1: эмбеддинг запроса (строка 12 шаблона) | {round(c1['rub_emb'] / emb_k * 1000)} токенов | "
+        f"{emb_k} ₽ за 1000 | {c1['rub_emb']} | numTokens из ответа Yandex, тот же замер |",
+        f"| **Запрос С1, итого** | | | **{c1['rub']}** | `make cost-xlsx` → "
+        f"`reports/cost-template-{last['label']}.xlsx` |",
+        f"| Разово: OCR страниц без текста | {idx['ocr_pages']} стр. | {round(other('ocr_page'), 4)} ₽ за стр. | "
+        f"{idx['ocr_rub']} | страницы меньше 50 знаков (`low_text_pages` паспорта индекса), STATUS «OCR 41 стр.» |",
+        f"| Разово: эмбеддинги всех фрагментов | {idx['fragments']} фрагментов × {int(i['chars_per_fragment'])} знаков "
+        f"÷ {i['chars_per_token']} знака на токен ≈ {idx['emb_tokens']} токенов | {emb_k} ₽ за 1000 | {idx['emb_rub']} "
+        f"({idx['emb_rub_range'][0]}–{idx['emb_rub_range'][1]}) | фрагменты — индекс стенда; длина — сборка без Yandex "
+        f"(3 545 фрагментов, 2 234 818 знаков); токен — 3 знака (допущение кода), диапазон 2,5–4 |",
+        f"| **Разово, итого** | | | **{idx['rub']}** ({idx['rub_range'][0]}–{idx['rub_range'][1]}) | пересборка "
+        "берёт OCR и эмбеддинги из кэша индекса — 0 ₽ |",
+        f"| Голос — опция к вопросу | распознавание 15 с + синтез фразы до 250 знаков | SpeechKit, тариф ниже | "
+        f"{voice} | правила `src/service/voice.py`; живой замер 0,27 ₽ — `reports/2026-11-26-voice-cost.md` |",
+        f"| Парк: запросы в месяц | {int(a['vehicles'])} машин × {round(a['checks_per_vehicle_month'], 2)} проверки "
+        f"= {fleet['checks']} проверок × (С1 {c1['rub']} + 1–2 вопроса × Р1 {r1['rub']}) | — | "
+        f"{fleet['requests_rub'][0]}–{fleet['requests_rub'][1]} | пример организаторов; сверху: каждая проверка — "
+        "отклонение с заявкой (норма и сбой дешевле) |",
+        f"| Парк: контейнер и хранилище в месяц | {fixed['questions']} вопросов, {fixed['hours']} ч контейнера, "
+        f"{fixed['storage_gb']} ГБ | тарифы ниже | {fleet['fixed_rub']} ({fleet['fixed_rub_no_free_tier']} без "
+        "бесплатного уровня) | ниже, «Постоянные» |",
+        f"| **Парк в месяц, итого** | | | **{fleet['total_rub'][0]}–{fleet['total_rub'][1]}** | с голосом на каждый "
+        f"вопрос +{fleet['voice_rub']} |",
         "",
         "## Слои себестоимости",
         "",
-        "1. **Запрос** = модель + эмбеддинг запроса (поиск по смыслу) — таблица выше; только он идёт в шаблон "
-        "организаторов (`make cost-xlsx`).",
-        "2. **Голос — опция** к запросу: распознавание вопроса (15 с) и синтез ответа (SpeechKit API v1, за символы; "
-        f"v3 вдвое дешевле) — **+{voice if voice is not None else '—'} ₽** на вопрос (замер Г1). "
+        "1. **Запрос** = модель + эмбеддинг запроса (поиск по смыслу) — таблица выше; только он идёт в строки "
+        "шаблона организаторов (`make cost-xlsx`), разовое и парк — в его комментарий.",
+        f"2. **Голос — опция** к запросу: распознавание вопроса (15 с) и синтез короткой фразы (SpeechKit, API "
+        f"дешевле для её длины) — **+{voice} ₽** на вопрос, округлённо 0,27 ₽ (живой замер — тоже 0,27). Прежние "
+        "+1,19 ₽ считали синтез всего ответа по API v1, а приложение озвучивает короткую фразу. "
         f"Альтернатива — {LOCAL_VOICE}.",
-        f"3. **Постоянные в месяц на парк** (не в запрос): парк {int(a['vehicles'])} ТС × "
-        f"{int(a['checks_per_vehicle_month'])} проверки × {int(a['questions_per_check'])} вопроса = "
-        f"{fixed['questions']} вопросов, {fixed['hours']} ч работы контейнера ({int(a['vcpu'])} vCPU, "
-        f"{int(a['ram_gb'])} ГБ), хранилище {fixed['storage_gb']} ГБ (индекс и PDF):",
+        f"3. **Постоянные в месяц на парк** (не в запрос): {fixed['questions']} вопросов в месяц, {fixed['hours']} ч "
+        f"работы контейнера ({int(a['vcpu'])} vCPU, {int(a['ram_gb'])} ГБ), хранилище {fixed['storage_gb']} ГБ "
+        "(индекс и PDF):",
         f"   - контейнер (Serverless Containers): **{fixed['container_rub']} ₽/мес** в бесплатном уровне, "
         f"{fixed['container_rub_no_free_tier']} ₽/мес без него;",
         f"   - хранилище (Object Storage): **{fixed['storage_rub']} ₽/мес** (первый 1 ГБ бесплатно), "

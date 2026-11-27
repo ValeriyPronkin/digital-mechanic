@@ -5,7 +5,8 @@
 
 Шаблон — COST_TEMPLATE (по умолчанию ~/hackathon-blind-pack/04_shablon_rascheta.xlsx, в git не входит).
 Заполняются только жёлтые ячейки листа «Расчёт»: I3 — курс ЦБ, A9:H12 — шаги агента с вызовом модели для одного
-запроса (сценарий видео С1: вопрос механика + черновик заявки), A17:A19 — комментарий. Формулы шаблона не трогаем.
+запроса (сценарий видео С1: вопрос механика + черновик заявки), A17:A19 — комментарий: запрос; разово — индексация
+руководств и голос-опция; пересчёт на парк в месяц (ответ организаторов 26.11, `cost_layers.py`). Формулы не трогаем.
 Цена входа — эффективная: доля токенов из кэша провайдера по замеру × цена кэша + остальное × цена входа.
 """
 
@@ -22,7 +23,7 @@ from typing import Any
 
 import openpyxl
 
-from cost_layers import LOCAL_VOICE, monthly_fixed, other, voice_option
+from cost_layers import ASSUMPTIONS, fleet_month, one_time_index, other, voice_option
 from service.store import llm_price_native, price_table
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -128,22 +129,27 @@ def model_rub(steps: list[dict[str, Any]], price: dict[str, float], currency: st
 
 
 def comment(run: dict[str, Any], price_note: str) -> list[str]:
-    """Три строки: запрос и допущения; голос — опция; постоянные в месяц на парк."""
+    """Три строки по ответу организаторов 26.11: запрос; разово — индексация и голос-опция; парк в месяц."""
     t = price_table()
-    rest = ", ".join(f"{k} {v['rub']}" for k, v in run["scenarios"].items() if k != SCENARIO)
-    fixed = monthly_fixed(run)
-    voice = voice_option(run)
-    voice_txt = f"+{voice} ₽ на вопрос" if voice is not None else "в замере нет"
+    idx = one_time_index()
+    fleet = fleet_month(run)
+    a = ASSUMPTIONS
+    lo, hi = fleet["requests_rub"]
     return [
-        f"Запрос = сценарий видео С1 (вопрос + черновик заявки): модель + эмбеддинг запроса, токены — среднее "
-        f"{run['repeat']} прогонов на демо (make cost, замер {run['label']}); вход — со скидкой за кэш по замеренной "
-        f"доле. {price_note} Другие сценарии, ₽: {rest}. Цены — официальные, курс ЦБ {t['usd_rub']['value']} на "
-        f"{t['usd_rub']['date']}, без НДС.",
-        f"Голос — опция, не в итоге: распознавание 15 с + синтез ответа (SpeechKit) — {voice_txt}; {LOCAL_VOICE}.",
-        f"Постоянные в месяц на парк, не в запрос: контейнер {fixed['container_rub']} ₽ в бесплатном уровне "
-        f"({fixed['container_rub_no_free_tier']} ₽ без него) при {fixed['questions']} вопросах; хранилище индекса и "
-        f"PDF {fixed['storage_gb']} ГБ — {fixed['storage_rub']} ₽ ({fixed['storage_rub_no_free_tier']} ₽ без "
-        "бесплатного объёма).",
+        f"Запрос = сценарий С1 (результат диагностики → вопрос механика → черновик заявки): все вызовы модели + "
+        f"эмбеддинг запроса (строка 12), среднее {run['repeat']} прогонов на демо (make cost, замер {run['label']}); "
+        f"вход — со скидкой за кэш по замеренной доле. {price_note} Цены — официальные, "
+        f"курс ЦБ {t['usd_rub']['value']} на {t['usd_rub']['date']}, без НДС. Другие сценарии — reports/cost.md.",
+        f"Разово, не в запрос: индексация руководств {idx['rub']} ₽ = OCR {idx['ocr_pages']} стр. × "
+        f"{round(other('ocr_page'), 4)} ₽ ({idx['ocr_rub']} ₽) + эмбеддинги {idx['fragments']} фрагментов ≈ "
+        f"{idx['emb_tokens']} токенов × {round(other('embedding'), 5)} ₽/1000 ({idx['emb_rub']} ₽, "
+        f"{idx['emb_rub_range'][0]}–{idx['emb_rub_range'][1]}); пересборка из кэша 0 ₽. Голос — опция: "
+        f"+{voice_option(run)} ₽ на вопрос (распознавание 15 с + синтез фразы до 250 знаков) или локально 0 ₽.",
+        f"Парк в месяц (пример организаторов): {int(a['vehicles'])} машин × проверка раз в две недели = "
+        f"{fleet['checks']} проверок; проверка = {SCENARIO} + ещё 1–2 вопроса по Р1 ({fleet['per_check_rub'][0]}–"
+        f"{fleet['per_check_rub'][1]} ₽) → {lo}–{hi} ₽/мес, оценка сверху (каждая проверка — отклонение с "
+        f"заявкой); контейнер и хранилище {fleet['fixed_rub']} ₽ в бесплатном уровне "
+        f"({fleet['fixed_rub_no_free_tier']} ₽ без него); голос на каждый вопрос +{fleet['voice_rub']} ₽.",
     ]
 
 
@@ -195,6 +201,9 @@ def main() -> int:
         toks = f"{s['tokens_in']} ({s['tokens_cached']} из кэша) / {s['tokens_out']}"
         print(f"  {s['name']}: {s['calls']} вызова, {toks}")
     print(f"{out.relative_to(ROOT)}: модель на 1 запрос ≈ {res['rub']:.4f} ₽ без НДС")
+    idx, fleet = one_time_index(), fleet_month(run)
+    print(f"  разово, индексация: {idx['rub']} ₽ ({idx['rub_range'][0]}–{idx['rub_range'][1]})")
+    print(f"  парк в месяц: {fleet['total_rub'][0]}–{fleet['total_rub'][1]} ₽ (+{fleet['voice_rub']} ₽ с голосом)")
     return 0
 
 
