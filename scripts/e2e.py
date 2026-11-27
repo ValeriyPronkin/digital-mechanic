@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MONTHS = "янв фев мар апр мая июн июл авг сен окт ноя дек".split()
 DIAG = "Получить результат диагностики"
 ASK = "Спросите по руководству"
+BUSY = "Готовим ответ"
 QUESTION = "Какой зазор клапанов?"
 CONTRADICTION = "Когда регулировать зазоры клапанов — сразу после остановки можно?"
 ANSWER_S = 180  # ответ модели на стенде, с холодным стартом
@@ -132,8 +133,13 @@ class Screen:
                 radios.nth(i).click()
                 break
         self.page.get_by_role("button", name=DIAG).click()
-        self.page.wait_for_load_state("networkidle", timeout=120_000)
-        self.page.wait_for_timeout(1500)
+        self.idle()
+
+    def idle(self) -> None:
+        """Ответ дописан: «Готовим ответ…» пропало (на стенде результат и ответ приходят за секунды)."""
+        self.page.wait_for_timeout(800)
+        self.page.wait_for_function(f"() => !document.body.innerText.includes({BUSY!r})", timeout=ANSWER_S * 1000)
+        self.page.wait_for_timeout(800)
 
     def logs(self) -> int:
         return int(self.page.locator("details").count())
@@ -147,7 +153,7 @@ class Screen:
         self.page.wait_for_function(
             f"() => document.querySelectorAll('details').length > {before}", timeout=ANSWER_S * 1000
         )
-        self.page.wait_for_timeout(1000)
+        self.idle()
         return time.monotonic() - t0
 
     def page_sheet(self) -> tuple[bool, str]:
