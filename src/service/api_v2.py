@@ -32,7 +32,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from service import conv_state, language, passport
+from service import conv_state, escalation, language, passport
 from service.agent import Agent, AgentReply, Conversation
 from service.case_log import CaseLog, verify
 from service.clients import ServiceError, TicketRequest
@@ -287,7 +287,9 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
     while end < len(lines) and lines[end].startswith("- "):
         item_lines.append(lines[end])
         end += 1
-    if end >= len(lines) or contradictions.ADVICE not in lines[end] or len(item_lines) != len(quotes):
+    conclusion_line = end < len(lines) and not contradictions.ESCALATION.match(lines[end])
+    esc_at = end + 1 if conclusion_line else end  # строка вывода (если есть), затем строка эскалации
+    if esc_at >= len(lines) or not contradictions.ESCALATION.match(lines[esc_at]) or len(item_lines) != len(quotes):
         return None, text
     pages = {(q.doc, q.page) for q in quotes}
     refs = {(s.manual_id, s.pdf_page): s.ref for s in conv.sources.values() if (s.manual_id, s.pdf_page) in pages}
@@ -310,16 +312,29 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
         if k.conclusion
         else "Какое значение верно для вашего двигателя, руководства не уточняют."
     )
-    rest_lines = lines[:start] + lines[end + 1 :]
+    line = lines[esc_at]
+    rest_lines = lines[:start] + lines[esc_at + 1 :]
     rest = "\n\n".join(p for p in (part.strip() for part in "\n".join(rest_lines).split("\n\n")) if p)
     block = {
         "kind": "contradiction",
         "title": k.title,
         "items": items,
         "conclusion": conclusion,
-        "advice": contradictions.ADVICE,
+        # строка эскалации вместо совета (Валерий, 27.11): «Передано главному механику на решение (№ N). Пока — …»
+        # или «Решение по противоречию (источник, дата): …» — рядом с формулировками, не вместо них
+        "advice": line,  # прежнее поле — для текущего web/
+        "escalation": escalation_view(line),
     }
     return block, rest
+
+
+_ESC_NUMBER = re.compile(r"\(№ (\d+)\)")
+
+
+def escalation_view(line: str) -> dict[str, Any]:
+    m = _ESC_NUMBER.search(line)
+    resolved = line.startswith("Решение по противоречию")
+    return {"line": line, "number": int(m.group(1)) if m else None, "resolved": resolved}
 
 
 def source_items(reply: AgentReply, conv: Conversation) -> list[dict[str, Any]]:
@@ -643,6 +658,19 @@ class TicketDecision(BaseModel):
     urgency: Literal["low", "medium", "high"] | None = None
 
 
+class EscalationSend(BaseModel):
+    to: Literal["manufacturer", "support"]
+    by: str = Field(min_length=1, max_length=120)  # кто отправил (главный механик / поддержка)
+    text: str | None = Field(default=None, max_length=8000)  # свой текст; нет — черновик кода
+
+
+class EscalationResolve(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)  # ответ завода / поддержки
+    by: str = Field(min_length=1, max_length=120)  # кто зафиксировал
+    source: Literal["manufacturer", "support", "chief_mechanic"] = "manufacturer"
+    document: str | None = Field(default=None, max_length=500)  # документ-основание: письмо, извещение, редакция
+
+
 class ResumeIn(BaseModel):
     vehicle_id: str = Field(min_length=1)
 
@@ -944,6 +972,48 @@ def build_router(
         threads.put(b, decision.vehicle_id, data)
         remember(decision.vehicle_id, data, ticket_rec, status="ticket_sent", ticket_id=resp.ticket_id)
         return view
+
+    # ---------- противоречия: очередь главного механика (эскалация) ----------
+
+    def queue() -> Any:
+        return get_agent().escalation
+
+    def item_or_404(number: int) -> dict[str, Any]:
+        item = queue().get(number)
+        if item is None:
+            raise HTTPException(404, f"Противоречия № {number} нет.")
+        return dict(item)
+
+    @router.get("/contradictions")
+    def contradictions_queue(status: Literal["open", "sent", "resolved", "all"] = "open") -> list[dict[str, Any]]:
+        """Очередь главного механика: что, двигатель, обе формулировки со страницами, сколько раз всплывало."""
+        return [dict(i) for i in queue().items(status)]
+
+    @router.get("/contradictions/journal")
+    def contradictions_journal() -> list[dict[str, Any]]:
+        """Журнал решений (только добавление): отправлено кому и когда, решение — кем, когда, на каком основании."""
+        return list(queue().journal())
+
+    @router.get("/contradictions/{number}")
+    def contradiction_item(number: int) -> dict[str, Any]:
+        return item_or_404(number)
+
+    @router.get("/contradictions/{number}/letter")
+    def contradiction_letter(number: int, to: Literal["manufacturer", "support"] = "manufacturer") -> dict[str, Any]:
+        """Черновик обращения заводу-изготовителю или в поддержку — собран кодом; код его не отправляет."""
+        return {"to": to, "text": queue().letter(item_or_404(number), to), "channel": escalation.channel()}
+
+    @router.post("/contradictions/{number}/send")
+    def contradiction_send(number: int, body: EscalationSend) -> dict[str, Any]:
+        """Отметка «отправлено»: кому, кто, когда, текст обращения (письмо не отправляется — канал на пилоте)."""
+        item_or_404(number)
+        return dict(queue().send(number, body.to, body.by, body.text))
+
+    @router.post("/contradictions/{number}/resolve")
+    def contradiction_resolve(number: int, body: EscalationResolve) -> dict[str, Any]:
+        """Ответ завода / поддержки: после него агент показывает решение рядом с обеими формулировками."""
+        item_or_404(number)
+        return dict(queue().resolve(number, body.text, body.by, body.source, body.document))
 
     # ---------- долгая сессия: история обращений, продолжение, выгрузка для рекламации ----------
 

@@ -212,34 +212,54 @@ class CaseLog:
         return f"v2/records/{vehicle_id}/{thread_id}/{seq:06d}.json"
 
     def append(self, vehicle_id: str, thread_id: str, record: dict[str, Any], start: int = 1) -> dict[str, Any]:
-        """Следующая запись цепочки. Объект создаётся только если его нет: занят другим экземпляром — следующий номер.
-        `start` — с какого номера искать (число записей в истории + 1), чтобы не перечитывать всю цепочку."""
-        seq = max(1, start)
-        while True:  # первый свободный номер: перед ним все заняты
-            raw, _ = self.backend.read(self._record_key(vehicle_id, thread_id, seq))
-            if raw is None:
-                break
-            seq += 1
-        for _ in range(MAX_TRIES):
-            prev = ""
-            if seq > 1:
-                raw, _ = self.backend.read(self._record_key(vehicle_id, thread_id, seq - 1))
-                prev = json.loads(raw)["sha256"] if raw else ""
-            rec = {**record, "seq": seq, "thread_id": thread_id, "vehicle_id": vehicle_id, "prev_sha256": prev}
-            rec.setdefault("at", now_iso(self.clock()))
-            rec["sha256"] = record_hash(rec)
-            if self.backend.create(self._record_key(vehicle_id, thread_id, seq), _dump(rec)):
-                self.touch(vehicle_id, thread_id, records=seq)  # сколько записей должно быть: пропуск виден
-                return rec
-            seq += 1
-        raise RuntimeError(f"запись {vehicle_id}/{thread_id}: не удалось добавить за {MAX_TRIES} попыток")
+        """Следующая запись цепочки нити (только добавление). `start` — с какого номера искать: число записей
+        в истории + 1, чтобы не перечитывать всю цепочку."""
+        rec = append_chain(
+            self.backend,
+            f"v2/records/{vehicle_id}/{thread_id}",
+            {**record, "thread_id": thread_id, "vehicle_id": vehicle_id},
+            self.clock,
+            start,
+        )
+        self.touch(vehicle_id, thread_id, records=rec["seq"])  # сколько записей должно быть: пропуск виден
+        return rec
 
     def records(self, vehicle_id: str, thread_id: str) -> list[dict[str, Any]]:
-        out: list[dict[str, Any]] = []
-        seq = 1
-        while True:
-            raw, _ = self.backend.read(self._record_key(vehicle_id, thread_id, seq))
-            if raw is None:
-                return out
-            out.append(json.loads(raw))
-            seq += 1
+        return read_chain(self.backend, f"v2/records/{vehicle_id}/{thread_id}")
+
+
+def append_chain(
+    backend: Backend, prefix: str, record: dict[str, Any], clock: Callable[[], float] = time.time, start: int = 1
+) -> dict[str, Any]:
+    """Запись в цепочку `<prefix>/<NNNNNN>.json` только добавлением: объект создаётся, если его нет
+    (`If-None-Match: *`); номер занят другим экземпляром — следующий. В записи — хэш предыдущей."""
+
+    def key(n: int) -> str:
+        return f"{prefix}/{n:06d}.json"
+
+    seq = max(1, start)
+    while backend.read(key(seq))[0] is not None:  # первый свободный номер
+        seq += 1
+    for _ in range(MAX_TRIES):
+        prev = ""
+        if seq > 1:
+            raw, _ = backend.read(key(seq - 1))
+            prev = json.loads(raw)["sha256"] if raw else ""
+        rec = {**record, "seq": seq, "prev_sha256": prev}
+        rec.setdefault("at", now_iso(clock()))
+        rec["sha256"] = record_hash(rec)
+        if backend.create(key(seq), _dump(rec)):
+            return rec
+        seq += 1
+    raise RuntimeError(f"{prefix}: не удалось добавить запись за {MAX_TRIES} попыток")
+
+
+def read_chain(backend: Backend, prefix: str) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seq = 1
+    while True:
+        raw, _ = backend.read(f"{prefix}/{seq:06d}.json")
+        if raw is None:
+            return out
+        out.append(json.loads(raw))
+        seq += 1

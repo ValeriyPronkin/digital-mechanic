@@ -32,6 +32,7 @@ from service import (
 from service import parts_supplier as parts_supplier_mod
 from service.agent import Agent, Level
 from service.clients import MLClient, ServiceError, ToirClient
+from service.escalation import ContradictionQueue
 from service.fault_matrix import card_explanation
 from service.fleet import fleet
 from service.fleet_api import build_router as build_fleet_router
@@ -180,6 +181,7 @@ def agent() -> Agent:
         budget_day_rub=float(os.environ.get("LLM_BUDGET_DAY_RUB", "100")),
         budget_total_rub=float(os.environ.get("LLM_BUDGET_TOTAL_RUB", "1000")),
         ledger=shared_ledger(),
+        escalation=ContradictionQueue.from_env(),  # очередь противоречий главного механика (бакет на стенде)
     )
 
 

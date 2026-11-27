@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -76,6 +77,8 @@ _TICKET_ASK = re.compile(r"заявк|оформ|отправ", re.I)
 
 SILENT_NOTE = "В руководстве этого двигателя нет порядка работ по этому узлу — нужна дефектовка."
 
+log = logging.getLogger(__name__)
+
 SYSTEM_PROMPT = """Ты — «Цифровой механик», помощник механика автопарка. Механик читает ответ с телефона и может быть \
 малоопытным: пиши просто, коротко, по шагам.
 
@@ -100,7 +103,8 @@ operations и spare_parts — они подставятся из матрицы)
 матрицы. Своё рассуждение без источника не пиши, а если без него нельзя — пометь «мнение помощника, не из руководства».
 8. Если в найденных фрагментах этого двигателя инструкции противоречат друг другу (цифры, условия, порядок) — \
 не выбирай одну как бесспорную: строка «Противоречие в документации:», затем каждая формулировка дословно в кавычках \
-«…» со ссылкой [R…], и совет уточнить у производителя двигателя для своей модификации. Если в результате \
+«…» со ссылкой [R…]. Совет «уточните у производителя / у специалиста» не пиши: противоречие передаёт главному \
+механику код и сам пишет строку об этом. Если в результате \
 поиска есть contradiction — блок с цитатами покажет код, а ответ строй на его выводе. \
 9. Фрагмент с context «испытания на стенде» — нормы и действия при обкатке и испытаниях двигателя на стенде после \
 ремонта (например, аварийная защита стенда), а не поведение машины в эксплуатации: так и скажи, не выдавай за норму \
@@ -637,6 +641,7 @@ class Agent:
         budget_total_rub: float = 1000.0,
         clock: Any = time.time,
         ledger: SpendLedger | None = None,
+        escalation: Any = None,
     ) -> None:
         self.provider = provider
         self.ml = ml
@@ -650,6 +655,10 @@ class Agent:
         self.budget_total_rub = budget_total_rub
         self.clock = clock
         self.ledger = ledger  # общий счётчик расходов всех экземпляров стенда (#11); None — журнал экземпляра
+        # очередь противоречий главного механика (эскалация вместо совета механику; Валерий, 27.11)
+        from service.escalation import ContradictionQueue
+
+        self.escalation: ContradictionQueue = escalation if escalation is not None else ContradictionQueue()
 
     # ---- разговор ----
     def start(self, vehicle_id: str, session_id: str) -> Conversation:
@@ -709,6 +718,7 @@ class Agent:
             hit = self.store.cached_answer(cache_key)
             if hit is not None:
                 cached = self._reply_from_cache(conv, hit, request_id, question)
+                cached.text = self._refresh_escalation(conv, cached.text)
                 cached.lang = target or "ru"
                 return cached
         if self.prefetch:
@@ -1479,7 +1489,9 @@ class Agent:
                     conv.contradiction = (k, quotes)
         if conv.contradiction is None:
             checked, notes = contradictions.check_model_blocks(
-                text, lambda ref: conv.sources[ref].text if ref in conv.sources else None
+                text,
+                lambda ref: conv.sources[ref].text if ref in conv.sources else None,
+                lambda found: self._escalate_model(conv, found),
             )
             return checked, cited, notes
         k, quotes = conv.contradiction
@@ -1487,12 +1499,46 @@ class Agent:
         refs = {(s.manual_id, s.pdf_page): s.ref for s in conv.sources.values() if (s.manual_id, s.pdf_page) in pages}
         stripped, _ = contradictions.check_model_blocks(text, lambda ref: None)  # свои блоки модели — убрать
         parts = contradictions.neutralize(k, stripped).split("\n\n", 1)
-        blk = contradictions.block(k, quotes, refs)
+        blk = contradictions.block(k, quotes, refs, self._escalate(conv, k, quotes))
         text = "\n\n".join(p for p in (parts[0], blk, parts[1] if len(parts) > 1 else "") if p.strip())
         for ref in refs.values():
             if conv.sources[ref] not in cited:
                 cited.append(conv.sources[ref])
         return text, cited, ["Противоречие в документации: показаны все формулировки со страницами."]
+
+    def _escalate(self, conv: Conversation, k: Any, quotes: list[Any]) -> str:
+        """Противоречие — в очередь главного механика; строка «передано на решение / решение по противоречию».
+        Сбой очереди ответ не ломает: строка без номера."""
+        from service.escalation import escalation_line, safe_rule
+
+        try:
+            item = self.escalation.report(k, quotes, conv.vehicle.engine_model, conv.vehicle.vehicle_id)
+        except Exception as exc:
+            log.warning("противоречие не поставлено в очередь: %s", type(exc).__name__)
+            return f"Передаётся главному механику на решение. Пока — безопасное правило: {safe_rule(k.conclusion)}."
+        conv.passport.setdefault("escalations", []).append(item["number"])
+        return escalation_line(item)
+
+    def _escalate_model(self, conv: Conversation, found: list[tuple[str, str]]) -> str:
+        """Противоречие, которое заметила модель и подтвердили цитаты: в очередь по своему ключу (цитаты)."""
+        from types import SimpleNamespace
+
+        quotes = [
+            contradictions.Quote(conv.sources[ref].manual_id, conv.sources[ref].pdf_page, quote)
+            for quote, ref in found
+            if ref in conv.sources
+        ]
+        key = hashlib.sha256("|".join(sorted(f"{q.doc}:{q.page}:{q.quote}" for q in quotes)).encode()).hexdigest()
+        k = SimpleNamespace(id=f"model-{key[:12]}", title=f"найдено в ответе: «{quotes[0].quote[:60]}»", conclusion="")
+        return self._escalate(conv, k, quotes)
+
+    def _refresh_escalation(self, conv: Conversation, text: str) -> str:
+        """Ответ из кэша: строка эскалации — на сегодня (решение могли принять после того, как ответ сохранили)."""
+        if conv.contradiction is None or contradictions.HEADER not in text:
+            return text
+        k, quotes = conv.contradiction
+        line = self._escalate(conv, k, quotes)
+        return contradictions.ESCALATION.sub(lambda _m: line, text, count=1)
 
     def _source_for(self, conv: Conversation, manual_id: str, pdf_page: int, section: str, text: str) -> Source:
         """Источник R… для страницы руководства; одна страница — один R, текст дополняется."""
