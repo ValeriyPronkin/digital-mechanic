@@ -152,6 +152,7 @@ def test_plain_steps_without_diagnosis_are_not_marked(ml: MLClient, toir: ToirCl
     assert OPINION not in text
 
 
+@pytest.mark.usefixtures("without_matrix")  # сценарий C1 из фикстуры поиска — как в CI, без матрицы
 def test_no_link_card_line_is_dropped(ml: MLClient, toir: ToirClient) -> None:
     """Связь с карточкой — только если она есть: строка «к этому не относится» из ответа убирается кодом."""
     for line in (
@@ -255,6 +256,7 @@ def test_any_unsourced_card_sentence_is_replaced_by_code_line(ml: MLClient, toir
     assert "связи не даёт" not in reply.text and reply.text.count("К найденной неисправности") == 1
 
 
+@pytest.mark.usefixtures("without_matrix")  # сценарий C1 из фикстуры поиска — как в CI, без матрицы
 def test_opinion_with_work_part_or_number_is_cut(ml: MLClient, toir: ToirClient) -> None:
     """Приёмка v2: под пометкой «мнение» — советы по деталям и цифры. Остаётся один общий совет."""
     answer = ("Нажать на ветвь с усилием 40 Н [R1].\n"

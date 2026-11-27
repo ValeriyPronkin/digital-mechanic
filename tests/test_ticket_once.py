@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from service import api_v2, conv_state, main
@@ -164,6 +165,7 @@ def test_empty_selection_does_not_send_everything(ml: MLClient, toir: ToirClient
     assert ok.status_code == 200 and counting.sent == 1
 
 
+@pytest.mark.usefixtures("without_matrix")  # сценарий C1 из фикстуры поиска — как в CI, без матрицы
 def test_removed_operation_takes_its_page_out_of_references(ml: MLClient, toir: ToirClient) -> None:
     """Механик убрал работу на листе заявки — страница, на которую ссылалась только она, в ТОиР не уходит."""
     from test_agent import TwoPageSearch

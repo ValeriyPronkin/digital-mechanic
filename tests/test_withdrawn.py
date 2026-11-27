@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from service import api_v2
 from service.agent import WITHDRAWN_UNCITED, WITHDRAWN_UNVERIFIED, Source
 from service.clients import MLClient, ToirClient
@@ -55,6 +57,7 @@ def test_withdrawn_claim_is_replaced_in_place_and_numbering_kept(ml: MLClient, t
     assert "не нашёл" not in text and not any("не нашёл" in n for n in reply.notes)
 
 
+@pytest.mark.usefixtures("without_matrix")  # сценарий C1 из фикстуры поиска — как в CI, без матрицы
 def test_verification_event_lists_withdrawn_claims_in_note_order(ml: MLClient, toir: ToirClient) -> None:
     reply = _reply(ml, toir)
     text = api_v2.to_handles(reply.text)

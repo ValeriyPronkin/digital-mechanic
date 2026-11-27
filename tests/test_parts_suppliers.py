@@ -164,6 +164,7 @@ def test_manual_designations_come_from_matrix() -> None:
     assert got["Втулка коромысла (236-1007118), стр. 169"] == "236-1007118"
 
 
+@pytest.mark.usefixtures("without_matrix")  # сценарий C1 из фикстуры поиска — как в CI, без матрицы
 def test_v2_ticket_pending_carries_parts_offers(
     ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
