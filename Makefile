@@ -48,7 +48,7 @@ e2e: install
 ## и секунд; код 0 = «готово к дублю», 3 = только «ждёт PR #N», 1 = ❌. Заявку не шлёт. ARGS=--help — параметры
 ## Видео для жюри одним дублем (Playwright Chromium, настоящая модель): ускоряется только ожидание ответа модели (ffmpeg)
 ## → reports/video/<метка>-<тема>/video.mp4 и scenes.md с таймкодами. Перед дублем — make reset-demo.
-## E2E_URL — стенд; VIDEO_ARGS="--theme light --pace 1.6"
+## E2E_URL — стенд; VIDEO_ARGS="--theme light --pace 1.6 --narrator alena" (--silent — без звука). Голос — ключ SpeechKit из .env
 video: install
 	uv run python -m playwright install chromium
 	uv run --with imageio-ffmpeg $(if $(wildcard .env),--env-file .env,) python scripts/video.py $(E2E_URL) $(VIDEO_ARGS)
