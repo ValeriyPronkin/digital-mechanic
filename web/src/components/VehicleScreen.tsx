@@ -134,7 +134,8 @@ function AssistantBlock({
         if (!onRedo || turn.live || !turn.text || !level) return null
         const down = moreDetail(level)
         const up = shorter(level)
-        const quiet = 'min-h-12 rounded-lg border border-line px-3 text-dim hover:text-text'
+        const quiet =
+          'min-h-12 rounded-lg border border-line px-3 text-dim hover:text-text min-[900px]:pointer-fine:min-h-9'
         return (
           <div className="flex flex-wrap items-center gap-2 text-[13px]">
             <span className="mr-1 text-mute">{copy.level.answered[level]}</span>
