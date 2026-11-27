@@ -373,6 +373,11 @@ def knowledge_version() -> str:
     return "/".join(stamps)
 
 
+def own_source_check() -> bool:
+    """GUARD_OWN_SOURCE=0 — проверка цифр по всем источникам ответа, как до 27.11."""
+    return os.environ.get("GUARD_OWN_SOURCE", "1") != "0"
+
+
 def numbers(text: str) -> set[str]:
     return {_norm_num(n) for n in _NUM.findall(_REF_BARE.sub(" ", _REF.sub(" ", text)))}
 
@@ -958,14 +963,22 @@ class Agent:
             return [(page_text(s.manual_id, s.pdf_page) if page_text else None) or s.text for s in srcs]
 
         kept: list[str] = []
-        dropped = row_dropped = 0
+        dropped = row_dropped = own_dropped = 0
+        context_nums = self._context_numbers(conv) if own_source_check() else set()
         for line in text.split("\n"):
             mark = _LIST_MARK.match(line)
             prefix = mark.group(0) if mark else ""
             good = []
+            line_refs = [r for r in _REF.findall(line) if r in conv.sources]
             for part in _SENTENCE.split(line[len(prefix) :]):
                 if numbers(part) - allowed:
                     dropped += 1
+                    continue
+                # число — из источника своего предложения (или своей строки), как в verify.py Никиты; без
+                # ссылки ни в предложении, ни в строке — как раньше, по всем источникам ответа
+                own = [r for r in _REF.findall(part) if r in conv.sources] or line_refs
+                if own_source_check() and own and numbers(part) - (context_nums | self._own_numbers(conv, own)):
+                    own_dropped += 1
                     continue
                 if cited and not row_check.row_ok(part, question, pages_for(part)):
                     row_dropped += 1  # число из строки таблицы про другую деталь
@@ -982,7 +995,7 @@ class Agent:
         text = _restrict_opinions(text)
         if opinions:
             notes.append("Часть выводов — рассуждение помощника, а не руководство: они помечены.")
-        if dropped:
+        if dropped or own_dropped:
             notes.append("Часть цифр не нашёл в руководстве — убрал их. Точные значения уточнит дефектовка.")
         if row_dropped:
             notes.append("Цифру из строки таблицы про другую деталь убрал — в руководстве она относится не к этому.")
@@ -990,6 +1003,7 @@ class Agent:
         grounded = bool(cited)
         conv.passport["guard"] = {
             "numbers_dropped": dropped,
+            "own_source_dropped": own_dropped,
             "row_dropped": row_dropped,
             "opinions_marked": opinions,
             "ungrounded": not grounded,
@@ -1007,6 +1021,21 @@ class Agent:
             if not self._other_variant(conv, src):
                 allowed |= numbers(src.text)
         return allowed
+
+    def _own_numbers(self, conv: Conversation, refs: list[str]) -> set[str]:
+        """Цифры источников, на которые ссылается само предложение, и соседних с ними страниц того же руководства
+        из этого разговора: предложение или таблица переходят через разрыв страницы."""
+        own = [conv.sources[r] for r in refs]
+        near = [
+            s
+            for s in conv.sources.values()
+            if any(s.manual_id == o.manual_id and abs(s.pdf_page - o.pdf_page) <= 1 for o in own)
+        ]
+        out: set[str] = set()
+        for src in near:
+            if not self._other_variant(conv, src):
+                out |= numbers(src.text)
+        return out
 
     def _other_variant(self, conv: Conversation, src: Source) -> bool:
         """Как _has в app/verify.py Никиты: страница другой модификации двигателя (registry/page_scope.yaml) читается
