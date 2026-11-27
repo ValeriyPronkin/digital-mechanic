@@ -2115,8 +2115,19 @@ class Agent:
                 page_text = getattr(self.searcher, "page_text", None)
                 quotes = contradictions.verified_quotes(k, page_text)
                 if len(quotes) >= 2:
+                    # одно предложение со страницами-метками (финальная проверка 27.11, B418HK98), а не строка
+                    # «Безопасное правило: …» без страницы
+                    quoted = {(q.doc, q.page): q.quote for q in quotes}
+                    refs: dict[tuple[str, int], str] = {}
+                    for doc, page in contradictions.step_pages(k):
+                        if (doc, page) in quoted:
+                            src = self._source_for(conv, doc, page, k.title, quoted[(doc, page)])
+                            refs[(doc, page)] = src.ref
+                            if src not in cited:
+                                cited.append(src)
+                    step = contradictions.render_step(k, refs)
                     rule = k.conclusion or contradictions.safe_rule(k, quotes, page_text)
-                    text = contradictions.neutralize(k, text, f"{contradictions.RULE} {rule}")
+                    text = contradictions.neutralize(k, text, step or f"{contradictions.RULE} {rule}")
                 k = None
             if k is not None:
                 quotes = contradictions.verified_quotes(k, getattr(self.searcher, "page_text", None))

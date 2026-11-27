@@ -52,7 +52,7 @@ def test_known_case_shows_all_quotes_marks_and_concludes_cold(ml: MLClient, toir
     for quote in (RE31, RK269, RK276):
         assert quote in text  # каждая формулировка — дословно
     assert "стр. 31" in text and "стр. 269" in text and "стр. 276" in text
-    assert "Регулировать зазоры на холодном двигателе" in text  # вывод заказчика
+    assert "Регулируйте на холодном двигателе" in text  # вывод заказчика
     assert {(s["pdf_page"]) for s in reply.sources} >= {31, 269, 276}  # ссылки на все страницы
     assert any("Противоречие" in n for n in reply.notes)
 
@@ -220,4 +220,13 @@ def test_disputed_timing_outside_the_topic_gets_the_rule_without_block(ml: MLCli
     ag, _ = make_agent([call("search_manual", query="регулировка зазоров"), say(answer)], ml, toir, Manual236())
     reply = ag.ask(ag.start("B418HK98", "S-0007"), "Создай заявку на дефектовку.")
     assert "не позднее 15 минут" not in reply.text and HEADER not in reply.text
-    assert "1. Безопасное правило: Регулировать зазоры на холодном двигателе" in reply.text
+    # одно предложение со страницами-метками, а не «Безопасное правило: …» без страницы (финальная проверка 27.11)
+    assert RULE not in reply.text
+    import re
+
+    line = next(ln for ln in reply.text.split("\n") if ln.startswith("1. "))
+    assert line.startswith("1. Зазоры регулируйте на холодном двигателе [R")
+    refs = re.findall(r"\[(R\d+)\]", line)
+    assert len(refs) == 2 and "это не значит, что двигатель уже остыл" in line
+    pages = {(s["url"].split("/")[2].split("#")[0], s["pdf_page"]) for s in reply.sources if s["ref"] in refs}
+    assert pages == {("yamz-236-re", 31), ("yamz-236-rk", 269)}

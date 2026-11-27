@@ -36,7 +36,7 @@ def test_contradiction_goes_to_queue_instead_of_advice(ml: MLClient, toir: ToirC
     ag.ask(ag.start("B418HK98", "S-0007"), QUESTION)  # всплыло ещё раз — тот же номер, счётчик +1
     item = ag.escalation.items("open")[0]
     assert item["number"] == 1 and item["count"] == 2 and item["engine"] == "ЯМЗ-236М2"
-    assert item["safe_rule"].startswith("Регулировать зазоры на холодном")  # полный текст — в очереди и письме
+    assert item["safe_rule"].startswith("Регулируйте на холодном двигателе")  # полный текст — в очереди и письме
     assert [f["pdf_page"] for f in item["formulations"]] == [31, 269, 276] and item["vehicles"] == ["B418HK98"]
 
 

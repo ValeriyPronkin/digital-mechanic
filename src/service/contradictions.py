@@ -65,6 +65,8 @@ class Known:
     # "to": [doc, page] — страница раздела, "also": [{"quote" — дословно с той страницы, "note" — к чему он}]}
     refers: dict[str, Any] | None = None
     appendix: tuple[tuple[str, int], ...] = ()  # страницы-приложения с моментами затяжки / зазорами
+    # шаг для ответа не о спорной теме (диагноз): одно предложение, страницы — {doc:page}, код ставит метки
+    step: str = ""
 
 
 @lru_cache(maxsize=1)
@@ -84,9 +86,25 @@ def known() -> tuple[Known, ...]:
             basis=i["basis"],
             refers=i.get("refers"),
             appendix=tuple((d, int(p)) for d, p in i.get("appendix", [])),
+            step=i.get("step", ""),
         )
         for i in data["items"]
     )
+
+
+STEP_PAGE = re.compile(r"\{([\w-]+):(\d+)\}")
+
+
+def step_pages(k: Known) -> list[tuple[str, int]]:
+    """Страницы, на которые ссылается шаг `step`, по порядку."""
+    return [(m.group(1), int(m.group(2))) for m in STEP_PAGE.finditer(k.step)]
+
+
+def render_step(k: Known, refs: dict[tuple[str, int], str]) -> str:
+    """Шаг с метками источников вместо {doc:page}; страница без метки — шаг не строится (пустая строка)."""
+    if not k.step or any(p not in refs for p in step_pages(k)):
+        return ""
+    return STEP_PAGE.sub(lambda m: f"[{refs[(m.group(1), int(m.group(2)))]}]", k.step)
 
 
 def match(engine: str, question: str) -> Known | None:
