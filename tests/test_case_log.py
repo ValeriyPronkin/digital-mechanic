@@ -122,3 +122,16 @@ def test_long_session_through_v2(ml: MLClient, toir: ToirClient, monkeypatch: py
     assert exp["integrity"]["ok"] is False and "должно быть 4" in exp["integrity"]["detail"]
     assert phone.post("/api/v2/threads/nope/resume", json={"vehicle_id": vid}).status_code == 404
     assert phone.get(f"/api/v2/vehicles/{vid}/threads/nope/export").status_code == 404
+
+
+def test_thread_topic_is_first_real_question() -> None:
+    """Тема в истории — первый вопрос механика, а не текст кнопки «Получить результат диагностики»."""
+    from service.api_v2 import thread_topic
+
+    assert thread_topic(None, "Получить результат диагностики", "S-0009") == "Результат проверки S-0009"
+    assert thread_topic("Результат проверки S-0009", "Какой зазор клапанов?", "S-0009") == "Какой зазор клапанов?"
+    assert thread_topic("Какой зазор клапанов?", "Чем проверить давление масла?", "S-0009") == "Какой зазор клапанов?"
+    assert thread_topic("Какой зазор клапанов?", "Получить результат диагностики", "S-0009") == "Какой зазор клапанов?"
+    # нить, записанная до правки: темой стоит текст кнопки — первый вопрос её заменяет
+    assert thread_topic("Получить результат диагностики", "Можно ли ехать?", "S-0009") == "Можно ли ехать?"
+    assert thread_topic(None, "Какой зазор клапанов?", "S-0009") == "Какой зазор клапанов?"
