@@ -22,6 +22,7 @@ import os
 import re
 import secrets
 import threading
+import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -44,6 +45,17 @@ log = logging.getLogger(__name__)
 
 COOKIE = "dm_v2"
 URGENCY_WORD = {"high": "высокий", "medium": "средний", "low": "низкий"}
+URGENCY_LEVELS: tuple[Literal["high", "medium", "low"], ...] = ("high", "medium", "low")
+
+
+def urgency_note(proposed: str, chosen: str, reason: str) -> str:
+    """Строка о приоритете для заявки и паспорта: что предложило правило кода и что выбрал механик (#60)."""
+    rule = f"по правилу кода — «{URGENCY_WORD[proposed]}» ({reason.rstrip('.')})"
+    if chosen == proposed:
+        return f"Приоритет {rule}; механик оставил его."
+    return f"Приоритет выбран механиком: «{URGENCY_WORD[chosen]}»; {rule}."
+
+
 QUALITY_WORD = {"good": "запись чистая", "warning": "запись с помехами", "bad": "запись непригодна"}
 _REF = re.compile(r"\[R(\d+)\]")
 
@@ -457,8 +469,12 @@ def ticket_pending(conv: Conversation) -> dict[str, Any] | None:
             "action": URGENCY_ACTION[level],
             "reasons": [d.urgency_reason],
         },
-        # Приоритет — правило кода (D-6): механику показан один, предложенный; выбор другого — решение человека.
-        "urgency_choices": [{"level": level, "word": URGENCY_WORD[level], "action": URGENCY_ACTION[level]}],
+        # Приоритет предлагает правило кода (D-6); механик может выбрать другой (решение Валерия, #60) —
+        # выбор и предложенное правилом пишутся в заявку и паспорт (`urgency_note`).
+        "urgency_choices": [
+            {"level": u, "word": URGENCY_WORD[u], "action": URGENCY_ACTION[u], "proposed": u == level}
+            for u in URGENCY_LEVELS
+        ],
         "warning": warning,
     }
 
@@ -511,8 +527,13 @@ def build_router(
     get_speech: Callable[[], Any] | None = None,
     get_pages: Callable[[], Any] | None = None,
     get_marks: Callable[[], Any] | None = None,
+    get_log_put: Callable[[], Callable[[str, bytes], None] | None] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v2")
+
+    def log_put() -> Callable[[str, bytes], None] | None:
+        """`put` журнала стенда для копии паспорта (#27, `PASSPORT_LOG=bucket`); без журнала — None."""
+        return get_log_put() if get_log_put is not None else None
 
     def browser(request: Request) -> str | None:
         b = request.cookies.get(COOKIE, "")
@@ -624,6 +645,7 @@ def build_router(
                 yield _sse(u)
             # Наши функции, которых пока нет в компонентах v2: интерфейс незнакомые события пропускает (#52 п. 3).
             pp = passport.build(reply.trace, question=req.message, notes=reply.notes, level=req.level)
+            passport.write(pp, time.time(), put=log_put())  # журнал стенда (#27), как у /api/chat
             yield _sse({"type": "passport", **pp})
             spoken = speech_for(reply.text, conv.sources)
             yield _sse(
@@ -686,8 +708,6 @@ def build_router(
         pending = data["pending"]
         if pending["warning"] and not decision.warning_acknowledged:
             raise HTTPException(409, "Результат предварительный — отметьте, что поняли это.")
-        if decision.urgency and decision.urgency != pending["payload"]["urgency"]:
-            raise HTTPException(409, "Приоритет задаёт правило кода (D-6) — отправьте с предложенным.")
         ag = get_agent()
         conv = conv_state.load(data["state"], get_fleet())
         if conv.draft is None or conv.draft.fingerprint != pending_id:
@@ -700,12 +720,19 @@ def build_router(
             parts = body["spare_parts"] if not decision.keep_spare_parts else parts
         if not ops:
             raise HTTPException(409, "В заявке должна остаться хотя бы одна работа.")
-        if ops != body["operations"] or parts != body["spare_parts"]:
-            # механик убрал лишнее из показанного состава (только убрать, не добавить): новый отпечаток —
-            # и все проверки confirm_ticket заново (статус, совместимость, ссылки, повтор)
+        proposed = pending["payload"]["urgency"]
+        chosen = decision.urgency or proposed
+        note = urgency_note(proposed, chosen, conv.draft.urgency_reason)
+        if ops != body["operations"] or parts != body["spare_parts"] or chosen != body["urgency"]:
+            # механик убрал лишнее из показанного состава (только убрать, не добавить) или выбрал другой
+            # приоритет (#60): новый отпечаток — и все проверки confirm_ticket заново (статус, совместимость,
+            # ссылки, повтор). Другой приоритет записан в заключении: в ТОиР видно, что выбрал механик.
             from service.agent import TicketDraft, fingerprint
 
-            new_body = TicketRequest.model_validate({**body, "operations": ops, "spare_parts": parts})
+            conclusion = body["conclusion"] if chosen == proposed else f"{body['conclusion']} {note}"
+            new_body = TicketRequest.model_validate(
+                {**body, "operations": ops, "spare_parts": parts, "urgency": chosen, "conclusion": conclusion}
+            )
             conv.draft = TicketDraft(
                 body=new_body, urgency_reason=conv.draft.urgency_reason, fingerprint=fingerprint(new_body)
             )
@@ -714,9 +741,15 @@ def build_router(
         except ServiceError as exc:
             raise HTTPException(exc.http_status, exc.message) from exc
         store = get_store()
-        store.set_urgency_proposed(resp.ticket_id, pending["payload"]["urgency"])
+        store.set_urgency_proposed(resp.ticket_id, proposed)
         row = next(r for r in store.tickets(decision.vehicle_id) if r["ticket_id"] == resp.ticket_id)
         view = ticket_view(row)
+        view["urgency_note"] = note
+        # паспорт ответа, предложившего заявку: строка о приоритете — и копия в журнал стенда (PASSPORT_LOG)
+        turn = next((t for t in reversed(data["transcript"]) if t.get("role") == "assistant"), None)
+        if turn and turn.get("passport"):
+            turn["passport"]["rules"].append(f"Заявка {resp.ticket_id}. {note}")
+            passport.write(turn["passport"], time.time(), put=log_put())
         data["transcript"].append({"role": "ticket", "ticket": view})
         data["pending"] = None
         data["state"] = conv_state.dump(conv)
