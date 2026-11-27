@@ -97,6 +97,15 @@ TICKET_NOT_ASKED = (
     "Механик не просил заявку. Сначала ответь на его вопрос (если спрашивает, можно ли ехать, — первой строкой "
     "«можно» или «нельзя» со ссылкой [R…]); заявку можно предложить одной строкой в конце."
 )
+MISMATCH_STEPS = (
+    "Что сделать: проверка назвала неисправность узла, которого у этого двигателя нет, — повторите проверку; если "
+    "признаки остаются, проведите дефектовку узла, который слышен. Заявка по этой проверке не оформляется."
+)
+MISMATCH_REPEAT = re.compile(r"повтор\w*\s+(?:акустическ\w+\s+)?(?:проверк|запис)", re.I)
+CHECK_FAILED_NO_SEARCH = (
+    "Запись не годится для выводов (сбой проверки): руководство по ней не открываем, заявки нет. "
+    "Скажите механику повторить запись: прогреть двигатель, микрофон у двигателя, без постороннего шума."
+)
 SILENT_NOTE = "В руководстве этого двигателя нет порядка работ по этому узлу — нужна дефектовка."
 
 log = logging.getLogger(__name__)
@@ -112,7 +121,8 @@ SYSTEM_PROMPT = """Ты — «Цифровой механик», помощни�
 Если нужного нет — напиши «В руководстве этого двигателя нет данных об этом» и предложи конкретный шаг: дефектовку \
 узла или ближайший раздел руководства со ссылкой [R…]. Пиши безлично: не «не нашёл», «не делаю», а «в руководстве \
 нет», «выводов по записи нет».
-4. Статус normal — заявка не нужна. Статус check_failed — никаких выводов о двигателе, попроси повторить запись. \
+4. Статус normal — заявка не нужна. Статус check_failed — никаких выводов о двигателе, руководство не ищи \
+(search_manual не вызывай), попроси повторить запись. \
 Если ticket_possible = false — заявку не предлагай и не оформляй. Если compatible = false — такого узла на этом \
 двигателе нет: это ошибка акустической проверки, ремонт по ней не нужен; назови оба шага — повторить проверку и, если \
 признаки остаются, дефектовку узла.
@@ -452,9 +462,20 @@ _UNIT_AFTER = re.compile(
 )
 _MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября",
            "декабря")  # fmt: skip
-_MAKE_NAME = re.compile(r"\b(?:ЯМЗ|ЗМЗ|МАЗ|КамАЗ|ГАЗ|УАЗ)[\s‑–-]*\d[\d.]*(?:[А-ЯA-Z]\d*)*", re.I)
+# обозначение двигателя или машины целиком, с исполнением: «ЯМЗ-236М2», «ЯМЗ-53642-20», «ЗМЗ-40904.10»
+_MAKE_NAME = re.compile(r"\b(?:ЯМЗ|ЗМЗ|МАЗ|КамАЗ|ГАЗ|УАЗ)[\s‑–-]*\d[\d.]*(?:[А-ЯA-Z]\d*)*(?:-\d{1,3}(?![\d,]))?", re.I)
 _FAULT_CODE = re.compile(r"\bF\d{2}\b")
 _PAGE_LABEL = re.compile(r"\b(?:стр\.?|страниц[аеыу]?)\s*(\d+)", re.I)
+# Номер рисунка, таблицы, раздела, пункта, позиции — ссылка внутри руководства, а не величина (как в app/verify.py
+# Никиты): «по рис. 48», «табл. 10», «п. 5.2.9», «поз. 5». Eval 27.11: шаг «схема по рис. 48 [S1]» снимался, потому
+# что рисунок — на соседней странице.
+_DOC_LABEL = re.compile(
+    r"\b(?:рис\.?|рисун\w*|табл\.?|таблиц\w*|п\.|пп\.|пункт\w*|разд\.?|раздел\w*|поз\.?|позици\w*|гл\.|глав\w*)"
+    r"\s*№?\s*\d+(?:\.\d+)*(?!,\d|\d)"
+    # перечень номеров: «поз. 11 и 12», «поз. 1–10», «п. 3, 4» — если за номером не стоит единица
+    r"(?:\s*(?:,|и|–|-|…)\s*\d+(?:\.\d+)*(?!,\d|\d)(?!\s*(?:Н|н|мм|кг|°|%|кПа|МПа|об|мин|л\b|В\b|ч\b)))*",
+    re.I,
+)
 
 
 # Пометки на месте снятого утверждения — как их читает интерфейс v2 (`web/src/copy.ts`: thread.withdrawn,
@@ -544,10 +565,10 @@ class NumberContext:
     percent: frozenset[str]
 
     def needs_source(self, text: str, pages: Collection[int] = ()) -> set[str]:
-        t = _REF_BARE.sub(" ", _REF.sub(" ", text))
+        t = _MAKE_NAME.sub(" ", _REF_BARE.sub(" ", _REF.sub(" ", text)))  # обозначение целиком — до частей (ЯМЗ-536)
         for label in self.labels:
             t = re.sub(re.escape(label), " ", t, flags=re.I)
-        t = _FAULT_CODE.sub(" ", _MAKE_NAME.sub(" ", t))
+        t = _DOC_LABEL.sub(" ", _FAULT_CODE.sub(" ", t))
         t = _PAGE_LABEL.sub(lambda m: " " if int(m.group(1)) in pages else m.group(0), t)
         for pat in self.dates:
             t = pat.sub(lambda m: m.group(0) if _UNIT_AFTER.match(m.string, m.end()) else " ", t)
@@ -1212,6 +1233,7 @@ class Agent:
         final = plain_words(final, conv.card.fault_title if conv.card else None)  # без служебных слов и кодов
         final = mark_risk(section_heads(final))  # заголовки — строкой; последствие без страницы — с пометкой
         final, bans = unsourced_bans(final, conv.card.urgency if conv.card else None)  # запрет — только со страницей
+        final = self._mismatch_steps(conv, final)  # узла у двигателя нет — оба пути: повторить проверку и дефектовка
         if bans:
             notes.append("Запрет эксплуатации без страницы руководства заменён рекомендацией по срочности.")
         final, cited = self._complete_refusal(conv, question, final, cited)
@@ -1419,6 +1441,17 @@ class Agent:
         followup = {"label": f"Проверка по «{title}»",
                     "question": f"Что проверить по неисправности {card.fault_code} «{title}»?"}  # fmt: skip
         return f"{text.rstrip()}\n\n{line}", followup
+
+    def _mismatch_steps(self, conv: Conversation, text: str) -> str:
+        """Проверка назвала узел, которого у двигателя нет (код несовместим): в ответе — оба пути, повторить проверку и
+        дефектовка (ответ организаторов 27.11: конкретный шаг; golden mismatch-*: на настойчивый вопрос модель
+        давала посторонний порядок работ без них)."""
+        card = conv.card
+        if card is None or card.compatible or card.status != "anomaly":
+            return text
+        if MISMATCH_REPEAT.search(text) and "дефектовк" in text.lower():
+            return text
+        return f"{text.rstrip()}\n\n{MISMATCH_STEPS}"
 
     def _card_question(self, conv: Conversation, question: str) -> bool:
         """Вопрос о неисправности из карточки при аномалии совместимого кода — ответ разделами (`CARD_FORMAT`)."""
@@ -1758,6 +1791,10 @@ class Agent:
                 return self._get_diagnosis(conv, args), True
             if name == "vehicle_history":
                 return self._vehicle_history(conv, args), True
+            if name in ("search_manual", "read_pages") and conv.card is not None and conv.card.status == "check_failed":
+                # сбой записи: выводов о двигателе нет — и руководство не открываем (sweep 27.11: поиск на «Создать
+                # заявку» в 3 из 5 нитей сбоя записи)
+                return {"refused": CHECK_FAILED_NO_SEARCH}, False
             if name == "search_manual":
                 return self._search_manual(conv, args), True
             if name == "read_pages" and search_engine() == "nikita":
