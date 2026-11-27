@@ -26,7 +26,16 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from service import absent_parts, clean_refusal, contradictions, glossary, language, other_engine, row_check
+from service import (
+    absent_parts,
+    clean_refusal,
+    contradictions,
+    glossary,
+    language,
+    other_engine,
+    parts_tools,
+    row_check,
+)
 from service.clients import (
     Diagnosis,
     MLClient,
@@ -82,6 +91,7 @@ FINAL_NOTE = (
     "[Код сервиса: шаги поиска кончились. Ответь сейчас по уже найденным фрагментам, без новых вызовов "
     "инструментов; чего в них нет — так и скажи.]"
 )
+_MODEL_NEED = re.compile(r"^\s*\**Понадобится\**\s*:[^\n]*\n?", re.I | re.M)  # строка модели — заменит реестр
 NO_TIME = "Не успел собрать ответ. Переформулируйте вопрос короче."
 
 SEARCH_PLAN_PROMPT = """Ты готовишь поиск по руководству по эксплуатации и ремонту двигателя. Вопрос механика может \
@@ -290,6 +300,20 @@ TOOLS: list[ToolSpec] = [
                 "spare_parts": {"type": "array", "items": {"type": "string"}},
             },
             "required": ["conclusion"],
+        },
+    ),
+    ToolSpec(
+        "find_parts_tools",
+        "Запчасти (с обозначениями, как в руководстве) и инструмент (с размером: «щуп 0,25 мм», «ключ S=13», "
+        "приспособление с обозначением) из реестра руководств двигателя этой машины — по узлу или операции. "
+        "Возвращает записи со ссылками R…. Для вопросов «какой инструмент», «какие запчасти», «что заменить на новое».",
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Узел или операция словами механика"},
+                "kind": {"type": "string", "enum": ["part", "tool", "both"]},
+            },
+            "required": ["query"],
         },
     ),
     ToolSpec(
@@ -1271,6 +1295,7 @@ class Agent:
         final, bans = unsourced_bans(
             final, conv.card.urgency if conv.card else None, replace=not conv.passport.get("drive_rule")
         )  # запрет — только со страницей
+        final, cited = self._registry_lines(conv, question, final, cited)  # инструмент и запчасти — из реестра
         final, cited = self._absent_head(conv, final, cited)  # «У <двигателя> нет <узла>» — первой строкой
         final = self._mismatch_steps(conv, final)  # узла у двигателя нет — оба пути: повторить проверку и дефектовка
         if bans:
@@ -1911,6 +1936,9 @@ class Agent:
                     return {"refused": TICKET_NOT_ASKED}, False
                 res = self._draft_ticket_or_matrix(conv, args)
                 return res, "refused" not in res
+            if name == "find_parts_tools":
+                res = self._find_parts_tools(conv, args)
+                return res, bool(res.get("found"))
             if name == "fleet_summary":
                 result = self._fleet_summary()
                 conv.fact_numbers |= numbers(json.dumps(result, ensure_ascii=False))
@@ -2267,6 +2295,59 @@ class Agent:
         k, quotes = conv.contradiction
         line = self._escalate(conv, k, quotes)
         return contradictions.ESCALATION.sub(lambda _m: line, text, count=1)
+
+    def _find_parts_tools(self, conv: Conversation, args: dict[str, Any]) -> dict[str, Any]:
+        """Реестр запчастей и инструмента (`parts_tools`): записи двигателя этой машины со ссылками R…."""
+        kind = str(args.get("kind") or "both")
+        kinds = None if kind not in ("part", "tool") else {kind}
+        recs = parts_tools.find(conv.vehicle.engine_model, mask_pii(str(args.get("query") or "")), kinds)
+        found = []
+        for r in recs:
+            src = self._source_for(conv, r.doc, r.page, r.node, r.quote)
+            found.append({"kind": r.kind, "name": r.label(), "ref": src.ref, "page": r.page,
+                          "operation": r.operation[:160], "one_time": r.source == "одноразовая"})  # fmt: skip
+        if not found:
+            return {"found": [], "note": "В реестре руководств этого двигателя записей по запросу нет."}
+        return {"engine": conv.vehicle.engine_model, "found": found}
+
+    def _registry_lines(
+        self, conv: Conversation, question: str, text: str, cited: list[Source]
+    ) -> tuple[str, list[Source]]:
+        """«Какой инструмент / какие запчасти»: строки «Понадобится» и «Запчасти» пишет код из реестра — записи со
+        страниц ответа и по словам вопроса, у каждой ссылка [R…]. Строка «Понадобится» модели заменяется. Нет
+        записей — ответ как есть. Только в русском ответе (названия в реестре — по-русски, как в руководстве)."""
+        kinds = parts_tools.asks(question)
+        if not kinds or (conv.passport.get("answer_lang") or "ru") != "ru":
+            return text, cited
+        card = conv.card
+        query = question
+        if card is not None and card.status == "anomaly" and card.compatible and card.fault_title:
+            query = f"{question} {card.fault_title}"  # кнопка «Какой нужен инструмент» — к неисправности карточки
+        pages = {(s.manual_id, s.pdf_page) for s in cited}
+        recs = parts_tools.find(conv.vehicle.engine_model, query, kinds, pages=pages, limit=6)
+        if not recs:
+            return text, cited
+        lines: list[str] = []
+        for kind, head in (("tool", "Понадобится (по руководству)"), ("part", "Запчасти (по руководству)")):
+            items = []
+            for r in recs:
+                if r.kind != kind:
+                    continue
+                src = self._source_for(conv, r.doc, r.page, r.node, r.quote)
+                if src not in cited:
+                    cited = [*cited, src]
+                once = " — одноразовые, только новые" if r.source == "одноразовая" else ""
+                items.append(f"{r.label()}{once} [{src.ref}]")
+            if items:
+                lines.append(f"**{head}:** " + "; ".join(items) + ".")
+        if not lines:
+            return text, cited
+        conv.passport["registry_lines"] = [r.label() for r in recs]
+        if any(ln.startswith("**Понадобится") for ln in lines):
+            text = _MODEL_NEED.sub("", text)
+        paras = [p for p in text.split("\n\n") if p.strip()]
+        at = 1 if paras else 0
+        return "\n\n".join([*paras[:at], "\n".join(lines), *paras[at:]]).strip(), cited
 
     def _source_for(self, conv: Conversation, manual_id: str, pdf_page: int, section: str, text: str) -> Source:
         """Источник R… для страницы руководства; одна страница — один R, текст дополняется."""
@@ -2681,6 +2762,14 @@ class Agent:
         )
         matrix_ops = (confirmed or {}).get("operations", [])
         tools = list(dict.fromkeys(t for o in matrix_ops if o["text"] in operations for t in o.get("tools", [])))
+        # детали и инструмент к работам — из реестра руководств: записи со страниц работ этой заявки
+        work_pages = {(c.manual_id, c.pdf_page) for c in cited}
+        reg = [r for r in parts_tools.records(conv.vehicle.engine_model) if (r.doc, r.page) in work_pages]
+        tools = list(dict.fromkeys([*tools, *(r.label() for r in reg if r.kind == "tool")]))[:8]
+        if not body.spare_parts:
+            reg_parts = [f"{r.label()}, стр. {r.page}" for r in reg if r.kind == "part"][:6]
+            if reg_parts:
+                body = body.model_copy(update={"spare_parts": reg_parts})
         conv.draft = TicketDraft(
             body=body, urgency_reason=why, fingerprint=fingerprint(body), tools=tools, op_pages=op_pages
         )
