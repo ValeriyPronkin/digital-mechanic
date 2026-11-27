@@ -166,6 +166,13 @@ export const copy = {
       master: 'Короче: только значение, инструмент и страница',
     },
   },
+  // the compact answer: «Коротко» first, the rest under «Подробнее», one list of pages under it
+  answer: {
+    more: 'Подробнее',
+    less: 'Свернуть',
+    pages: 'Страницы руководства',
+    footnote: (n: number, label: string) => `Сноска ${n}: ${label}`,
+  },
   sections: [
     'Что слышно',
     'Что это может быть',
