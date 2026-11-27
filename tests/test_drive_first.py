@@ -74,5 +74,18 @@ def test_card_only_verdict_gets_manual_page(ml: MLClient, toir: ToirClient) -> N
                        prefetch=False)  # fmt: skip
     reply = ag.ask(ag.start(*Q37), QUESTION)
     first = reply.text.split("\n\n")[0]
-    assert "Ограничения эксплуатации в руководстве — стр. 91 [R" in first
+    assert first.startswith("**Нет, ездить нельзя.** [R")  # запрет модели — со страницей руководства
+    assert "По руководству, стр. 91 [R" in first and "не эксплуатировать" in first  # словами руководства
+    assert "Прямого запрета" not in reply.text
     assert (reply.sources[-1]["pdf_page"], reply.sources[-1]["manual"].startswith("ЗМЗ")) == (91, True)
+
+
+def test_no_verdict_gets_manual_words_not_no_ban_line(ml: MLClient, toir: ToirClient) -> None:
+    """Train 27.11: код писал «Прямого запрета эксплуатации… нет» и тут же ссылался на стр. 91, где «двигатель не
+    эксплуатировать». Есть фраза-запрет по теме вопроса на странице ограничений — первой строкой она, со страницей."""
+    ag, _ = make_agent([say("Цепь может быть вытянута.\n\n1. Прослушать натяжитель.")], ml, toir, LimitPages(),
+                       prefetch=False)  # fmt: skip
+    reply = ag.ask(ag.start(*Q37), QUESTION)
+    first = reply.text.split("\n\n")[0]
+    assert first.startswith("**По руководству, стр. 91 [R") and "не эксплуатировать" in first
+    assert "Прямого запрета" not in reply.text

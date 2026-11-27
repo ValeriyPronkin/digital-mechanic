@@ -799,6 +799,16 @@ _BAN = re.compile(
 )
 _TRANSPORT = re.compile(r"буксир|эвакуатор|тягач|жёсткой сцепк|жесткой сцепк", re.I)
 NO_BAN_LINE = "Прямого запрета эксплуатации в найденных страницах руководства нет."
+_NO_BAN_CLAIM = re.compile(r"[^.\n]*прям\w* запрет\w*[^.\n]{0,80}\bнет\b[^.\n]*\.\s*", re.I)
+_RULE_SENT = re.compile(r"(?<=[.!?])\s+")
+_LIMIT_WORDS = re.compile(
+    r"не эксплуатир|запрещ|не допуска|допускается|немедленно|заглушить|остановить двигатель|не ниже|не менее", re.I
+)
+_BAN_RULE = re.compile(r"не эксплуатир|запрещ|не допуска|немедленно|заглушить|остановить двигатель", re.I)
+_OPERATION_RULE = re.compile(r"эксплуатац|допускается работ", re.I)  # предел для работы, а не норма проверки
+_LEMMA_ALIAS = {"стучать": "стук", "стучит": "стук", "шуметь": "шум", "низкий": "давление"}
+_DRIVE_STOP = {"можно", "пока", "ездить", "ехать", "машина", "двигатель", "база", "свой", "ход", "перегнать",
+               "дальше", "ещё", "еще", "доехать", "работа", "время"}  # fmt: skip
 RECOMMEND = {
     "high": "Рекомендация по проверке: дефектовка до выпуска в рейс.",
     "medium": "Рекомендация по проверке: дефектовка в ближайшее время.",
@@ -807,7 +817,7 @@ RECOMMEND = {
 _SAFETY_EMPTY = re.compile(r"^\s*\**Безопасность\**\s*:\s*(?:в руководстве|во фрагментах)\s+не указан\w*\.?\s*$", re.I)
 
 
-def unsourced_bans(text: str, urgency: str | None) -> tuple[str, int]:
+def unsourced_bans(text: str, urgency: str | None, replace: bool = True) -> tuple[str, int]:
     """Фразы-запреты и способы перевозки без ссылки на руководство — убрать; на месте первого запрета — что прямого
     запрета нет и рекомендация по срочности. Пустая строка «Безопасность: в руководстве не указано» — тоже убрать:
     строка безопасности — только когда руководство что-то о ней говорит. → (текст, сколько фраз снято)."""
@@ -823,7 +833,7 @@ def unsourced_bans(text: str, urgency: str | None) -> tuple[str, int]:
         for part in _SENTENCE.split(line[len(prefix) :]):
             if (_BAN.search(part) or _TRANSPORT.search(part)) and not _REF.search(part):
                 removed += 1
-                if _BAN.search(part) and not replaced:
+                if _BAN.search(part) and not replaced and replace:  # запрет руководства уже в ответе — без «нет»
                     kept.append(NO_BAN_LINE + (f" {RECOMMEND[urgency]}" if urgency in RECOMMEND else ""))
                     replaced = True
                 continue
@@ -1252,7 +1262,9 @@ class Agent:
         final, cited = self._drive_verdict(conv, question, final, cited)
         final = plain_words(final, conv.card.fault_title if conv.card else None)  # без служебных слов и кодов
         final = mark_risk(section_heads(final))  # заголовки — строкой; последствие без страницы — с пометкой
-        final, bans = unsourced_bans(final, conv.card.urgency if conv.card else None)  # запрет — только со страницей
+        final, bans = unsourced_bans(
+            final, conv.card.urgency if conv.card else None, replace=not conv.passport.get("drive_rule")
+        )  # запрет — только со страницей
         final = self._mismatch_steps(conv, final)  # узла у двигателя нет — оба пути: повторить проверку и дефектовка
         if bans:
             notes.append("Запрет эксплуатации без страницы руководства заменён рекомендацией по срочности.")
@@ -2435,9 +2447,16 @@ class Agent:
         has_verdict, has_ref = bool(_VERDICT.search(first)), bool(_REF.search(first))
         if has_verdict and has_ref:
             return text, cited
-        limit_src = self._limit_source(conv, question)
+        rule = self._limit_rule(conv, question)
+        limit_src = rule[0] if rule else self._limit_source(conv, question)
         tail = ""
-        if limit_src is not None:
+        if rule is not None:  # запрет или предел словами руководства со страницей (ответ организаторов 26.11)
+            tail = f" По руководству, стр. {rule[0].pdf_page} [{rule[0].ref}]: «{rule[1]}»"
+            text = _NO_BAN_CLAIM.sub("", text)  # «прямого запрета нет» рядом с запретом руководства — противоречие
+            paras = text.split("\n\n")
+            k = next((i for i, p in enumerate(paras) if p.strip()), 0)
+            first = paras[k] if paras else ""
+        elif limit_src is not None:
             tail = f" Ограничения эксплуатации в руководстве — стр. {limit_src.pdf_page} [{limit_src.ref}]."
         if limit_src is not None and limit_src not in cited:
             cited = [*cited, limit_src]
@@ -2446,6 +2465,13 @@ class Agent:
                 return text, cited
             # страница пределов — отдельной фразой: запрет модели без своей ссылки она не «подтверждает»
             # (`unsourced_bans` заменит его рекомендацией; ответ организаторов 26.11)
+            if rule is not None:  # запрет модели подтверждён фразой руководства — ссылка на её страницу
+                ban = _BAN.search(first)
+                if ban:
+                    end = re.compile(r"[.!?](?:\*\*)?").search(first, ban.end())
+                    at = end.end() if end else len(first)
+                    first = f"{first[:at]} [{rule[0].ref}]{first[at:]}"
+                conv.passport["drive_rule"] = rule[0].ref
             paras[k] = first.rstrip() + tail
             conv.passport["drive_page_by_code"] = True
             return "\n\n".join(paras), cited
@@ -2455,12 +2481,53 @@ class Agent:
             line = "**Решить по проверке нельзя:** запись не годится — повторите проверку; до неё следите за приборами."
         elif card.status == "normal":
             line = "**По проверке — можно:** отклонений не найдено."
+        elif rule is not None:  # первой строкой — слова руководства со страницей, затем рекомендация по проверке
+            line = f"**По руководству, стр. {rule[0].pdf_page} [{rule[0].ref}]:** «{rule[1]}»"
+            line += " " + RECOMMEND.get(card.urgency or "", RECOMMEND["medium"])
+            tail = ""
+            conv.passport["drive_rule"] = rule[0].ref
         elif card.urgency == "high":
             line = f"**{NO_BAN_LINE}** Срочность по проверке высокая: {RECOMMEND['high'].split(': ', 1)[1]}"
         else:
             line = f"**{NO_BAN_LINE}** По проверке нужна дефектовка в ближайшее время."
         conv.passport["drive_verdict_by_code"] = True
         return f"{line}{tail}\n\n{text}".strip(), cited
+
+    def _limit_rule(self, conv: Conversation, question: str) -> tuple[Source, str] | None:
+        """Фраза-запрет или предел со страниц ограничений эксплуатации этого двигателя (реестр Никиты), где есть слово
+        вопроса или неисправности из карточки: «…стуков… двигатель не эксплуатировать» (ЗМЗ-409, стр. 91), «…давлении
+        масла… не ниже 300 кПа» (ЯМЗ-236, стр. 19). Нет такой — None (тогда строка по срочности)."""
+        page_text = getattr(self.searcher, "page_text", None)
+        if page_text is None:
+            return None
+        engine = canonical_engine(conv.vehicle.engine_model) or conv.vehicle.engine_model
+        title = conv.card.fault_title if conv.card is not None and conv.card.status == "anomaly" else ""
+        want = {_LEMMA_ALIAS.get(t, t) for t in tokenize(f"{question} {title or ''}")} - _DRIVE_STOP
+        best: tuple[int, int, int, Any, str] | None = None
+        for n, limit in enumerate(nk_coverage.limits_for(engine)):
+            full = str(page_text(limit.manual, limit.page) or "")
+            sents = _RULE_SENT.split(re.sub(r"\s+", " ", full))
+            for i, sent in enumerate(sents):
+                if not _LIMIT_WORDS.search(sent) or not 30 <= len(sent) <= 320:
+                    continue
+                around = f"{sents[i - 1] if i else ''} {sent}"  # о чём фраза — бывает сказано в предыдущей
+                hit = len(want & {_LEMMA_ALIAS.get(t, t) for t in tokenize(around)})
+                if hit:
+                    tier = 2 if _BAN_RULE.search(sent) else 1 if _OPERATION_RULE.search(sent) else 0
+                    key = (hit, tier, -n)
+                    if best is None or key > best[:3]:
+                        best = (*key, limit, sent.strip())
+        if best is None:
+            return None
+        limit, sent = best[3], re.sub(r"^\d+\.\s+", "", best[4])
+        src = next((s for s in conv.sources.values() if s.manual_id == limit.manual and s.pdf_page == limit.page), None)
+        if src is None:
+            doc = DOCS_BY_ID.get(limit.manual)
+            name = doc.designation if doc else limit.manual
+            src = Source(ref=next_ref(conv), manual_id=limit.manual, manual=name, pdf_page=limit.page,
+                         section="", text=str(page_text(limit.manual, limit.page) or "")[:6000])  # fmt: skip
+            conv.sources[src.ref] = src
+        return src, sent
 
     def _limit_source(self, conv: Conversation, question: str) -> Source | None:
         """Страница ограничений эксплуатации руководства этого двигателя — источником разговора."""
