@@ -41,6 +41,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LIMIT_S = 175.0  # ≤ 2:55 — запас до 3:00
 SPEED_MIN, SPEED_MAX = 8.0, 10.0  # Валерий 27.11: ожидание — ×8–10, без пустоты на экране
 WIDTH, HEIGHT = 1280, 800
+STOP_AFTER_S = 9.0  # «Прослушать»: через столько секунд механик жмёт «Стоп» (реальная кнопка продукта)
 GAP_S = 0.9  # сцена = фраза диктора + 0,9 с (Валерий 27.11: без мёртвых пауз)
 BEAT_MAX_S = 1.2  # пауза внутри сцены — на анимацию, не на чтение: читать даёт фраза диктора
 DEMO_CHECKS = [("B418HK98", "S-0009"), ("H142OX78", "S-0113"), ("M260EH47", "S-0079")]
@@ -119,6 +120,7 @@ class Take:
     waits: list[tuple[float, float]] = field(default_factory=list)  # секунды записи: ожидание ответа модели
     scenes: list[tuple[float, str]] = field(default_factory=list)  # начало сцены (секунды записи) и ключ
     product: list[tuple[float, Path]] = field(default_factory=list)  # озвучка продукта: момент нажатия и файл
+    cuts: dict[int, float] = field(default_factory=dict)  # озвучку остановили «Стоп»: сколько секунд она звучала
     skipped: list[str] = field(default_factory=list)
 
     def now(self) -> float:
@@ -251,7 +253,17 @@ class Director:
         path = self.out / "product-speech.mp3"
         path.write_bytes(resp.body())
         self.take.product.append((clicked, path))
-        self.page.wait_for_timeout(int((duration_of(path) + 0.6) * 1000))
+        full = duration_of(path)
+        play_for = min(full, STOP_AFTER_S)
+        self.page.wait_for_timeout(int(max(0.0, clicked + play_for - self.take.now()) * 1000))
+        stop = self.page.get_by_role("button", name=re.compile("Стоп|Остановить озвучку"))
+        if play_for < full and stop.count() and stop.last.is_visible():
+            stop.last.click()  # механик дослушал главное и остановил — звук продукта в записи обрывается здесь же
+            self.take.cuts[len(self.take.product) - 1] = self.take.now() - clicked
+        elif play_for < full:
+            self.take.skipped.append("«Стоп» в озвучке (кнопки нет — дослушали до конца)")
+            self.page.wait_for_timeout(int((full - play_for) * 1000))
+        self.page.wait_for_timeout(600)
 
 
 def shoot(d: Director) -> None:
@@ -528,7 +540,13 @@ def render(src: Path, dst: Path, pieces: list[tuple[float, float, float]]) -> No
     subprocess.run(cmd, check=True)  # noqa: S603 — ffmpeg с нашими аргументами
 
 
-def mix(video: Path, dst: Path, voice: list[tuple[float, Path]], product: list[tuple[float, Path]]) -> None:
+def mix(
+    video: Path,
+    dst: Path,
+    voice: list[tuple[float, Path]],
+    product: list[tuple[float, Path]],
+    cuts: dict[int, float] | None = None,
+) -> None:
     """Звук поверх готового видео (видео копируется как есть): диктор и озвучка продукта (громче), каждая — со своего
     таймкода; нормализация громкости (loudnorm), AAC."""
     inputs, chains, labels = [], [], []
@@ -536,7 +554,9 @@ def mix(video: Path, dst: Path, voice: list[tuple[float, Path]], product: list[t
         ms = max(0, int(t * 1000))
         gain = 1.0 if i <= len(voice) else 1.8
         inputs += ["-i", str(path)]
-        chains.append(f"[{i}:a]aresample=48000,adelay=delays={ms}:all=1,volume={gain}[a{i}]")
+        cut = (cuts or {}).get(i - 1 - len(voice)) if i > len(voice) else None
+        trim = f"atrim=0:{cut:.2f},afade=t=out:st={max(0.0, cut - 0.25):.2f}:d=0.25," if cut else ""
+        chains.append(f"[{i}:a]{trim}aresample=48000,adelay=delays={ms}:all=1,volume={gain}[a{i}]")
         labels.append(f"[a{i}]")
     graph = ";".join(chains) + (  # лёгкая компрессия, −16 LUFS, истинный пик ≤ −1,5 dBTP — без клиппинга
         f";{''.join(labels)}amix=inputs={len(labels)}:normalize=0:dropout_transition=0,"
@@ -615,7 +635,7 @@ def main(argv: list[str] | None = None) -> int:
     voice_track = [(remap(t, pieces), voice_files[k]) for t, k in take.scenes if k in voice_files]
     product_track = [(remap(t, pieces), p) for t, p in take.product]
     if voice_track or product_track:
-        mix(silent, mp4, voice_track, product_track)
+        mix(silent, mp4, voice_track, product_track, take.cuts)
     else:
         shutil.copyfile(silent, mp4)
     final = duration_of(mp4)
@@ -633,7 +653,12 @@ def main(argv: list[str] | None = None) -> int:
         "| Время | Сцена | Диктор |",
         "|---|---|---|",
         *[f"| {clock(remap(t, pieces))} | {k} | {caption(NARRATION.get(k, ''))} |" for t, k in take.scenes],
-        *[f"| {clock(remap(t, pieces))} | ▶ озвучка продукта | (голос продукта) |" for t, _ in take.product],
+        *[
+            f"| {clock(remap(t, pieces))} | ▶ озвучка продукта | (голос продукта"
+            + (f", «Стоп» через {take.cuts[i]:.1f} с" if i in take.cuts else "")
+            + ") |"
+            for i, (t, _) in enumerate(take.product)
+        ],
     ]
     blanks = blank_frames(mp4)
     lines += ["", f"Пустые кадры (однотонные, проверка 2 кадра/с): {', '.join(clock(t) for t in blanks) or 'нет'}"]
