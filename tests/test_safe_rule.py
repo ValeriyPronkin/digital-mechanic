@@ -97,13 +97,14 @@ def test_known_items_have_a_rule_and_no_hand_off() -> None:
     for k in known():
         text = block(k, list(k.quotes), {}, page_text)
         last = text.split("\n")[-1]
-        assert last.startswith("Вывод:" if k.conclusion else RULE), k.id
+        assert last.startswith(RULE), k.id
         assert not re.search(r"уточните|специалист|производител|главн\w* механик", text, re.I), k.id
 
 
 def test_customer_rule_is_kept() -> None:
     k = next(k for k in known() if k.conclusion)
-    assert block(k, list(k.quotes), {}, page_text).split("\n")[-1] == f"Вывод: {k.conclusion} Основание — {k.basis}."
+    last = block(k, list(k.quotes), {}, page_text).split("\n")[-1]
+    assert last == f"{RULE} {k.conclusion}" and "заказчика" not in last and "демо" not in last
 
 
 def test_model_block_gets_the_derived_rule_instead_of_its_own_advice() -> None:

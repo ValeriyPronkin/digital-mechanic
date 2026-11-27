@@ -42,7 +42,8 @@ def test_check_dates_and_history_sessions_survive(ml: MLClient, toir: ToirClient
     day = f"{s.checked_at[8:10]}.{s.checked_at[5:7]}.{s.checked_at[:4]}"
     line = f"Проверка {s.session_id} ({day}): давление масла ниже нормы [R1]. До неё — {other.session_id}."
     text, notes = _answer(ml, toir, line)
-    assert day in text and other.session_id in text
+    assert day in text and "давление масла ниже нормы [R1]" in text  # guard фразу не снял
+    assert other.session_id not in text  # номер проверки — служебный, механику не показывается
     assert CUT_NOTE not in notes
 
 

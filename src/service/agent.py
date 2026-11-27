@@ -582,6 +582,9 @@ _INTERNAL_PAREN = re.compile(r"\s*\([^()\n]*\b(?:матриц\w*|silent|confirme
 _MATRIX = re.compile(r"\b(?:в|по|из|на)\s+матриц\w*|\bматриц\w*|\bsilent\b|\bconfirmed\b", re.I)
 _BARE_REFS = re.compile(r"(?:\s*(?:из\s+)?ссыл\w*)?\s*(?<!\[)\b[RS]\d+\b(?!\])(?:\s*,\s*(?<!\[)\b[RS]\d+\b(?!\]))*")
 _CODE = re.compile(r"(?:\bкод(?:ом|а|у)?\s+)?\bF\d{2}\b(\s*[«\"])?")
+_SESSION = re.compile(r"\s*\(?(?:№\s*)?\bS-\d{3,5}\b\)?")  # номер проверки — служебный, механик его не видит
+_EMPTY_SOURCE = re.compile(r"^\s*\**Источник\w*\**\s*:\s*\**[.\s]*$", re.M | re.I)
+_NOT_FOUND = re.compile(r"\b(?:я\s+)?не\s+наш[её]л\b", re.I)
 
 
 # Повелительное на «ты» → на «вы» (стенд 27.11: «Ничего не ремонтируй»): частые глаголы механика.
@@ -607,6 +610,10 @@ def plain_words(text: str, fault_title: str | None) -> str:
     text = _BARE_REFS.sub("", text)
     text = _CODE.sub(lambda m: m.group(1) or (f"«{fault_title}»" if fault_title else ""), text)
     text = _THOU.sub(_polite, text)
+    text = _SESSION.sub("", text)
+    text = _EMPTY_SOURCE.sub("", text)
+    text = _NOT_FOUND.sub(lambda m: "Не найдено" if m.group()[0].isupper() else "не найдено", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
     text = re.sub(r"[ \t]{2,}", " ", text)
     return re.sub(r"[ \t]+([.,;:])", r"\1", text)
 
@@ -1575,7 +1582,10 @@ class Agent:
         """Известное противоречие (по вопросу или по ответу модели) — блок кода сразу после прямого ответа, а строки
         модели, выбравшие одну формулировку, — вывод заказчика. Иначе — блоки модели сверяются с цитатами страниц."""
         if conv.contradiction is None:
+            # блок — только под ответом на вопрос о спорной теме (зазоры), а не под диагнозом или «можно ли ехать»
             k = contradictions.match_answer(conv.vehicle.engine_model, text)
+            if k is not None and not k.topic.search(_last_question(conv)):
+                k = None
             if k is not None:
                 quotes = contradictions.verified_quotes(k, getattr(self.searcher, "page_text", None))
                 if len(quotes) >= 2:

@@ -286,7 +286,7 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
         item_lines.append(lines[end])
         end += 1
     last = lines[end] if end < len(lines) else ""
-    if not last.startswith(("Вывод:", contradictions.RULE)) or len(item_lines) != len(quotes):
+    if not last.startswith(contradictions.RULE) or len(item_lines) != len(quotes):
         return None, text
     pages = {(q.doc, q.page) for q in quotes}
     refs = {(s.manual_id, s.pdf_page): s.ref for s in conv.sources.values() if (s.manual_id, s.pdf_page) in pages}
@@ -304,8 +304,7 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
                 "note": tail.strip().strip("()").strip() or None,
             }
         )
-    # правило заказчика или безопасное правило из страниц — как в тексте (`contradictions.block`)
-    conclusion = last.removeprefix("Вывод:").strip() if k.conclusion else last
+    conclusion = last  # безопасное правило — как в тексте (`contradictions.block`)
     rest_lines = lines[:start] + lines[end + 1 :]
     rest = "\n\n".join(p for p in (part.strip() for part in "\n".join(rest_lines).split("\n\n")) if p)
     block = {

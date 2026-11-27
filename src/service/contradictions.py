@@ -155,10 +155,9 @@ def block(k: Known, quotes: list[Quote], refs: dict[tuple[str, int], str], page_
     for q in quotes:
         ref = refs.get((q.doc, q.page))
         lines.append(f"- {q.label()}: «{q.quote}»" + (f" [{ref}]" if ref else ""))
-    if k.conclusion:  # правило заказчика (зазоры ЯМЗ-236) — как есть
-        lines.append(f"Вывод: {k.conclusion} Основание — {k.basis}.")
-    else:  # правила заказчика нет — правило выводится из самих страниц
-        lines.append(f"{RULE} {safe_rule(k, quotes, page_text)}")
+    # правило из данных (зазоры ЯМЗ-236: «на холодном» удовлетворяет обеим формулировкам) или выведенное из страниц;
+    # основание из данных механику не показывается (своего правила у заказчика нет — ответ организаторов 27.11)
+    lines.append(f"{RULE} {k.conclusion or safe_rule(k, quotes, page_text)}")
     return "\n".join(lines)
 
 

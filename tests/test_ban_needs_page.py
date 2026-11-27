@@ -82,3 +82,11 @@ def test_imperative_is_polite() -> None:
         "Ничего не ремонтируйте. Повторите проверку и убедитесь в записи."
     )
     assert plain_words("Проверьте зазор [R1].", None) == "Проверьте зазор [R1]."
+
+
+def test_session_id_empty_source_and_first_person_not_shown() -> None:
+    """Демо B418HK98 / S-0009: «S-0009», «F01», пустой «Источник:.», «я не нашёл» — служебное и первое лицо."""
+    from service.agent import plain_words
+
+    text = plain_words("Проверка S-0009 показала F01.\nЯ не нашёл в руководстве нормы.\n\nИсточник:.", "Клапаны")
+    assert text == "Проверка показала «Клапаны».\nНе найдено в руководстве нормы."

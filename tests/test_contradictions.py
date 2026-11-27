@@ -91,7 +91,8 @@ def test_safe_line_once_outside_list(ml: MLClient, toir: ToirClient) -> None:
 
 def test_model_own_conclusion_dropped_one_conclusion_left(ml: MLClient, toir: ToirClient) -> None:
     reply, _ = _ask(ml, toir, "Нет, дайте остыть.\n\nВывод: можно через 15 минут.\n\n1. Снять крышки [R1].")
-    assert reply.text.count("Вывод:") == 1 and "можно через 15 минут" not in reply.text
+    assert "Вывод:" not in reply.text and reply.text.count("Безопасное правило:") == 1
+    assert "можно через 15 минут" not in reply.text
     assert "\n\n\n" not in reply.text
 
 
