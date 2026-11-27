@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from service import (
@@ -575,3 +575,19 @@ app.include_router(
         get_parts=lambda: parts_supplier(),
     )
 )
+
+
+@app.get("/stream-probe", include_in_schema=False)
+def stream_probe(pad: int = 0, n: int = 4, gap: float = 1.0, kind: str = "sse") -> StreamingResponse:
+    """Опыт (не сливать): отдаёт ли платформа поток по частям. pad — байт комментария в начале."""
+
+    def gen() -> Any:
+        if pad:
+            yield ": " + "x" * min(pad, 1_000_000) + "\n\n"
+        for i in range(min(n, 10)):
+            yield f"data: {i} {time.time():.3f}\n\n"
+            time.sleep(min(gap, 5.0))
+        yield "data: end\n\n"
+
+    media = "text/event-stream" if kind == "sse" else "application/octet-stream"
+    return StreamingResponse(gen(), media_type=media, headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
