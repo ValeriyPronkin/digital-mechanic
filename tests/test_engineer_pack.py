@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -65,3 +66,38 @@ def test_render_groups_escapes_and_explains_refusal() -> None:
     assert "<script>x</script>" not in page and "&lt;script&gt;" in page
     assert "Посторонний текст (отложен, не выполнен)" in page
     assert 'id="g-noisy"' in page and 'id="g-check_failed"' in page and "Заявки нет:" in page
+
+
+class _Flaky:
+    """Стенд, который отвечает 502 / рвёт связь на заданные запросы, остальное — настоящему приложению."""
+
+    def __init__(self, app: TestClient, fail: dict[str, int]) -> None:
+        self.app, self.fail = app, fail
+
+    def _hit(self, url: str, body: Any) -> Any:
+        key = (body or {}).get("session_id") if url.endswith("/api/diagnose") else None
+        left = self.fail.get(key or "", 0)
+        if left:
+            self.fail[str(key)] = left - 1
+            if left % 2:
+                raise httpx.ConnectError("EOF occurred in violation of protocol")
+            return httpx.Response(502)
+        return None
+
+    def post(self, url: str, json: Any = None) -> Any:
+        return self._hit(url, json) or self.app.post(url, json=json)
+
+    def get(self, url: str) -> Any:
+        return self.app.get(url)
+
+
+def test_collect_retries_and_marks_what_the_stand_did_not_give(stand: TestClient) -> None:
+    first = collect(stand, "", limit=2, pause=0)
+    a, b = (r["session"]["session_id"] for r in first)
+    skipped: list[dict[str, Any]] = []
+    flaky = _Flaky(stand, {a: 2, b: 99})  # a: обрыв и 502, затем ответ; b: не отвечает никогда
+    rows = collect(flaky, "", pause=0, only={a, b}, skipped=skipped, backoff=0)  # type: ignore[arg-type]
+    assert [r["session"]["session_id"] for r in rows] == [a]
+    assert [k["session"]["session_id"] for k in skipped] == [b] and "после 6 попыток" in skipped[0]["reason"]
+    page = render(rows, "https://stand/", datetime.now(), skipped)
+    assert "Не получены со стенда (1)" in page and f"--only {b}" in page
