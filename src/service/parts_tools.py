@@ -169,7 +169,11 @@ def spans(engine: str, text: str, cited: dict[tuple[str, int], str] | None = Non
         if any(_VERB.search(w) or _NOT_NAME.match(w) for w in words):
             continue  # «заменить», «допускается» — не деталь (обрывки разбора)
         pats: list[tuple[re.Pattern[str], bool]] = []
-        if r.code and re.search(r"\d", r.code) and len(r.code) >= 4:
+        key = re.fullmatch(r"S(вн)?\s*=\s*(\d+)", r.code or "", re.I)
+        if key:  # размер ключа «S=6» — при любой длине, вместе со словом «ключ» перед ним («ключ S=6», web-2 27.11)
+            inner = r"\s*вн" if key.group(1) else ""
+            pats.append((re.compile(rf"(?:ключ\w*\s+(?:на\s+)?)?\(?\bS{inner}\s*=\s*{key.group(2)}(?!\d)", re.I), True))
+        elif r.code and re.search(r"\d", r.code) and len(r.code) >= 4:
             pats.append((re.compile(r"(?<![\w.\-])" + re.escape(r.code) + r"(?![\w\-])", re.I), True))
         # запчасть по одному названию — только из двух слов и больше («уплотнительные кольца инжектора»): одно слово
         # («кольцо», «вал») встречается в ответе на каждом шагу и красило бы всё подряд
