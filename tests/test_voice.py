@@ -51,12 +51,27 @@ def wav(seconds: float = 1.0, amplitude: int = 3000, rate: int = 16_000, channel
 # ---------- короткая версия ----------
 
 
-def test_speech_takes_sentence_with_reference_and_page() -> None:
+def test_speech_takes_checked_sentence_without_document_and_page() -> None:
+    """Валерий 28.11: на слух — рекомендация, без «Источник: …, страница N» (страницы — на экране)."""
     answer = "**Наблюдения:** стук клапанов.\n\nЗазор впускных клапанов на холодном двигателе 0,25–0,30 мм [R1]."
     sp = speech_for(answer, SOURCES)
     assert sp.refs == ("R1",)
-    assert "0,25–0,30 мм" in sp.text and "страница 68" in sp.text
-    assert "руководство по эксплуатации ЯМЗ-236М2" in sp.text and "[R1]" not in sp.text
+    assert sp.text == "Зазор впускных клапанов на холодном двигателе 0,25–0,30 мм."
+    for word in ("страниц", "стр.", "Источник", "РЭ", "РК", "[R"):
+        assert word not in sp.text
+
+
+def test_speech_two_practical_sentences_and_no_inline_page_refs() -> None:
+    """Число — затем следующий проверенный шаг; «(РЭ, стр. 68)» внутри предложения на слух не читается."""
+    answer = (
+        "Зазор впускных клапанов 0,25–0,30 мм (РЭ ЯМЗ-236М2, стр. 68) [R1].\n"
+        "Регулировать на холодном двигателе, по порядку работы цилиндров [R1]."
+    )
+    sp = speech_for(answer, SOURCES)
+    assert sp.text == (
+        "Зазор впускных клапанов 0,25–0,30 мм. Регулировать на холодном двигателе, по порядку работы цилиндров."
+    )
+    assert "стр." not in sp.text and "РЭ" not in sp.text and sp.refs == ("R1",)
 
 
 @pytest.mark.parametrize(
@@ -229,7 +244,7 @@ def test_chat_returns_signed_speech(
         "/api/chat", json={"vehicle_id": vid, "session_id": sid, "message": "Какое давление масла?"}
     ).json()
     sp = r["speech"]
-    assert "0,1 МПа" in sp["text"] and "страница 42" in sp["text"]
+    assert "0,1 МПа" in sp["text"] and "страница" not in sp["text"] and "стр." not in sp["text"]
     assert conv_state.verify_text(sp["text"], sp["sig"])
 
 

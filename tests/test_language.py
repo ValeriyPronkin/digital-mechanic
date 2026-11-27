@@ -84,7 +84,7 @@ def _src() -> dict[str, Source]:
 
 def test_speech_in_answer_language() -> None:
     sp = speech_for("Kirish klapanlari tirqishi 0,30–0,40 mm [R1].", _src(), "uz")
-    assert "Manba:" in sp.text and "173-sahifa" in sp.text
+    assert sp.text.startswith("Kirish klapanlari tirqishi 0,30–0,40 mm") and "sahifa" not in sp.text
     tg = speech_for("Тирқиши 0,30–0,40 мм [R1].", _src(), "tg")
     assert tg.text.startswith("Озвучки на языке «таджикский» нет") and not tg.refs
 
