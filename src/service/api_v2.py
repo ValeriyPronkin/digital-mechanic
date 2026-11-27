@@ -25,7 +25,7 @@ import secrets
 import threading
 import time
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -716,6 +716,19 @@ def answer_record(conv: Conversation, reply: AgentReply, question: str, text: st
     }
 
 
+def msk(iso: str | None) -> str:
+    """Время выгрузки для рекламации — по Москве, как на экране: «27.11.2026 19:28». Нет или не разобрать — как есть."""
+    if not iso:
+        return ""
+    try:
+        t = datetime.fromisoformat(iso)
+    except ValueError:
+        return iso
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=UTC)
+    return t.astimezone(timezone(timedelta(hours=3))).strftime("%d.%m.%Y %H:%M")
+
+
 def export_html(vehicle: Any, row: dict[str, Any], records: list[dict[str, Any]], check: tuple[bool, str]) -> str:
     """Выгрузка нити для печати (рекламация): шапка, проверка цепочки, записи по порядку."""
     E = html.escape
@@ -729,12 +742,12 @@ def export_html(vehicle: Any, row: dict[str, Any], records: list[dict[str, Any]]
         "@media print{a{color:inherit}}</style>",
         f"<h1>Обращение по машине {E(vehicle.vehicle_id)} · {E(vehicle.engine_model)}</h1>",
         f"<p>Нить {E(row['thread_id'])} · проверка {E(str(row.get('session_id') or '—'))} · "
-        f"с {E(row.get('started_at', ''))} по {E(row.get('updated_at', ''))} (UTC) · "
+        f"с {E(msk(row.get('started_at')))} по {E(msk(row.get('updated_at')))} (Москва) · "
         f"тема: {E(row.get('topic', ''))}</p>",
         f'<p class="{"" if ok else "bad"}"><b>Целостность записи:</b> {"✓" if ok else "✗"} {E(why)}</p>',
     ]
     for r in records:
-        head = f"№{r['seq']} · {r.get('at', '')} UTC"
+        head = f"№{r['seq']} · {msk(r.get('at'))} (Москва)"
         if r.get("kind") == "ticket":
             out.append(f'<div class="rec"><b>{E(head)} · заявка {E(str(r.get("ticket_id")))}</b>')
             out.append(f"<p>{E(str(r.get('conclusion', '')))}</p>")

@@ -1,4 +1,4 @@
-.PHONY: fetch-materials run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check reset-demo logs spend-probe eval-open eval-golden eval-sweep eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx cost-final index kb-publish kb-fetch pages-render pages-publish
+.PHONY: e2e fetch-materials run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check reset-demo logs spend-probe eval-open eval-golden eval-sweep eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx cost-final index kb-publish kb-fetch pages-render pages-publish
 
 PORT ?= 8000
 
@@ -36,6 +36,13 @@ LABEL ?= $(shell date +%Y%m%d-%H%M)
 STAND_URL ?= https://bbab8qkqhuhg3ere9dam.containers.yandexcloud.net/
 engineer-pack: install
 	uv run python scripts/engineer_pack.py $(STAND_URL) $(PACK_ARGS)
+
+## Сцены видео в браузере (Playwright): телефон WebKit 390×664 и ноутбук Chromium → reports/e2e/<метка>/report.md
+## По умолчанию — make run-local (:8010); стенд или превью — E2E_URL=…; E2E_ARGS="--only phone --send-ticket --break-images"
+E2E_URL ?= http://127.0.0.1:$(PORT_LOCAL)
+e2e: install
+	uv run python -m playwright install webkit chromium
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/e2e.py $(E2E_URL) $(E2E_ARGS)
 
 ## Маршрут дубля на стенде /v2 (B418HK98/S-0009, H142OX78/S-0113, запасная M739BA198/S-0104): таблица шагов
 ## и секунд; код 0 = «готово к дублю», 3 = только «ждёт PR #N», 1 = ❌. Заявку не шлёт. ARGS=--help — параметры
