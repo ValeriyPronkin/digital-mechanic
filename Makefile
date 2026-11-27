@@ -1,4 +1,4 @@
-.PHONY: run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
+.PHONY: run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx cost-final index kb-publish kb-fetch pages-render pages-publish
 
 PORT ?= 8000
 
@@ -54,9 +54,17 @@ pages-render: install
 pages-publish: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/pages_publish.py --upload $(if $(DOC),--doc $(DOC),)
 
-## Шаблон организаторов по замеру: reports/cost-template-<замер>.xlsx (шаблон — COST_TEMPLATE, в git не входит)
+## Шаблон организаторов по замеру → сдаваемый reports/cost-calculator.xlsx (жёлтые ячейки; шаблон — он же или COST_TEMPLATE).
+## Другой замер для сравнения — в другой файл: make cost-xlsx XLSX_LABEL=gigachat-1 XLSX_OUT=.state/gigachat.xlsx
 cost-xlsx: install
-	uv run python scripts/cost_xlsx.py $(if $(XLSX_LABEL),--label $(XLSX_LABEL),)
+	uv run python scripts/cost_xlsx.py $(if $(XLSX_LABEL),--label $(XLSX_LABEL),) $(if $(XLSX_OUT),--out $(XLSX_OUT),)
+
+## Себестоимость на текущем коммите одной командой (перед сдачей, после последних слияний): живой замер всех
+## сценариев, 2 прогона (≈1 ₽; нужны .env с ключом модели и Yandex и индекс .index/) → reports/cost/final.*,
+## reports/cost.md и сдаваемый шаблон reports/cost-calculator.xlsx. Провал проверки качества — код ≠ 0, шаблон не пишется.
+cost-final: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/cost_report.py --label final --repeat 2
+	uv run python scripts/cost_xlsx.py --label final
 
 ## Открытая половина вопросов приёмщика на настоящей модели (issue #28): reports/eval-open.md (вопросы — вне git)
 eval-open: install

@@ -97,3 +97,19 @@ def test_embedding_row_and_layered_comment(tmp_path: Path, monkeypatch: pytest.M
     assert "Голос — опция" in ws["A18"].value and "0.2666" in ws["A18"].value and "локально" in ws["A18"].value
     assert "Парк в месяц" in ws["A19"].value and "50 машин" in ws["A19"].value
     assert all(len(ws[c].value) <= 500 for c in ("A17", "A18", "A19"))  # «до 3 строк» в ячейке A:J
+
+
+def test_refill_clears_rows_of_previous_fill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Шаблон по умолчанию — сам сдаваемый файл: строки прошлого заполнения, которых нет в замере, очищаются."""
+    monkeypatch.setattr(cost_xlsx, "COST_DIR", tmp_path)
+    tpl = tmp_path / "tpl.xlsx"
+    _template(tpl)
+    wb = openpyxl.load_workbook(tpl)
+    for col, val in zip("ABCDEFGH", ("старый шаг", "m", 1, 100, 10, 0.1, 0.2, "$"), strict=True):
+        wb["Расчёт"][f"{col}12"] = val
+    wb.save(tpl)
+    _run(tmp_path)
+    cost_xlsx.fill(tpl, tpl, cost_xlsx.pick_run("t1"))  # тот же файл — и шаблон, и результат
+    ws = openpyxl.load_workbook(tpl)["Расчёт"]
+    assert all(ws[f"{c}12"].value is None for c in "ABCDEFGH")
+    assert ws["I12"].value == FORMULA.format(r=12)

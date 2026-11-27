@@ -1,13 +1,16 @@
 """Шаблон организаторов «калькулятор экономики решения» по замеру `make cost` (issue #16, ответ в #19).
 
-  make cost-xlsx                     # последний замер DeepSeek → reports/cost-template-<замер>.xlsx
-  make cost-xlsx XLSX_LABEL=gigachat-1    # конкретный замер (модель и валюта — из него)
+  make cost-final                    # замер на текущем коммите + этот шаблон — одной командой (перед сдачей)
+  make cost-xlsx                     # последний замер DeepSeek → reports/cost-calculator.xlsx (сдаваемый файл)
+  make cost-xlsx XLSX_LABEL=gigachat-1 XLSX_OUT=.state/gigachat.xlsx   # другой замер — в другой файл
 
-Шаблон — COST_TEMPLATE (по умолчанию ~/hackathon-blind-pack/04_shablon_rascheta.xlsx, в git не входит).
-Заполняются только жёлтые ячейки листа «Расчёт»: I3 — курс ЦБ, A9:H12 — шаги агента с вызовом модели для одного
-запроса (сценарий видео С1: вопрос механика + черновик заявки), A17:A19 — комментарий: запрос; разово — индексация
-руководств и голос-опция; пересчёт на парк в месяц (ответ организаторов 26.11, `cost_layers.py`). Формулы не трогаем.
-Цена входа — эффективная: доля токенов из кэша провайдера по замеру × цена кэша + остальное × цена входа.
+Шаблон — COST_TEMPLATE (чистый файл организаторов), а без него — сам сдаваемый reports/cost-calculator.xlsx:
+вне жёлтых ячеек он совпадает с чистым шаблоном, а жёлтые здесь переписываются целиком (лишние строки шагов —
+очищаются). Заполняются только жёлтые ячейки листа «Расчёт»: I3 — курс ЦБ, A9:H12 — шаги агента с вызовом модели
+для одного запроса (сценарий видео С1: вопрос механика + черновик заявки), A17:A19 — комментарий: запрос; разово —
+индексация руководств и голос-опция; пересчёт на парк в месяц (ответ организаторов 26.11, `cost_layers.py`).
+Формулы шаблона не трогаем. Цена входа — эффективная: доля токенов из кэша провайдера по замеру × цена кэша +
+остальное × цена входа.
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ from service.store import llm_price_native, price_table
 
 ROOT = Path(__file__).resolve().parents[1]
 COST_DIR = ROOT / "reports" / "cost"
-DEFAULT_TEMPLATE = "~/hackathon-blind-pack/04_shablon_rascheta.xlsx"
+SUBMITTED = ROOT / "reports" / "cost-calculator.xlsx"  # сдаётся вместе с решением
 SHEET = "Расчёт"
 STEP_ROWS = (9, 10, 11, 12)
 COMMENT_CELLS = ("A17", "A18", "A19")
@@ -167,6 +170,9 @@ def fill(template: Path, out: Path, run: dict[str, Any]) -> dict[str, Any]:
     wb = openpyxl.load_workbook(template)
     ws = wb[SHEET]
     ws["I3"] = rate
+    for row in STEP_ROWS[len(steps) :]:  # шаблоном может быть заполненный файл: прежние строки не оставляем
+        for col in "ABCDEFGH":
+            ws[f"{col}{row}"] = None
     for row, s in zip(STEP_ROWS, steps, strict=False):
         ws[f"A{row}"] = s["name"]
         ws[f"B{row}"] = s["model"]
@@ -189,18 +195,19 @@ def fill(template: Path, out: Path, run: dict[str, Any]) -> dict[str, Any]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--label", help="замер из reports/cost/ (по умолчанию — последний DeepSeek)")
-    ap.add_argument("--template", default=os.environ.get("COST_TEMPLATE", DEFAULT_TEMPLATE))
+    ap.add_argument("--template", default=os.environ.get("COST_TEMPLATE") or str(SUBMITTED))
+    ap.add_argument("--out", default=str(SUBMITTED), help="куда записать (по умолчанию — сдаваемый файл)")
     args = ap.parse_args()
     template = Path(args.template).expanduser()
     if not template.is_file():
         raise SystemExit(f"нет шаблона {template} (COST_TEMPLATE)")
     run = pick_run(args.label)
-    out = ROOT / "reports" / f"cost-template-{run['label']}.xlsx"
+    out = Path(args.out).expanduser().resolve()
     res = fill(template, out, run)
     for s in res["steps"]:
         toks = f"{s['tokens_in']} ({s['tokens_cached']} из кэша) / {s['tokens_out']}"
         print(f"  {s['name']}: {s['calls']} вызова, {toks}")
-    print(f"{out.relative_to(ROOT)}: модель на 1 запрос ≈ {res['rub']:.4f} ₽ без НДС")
+    print(f"{out}: модель на 1 запрос ≈ {res['rub']:.4f} ₽ без НДС")
     idx, fleet = one_time_index(), fleet_month(run)
     print(f"  разово, индексация: {idx['rub']} ₽ ({idx['rub_range'][0]}–{idx['rub_range'][1]})")
     print(f"  парк в месяц: {fleet['total_rub'][0]}–{fleet['total_rub'][1]} ₽ (+{fleet['voice_rub']} ₽ с голосом)")

@@ -341,6 +341,9 @@ def render_md() -> None:
         "Все суммы — ₽ без НДС (как в шаблоне организаторов), курс ЦБ на "
         f"{t['usd_rub']['date']}: {t['usd_rub']['value']} ₽/$. Скрипт: `make cost LABEL=…`, шаблон — `make cost-xlsx`.",
         "",
+        "**Пересчитать на текущем коммите одной командой:** `make cost-final` — живой замер всех сценариев (2 прогона, "
+        "≈1 ₽), этот файл и сдаваемый шаблон организаторов `reports/cost-calculator.xlsx`.",
+        "",
         f"«До» — `{first['label']}`, «после» — `{last['label']}` (DeepSeek). "
         "Строки по шагам — `reports/cost/<замер>.csv`.",
         "Карточка проверки (норма / отклонение / сбой) строится кодом: **0 токенов**.",
@@ -378,8 +381,7 @@ def render_md() -> None:
         f"{c1['rub_llm']} | замер `{last['label']}`, среднее {last['repeat']} прогонов |",
         f"| Запрос С1: эмбеддинг запроса (строка 12 шаблона) | {round(c1['rub_emb'] / emb_k * 1000)} токенов | "
         f"{emb_k} ₽ за 1000 | {c1['rub_emb']} | numTokens из ответа Yandex, тот же замер |",
-        f"| **Запрос С1, итого** | | | **{c1['rub']}** | `make cost-xlsx` → "
-        f"`reports/cost-template-{last['label']}.xlsx` |",
+        f"| **Запрос С1, итого** | | | **{c1['rub']}** | `make cost-xlsx` → `reports/cost-calculator.xlsx` |",
         f"| Разово: OCR страниц без текста | {idx['ocr_pages']} стр. | {round(other('ocr_page'), 4)} ₽ за стр. | "
         f"{idx['ocr_rub']} | страницы меньше 50 знаков (`low_text_pages` паспорта индекса), STATUS «OCR 41 стр.» |",
         f"| Разово: эмбеддинги всех фрагментов | {idx['fragments']} фрагментов × {int(i['chars_per_fragment'])} знаков "
