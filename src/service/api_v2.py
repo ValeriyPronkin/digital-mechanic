@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 from service import conv_state, escalation, language, passport
 from service.agent import LEVEL_WORD, Agent, AgentReply, Conversation, LevelChoice
 from service.case_log import CaseLog, verify
-from service.clients import ServiceError, TicketRequest
+from service.clients import NotFoundError, ServiceError, TicketRequest
 from service.fleet import Fleet, Vehicle
 from service.fleet_status import STATUS_LABEL, trend, vehicle_status
 from service.manuals.catalog import DOCS_BY_ID, documents_for_engine
@@ -774,6 +774,26 @@ def build_router(
     @router.get("/vehicles/{vehicle_id}")
     def vehicle(vehicle_id: str) -> dict[str, Any]:
         return vehicle_detail(get_fleet(), vehicle_or_404(vehicle_id))
+
+    @router.get("/vehicles/{vehicle_id}/verdict")
+    def verdict(vehicle_id: str, session_id: str) -> dict[str, Any]:
+        """Карточка проверки отдельным быстрым запросом, без модели: стенд отдаёт поток чата только целиком,
+        а карточка из полей ML и правил кода готова за доли секунды. Интерфейс показывает её до ответа."""
+        v = vehicle_or_404(vehicle_id)
+        if not any(s.session_id == session_id for s in v.sessions):
+            raise HTTPException(404, f"Проверка {session_id} машины {v.vehicle_id} не найдена.")
+        ag = get_agent()
+        try:
+            conv = ag.start(v.vehicle_id, session_id)
+            ag.verdict_card(conv)
+        except NotFoundError as exc:
+            raise HTTPException(404, exc.message) from exc
+        except ServiceError as exc:
+            raise HTTPException(502, exc.message) from exc
+        block = verdict_block(conv)
+        if block is None:
+            raise HTTPException(502, "Карточку проверки собрать не удалось.")
+        return block
 
     @router.get("/languages")
     def languages() -> list[dict[str, Any]]:
