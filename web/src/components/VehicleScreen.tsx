@@ -34,6 +34,7 @@ import { offersRussian } from '../lib/lang'
 import { TicketCard } from './TicketCard'
 import { TicketSheet } from './TicketSheet'
 import { VerdictCard } from './VerdictCard'
+import { queueHref } from '../lib/contradictions'
 
 function SessionPicker({
   sessions,
@@ -193,6 +194,9 @@ function AssistantBlock({
             block={b as ContradictionBlock}
             sources={sources}
             onOpen={(s, quote) => onOpenSource(s, quote)}
+            onQueue={(n) => {
+              window.location.hash = queueHref({ view: 'item', number: n })
+            }}
           />
         ))}
       {turn.progress && (
