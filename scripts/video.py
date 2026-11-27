@@ -562,8 +562,11 @@ def main(argv: list[str] | None = None) -> int:
             record_video_dir=str(raw),
             record_video_size={"width": WIDTH, "height": HEIGHT},
         )
-        ctx.add_init_script(f"try {{ localStorage.setItem('dm-theme', '{args.theme}'); "
-                            "localStorage.setItem('role', 'mechanic') }} catch (e) {{}}")  # fmt: skip
+        theme = json.dumps(args.theme)  # тема и режим — до загрузки страницы
+        ctx.add_init_script(
+            "try { localStorage.setItem('dm-theme', " + theme + "); localStorage.setItem('role', 'mechanic') }"
+            " catch (e) {}"
+        )
         page = ctx.new_page()
         take = Take(t0=time.monotonic())  # запись идёт с создания страницы — отсчёт оттуда же
         director = Director(page, base, take, args.pace, voice_len, out)
