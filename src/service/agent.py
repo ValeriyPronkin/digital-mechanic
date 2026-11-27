@@ -1377,6 +1377,10 @@ class Agent:
             conv.card = build_card(conv.diag, self.fleet.fault_titles, conv.vehicle.engine_model, conv.vehicle.sessions)
         return conv.diag, conv.card
 
+    def verdict_card(self, conv: Conversation) -> VerdictCard:
+        """Карточка выбранной проверки — кодом, без модели: /api/v2 шлёт её первой, и она остаётся при сбое модели."""
+        return self._ensure_diag(conv)[1]
+
     def _get_diagnosis(self, conv: Conversation, args: dict[str, Any]) -> dict[str, Any]:
         err = self._same_context(conv, args, need_session=True)
         if err:
