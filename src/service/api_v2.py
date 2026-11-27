@@ -495,6 +495,23 @@ def tool_events(reply: AgentReply, conv: Conversation, verdict_sent: bool) -> tu
     return events, verdict_sent
 
 
+def early_verdict(ag: Agent, conv: Conversation) -> dict[str, Any] | None:
+    """Карточка проверки до модели. Сервис диагностики недоступен — None: ошибку покажет ответ агента."""
+    try:
+        ag.verdict_card(conv)
+    except ServiceError:
+        return None
+    return verdict_block(conv)
+
+
+def verdict_events(block: dict[str, Any]) -> list[dict[str, Any]]:
+    """Те же события, что у карточки из tool_events: интерфейс v2 их уже понимает."""
+    return [
+        {"type": "tool_started", "id": "verdict", "name": "get_diagnosis", "label": TOOL_LABEL["get_diagnosis"]},
+        {"type": "tool_result", "id": "verdict", "name": "get_diagnosis", "ok": True, "block": block},
+    ]
+
+
 def manual_designations(conv: Conversation, code: str) -> dict[str, str]:
     """Строка запчасти черновика → обозначение из руководства (матрица, цитата сверена со страницей; D-29)."""
     from service.agent import _part_label
@@ -908,19 +925,41 @@ def build_router(
 
         def answer() -> Iterator[str]:
             yield _sse({"type": "thread", "thread_id": thread["thread_id"]})
+            card: dict[str, Any] | None = None
             try:
                 ag = get_agent()
                 conv = conv_state.load(thread["state"], get_fleet()) if thread["state"] else None
                 if conv is None:
                     conv = ag.start(v.vehicle_id, session_id)
+                if not thread.get("verdict_sent"):
+                    # Карточка — из полей ML и правил кода, до первого вызова модели: приходит первой и
+                    # остаётся на экране, если модель потом упадёт или кончится лимит расходов.
+                    card = early_verdict(ag, conv)
+                    if card is not None:
+                        thread["verdict_sent"] = True
+                        for e in verdict_events(card):
+                            yield _sse(e)
                 reply = ag.ask(conv, req.message, req.level, req.lang, back_translate=False)
             except ServiceError as exc:
+                if card is not None:  # карточка уже на экране — и в нити, с вопросом и ошибкой
+                    thread["transcript"] += [
+                        {"role": "user", "text": req.message},
+                        {"role": "assistant", "text": exc.message, "blocks": [card], "tools": [], "usage": []},
+                    ]
+                    threads.put(b, v.vehicle_id, thread)
                 yield _sse({"type": "error", "message": exc.message})
                 yield _sse({"type": "done", "reason": "error"})
                 return
             tools, thread["verdict_sent"] = tool_events(reply, conv, bool(thread.get("verdict_sent")))
+            if card is not None:  # первый get_diagnosis ответа — та же карточка, что уже ушла: второй строки нет
+                dup = next(
+                    (e["id"] for e in tools if e["type"] == "tool_started" and e["name"] == "get_diagnosis"), None
+                )
+                tools = [e for e in tools if e["id"] != dup]
             for e in tools:
                 yield _sse(e)
+            if card is not None:
+                tools = [*verdict_events(card), *tools]  # в нить — вместе с остальными блоками ответа
             sources = source_items(reply, conv)
             if sources:
                 yield _sse({"type": "sources", "items": sources})
