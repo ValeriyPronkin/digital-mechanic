@@ -118,6 +118,27 @@ operations и spare_parts — они подставятся из матрицы)
 2–3 предложения.
 Длина — до 150 слов. В «Источнике» — только ссылки [R…]. После черновика заявки — одно-два предложения."""
 
+# Опыт штурмана 27.11 (отчёт reports/2026-11-27-nikita-gap.md): промпт агента Никиты (app/prompts/agent.md, коммит
+# 6cd5a5697d, автор — Никита, pronkinnikita) вместо нашего — AGENT_PROMPT=nikita. Метки [S…] у нас [R…]; без
+# приставки уровня; предел ответа — как у Никиты (4000).
+NIKITA_PROMPT_PATH = Path(__file__).resolve().parent / "nikita" / "agent.md"
+NIKITA_MAX_TOKENS = 4000
+
+
+def nikita_prompt() -> bool:
+    return os.environ.get("AGENT_PROMPT", "") == "nikita"
+
+
+@lru_cache(maxsize=1)
+def _nikita_system_prompt() -> str:
+    text = NIKITA_PROMPT_PATH.read_text(encoding="utf-8").replace("[S12]", "[R12]").replace("[S", "[R")
+    return text + "\n\nСправка по неисправности — поле fault_guide в результате get_diagnosis."
+
+
+def system_prompt() -> str:
+    return _nikita_system_prompt() if nikita_prompt() else SYSTEM_PROMPT
+
+
 # Уровень механика (#17): формат и длина ответа. Правила кода (цифры из фрагментов, двигатель из карточки) — те же.
 Level = Literal["expert", "steps"]
 LEVELS: tuple[Level, ...] = ("expert", "steps")
@@ -657,7 +678,7 @@ class Agent:
             "заявки_по_машине_ранее": memory["tickets"],
         }
         conv.messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt()},
             {"role": "system", "content": "Контекст разговора:\n" + json.dumps(context, ensure_ascii=False)},
         ]
         return conv
@@ -667,7 +688,8 @@ class Agent:
         steps: list[dict[str, Any]] = []
         conv.passport = {"refs_before": set(conv.sources), "level": level}
         # Уровень — приставкой к вопросу, а не системным сообщением: GigaChat принимает system только первым.
-        conv.messages.append({"role": "user", "content": f"[{LEVEL_PROMPT[level]}]\n\n{mask_pii(question)}"})
+        prefix = "" if nikita_prompt() else f"[{LEVEL_PROMPT[level]}]\n\n"
+        conv.messages.append({"role": "user", "content": prefix + mask_pii(question)})
         self._note_contradiction(conv, question)
         other = self._other_engine_reply(conv, question, request_id)
         if other is not None:  # вопрос про другой двигатель — ответ кода без цифр (независимый прогон, п. 2)
@@ -686,7 +708,9 @@ class Agent:
         for step in range(1, MAX_STEPS + 1):
             self.check_budget()
             t0 = time.monotonic()
-            reply = self.provider.chat(conv.messages, tools(), max_tokens=LEVEL_MAX_TOKENS[level])
+            reply = self.provider.chat(
+                conv.messages, tools(), max_tokens=NIKITA_MAX_TOKENS if nikita_prompt() else LEVEL_MAX_TOKENS[level]
+            )
             ms = int((time.monotonic() - t0) * 1000)
             cost = self._spend(request_id, step, reply, ms)
             steps.append(
