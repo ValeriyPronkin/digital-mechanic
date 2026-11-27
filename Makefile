@@ -1,4 +1,4 @@
-.PHONY: run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check logs spend-probe eval-open eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
+.PHONY: run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check logs spend-probe eval-open eval-golden eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx index kb-publish kb-fetch pages-render pages-publish
 
 PORT ?= 8000
 
@@ -66,6 +66,11 @@ eval-open: install
 ## Вопросы — вне git: .state/questions_multi.jsonl (или EVAL_MULTI=путь); засчитано — страница, числа, язык ответа
 eval-multi: install
 	uv run $(if $(wildcard .env),--env-file .env,) python scripts/eval_open.py --set multi --label $(or $(LABEL),$(shell date +%Y%m%d-%H%M))
+
+## Контрольные вопросы Никиты (36 сверенных + 48 написанных вслепую) через /api/v2/chat работающего сервиса:
+## reports/eval-golden.md. Сервис — make run (EVAL_URL по умолчанию http://127.0.0.1:8000) или стенд; заявку не шлёт
+eval-golden: install
+	uv run python scripts/eval_golden.py --set $(or $(EVAL_SET),all) --label $(or $(LABEL),$(shell date +%Y%m%d-%H%M)) $(if $(EVAL_URL),--url $(EVAL_URL),) $(EVAL_ARGS)
 
 ## Стабильность (штурман 26.11): RUNS прогонов eval-open с префиксом PREFIX и сводка по ним
 eval-stability: install
