@@ -59,6 +59,7 @@ def urgency_note(proposed: str, chosen: str, reason: str) -> str:
     return f"Приоритет выбран механиком: «{URGENCY_WORD[chosen]}»; {rule}."
 
 
+STREAM_FAILED = "Ответ не получился из-за сбоя сервиса. Спросите ещё раз."
 QUALITY_WORD = {"good": "запись чистая", "warning": "запись с помехами", "bad": "запись непригодна"}
 _REF = re.compile(r"\[R(\d+)\]")
 
@@ -796,6 +797,28 @@ def build_router(
         }
 
         def events() -> Iterator[str]:
+            """Любой сбой посреди ответа (ревью 27.11): механик получает понятную ошибку и done, нить сохранена
+            с его вопросом — а не оборванный поток."""
+            finished = False
+            try:
+                for chunk in answer():
+                    finished = finished or chunk.startswith('data: {"type": "done"')
+                    yield chunk
+            except Exception:
+                log.exception("ответ v2 оборвался")
+                if finished:
+                    return
+                thread["transcript"] += [
+                    {"role": "user", "text": req.message},
+                    {"role": "assistant", "text": STREAM_FAILED, "blocks": [], "tools": [], "usage": []},
+                ]
+                try:
+                    threads.put(b, v.vehicle_id, thread)
+                finally:
+                    yield _sse({"type": "error", "message": STREAM_FAILED})
+                    yield _sse({"type": "done", "reason": "error"})
+
+        def answer() -> Iterator[str]:
             yield _sse({"type": "thread", "thread_id": thread["thread_id"]})
             try:
                 ag = get_agent()

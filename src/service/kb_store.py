@@ -197,6 +197,9 @@ def _env_bucket(http: httpx.Client, *, allow_static: bool) -> Bucket:
     raise KbError("нужны S3_ACCESS_KEY_ID и S3_SECRET_ACCESS_KEY (статический ключ, только локально)")
 
 
+LAST_ERROR: dict[str, str] = {}  # причина последней неудачной загрузки индекса — для /health
+
+
 def ensure_index_from_env(http: httpx.Client | None = None) -> str | None:
     """При старте сервиса: если задан S3_BUCKET — скачать индекс в INDEX_DIR по IAM-токену из метаданных.
     Ошибка не роняет сервис: поиск останется пустым (STUB: search-until-#3), причина — в журнале и /health."""
@@ -209,9 +212,11 @@ def ensure_index_from_env(http: httpx.Client | None = None) -> str | None:
     try:
         version = fetch_index(_env_bucket(client, allow_static=False), index_dir())
         log.info("индекс руководств %s скачан в %s", version, index_dir())
+        LAST_ERROR.clear()
         return version
     except (KbError, httpx.HTTPError, OSError, ValueError) as exc:
         log.error("индекс руководств из бакета не скачан: %s", exc)
+        LAST_ERROR["error"] = f"{type(exc).__name__}: {exc}"[:300]
         return None
     finally:
         if own:
