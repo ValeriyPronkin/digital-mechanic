@@ -84,3 +84,17 @@ export function confidenceLine(
     below,
   }
 }
+
+/** Whether «Создать заявку» may be offered for a verdict: only an anomaly the engine can have. Not for a
+ *  result that does not fit the engine (the card's `case: 'mismatch'`, or the check's `fits_engine: false`
+ *  in the vehicle's list: C808CM178, a turbo on a carburettor engine), and not when the guide says the
+ *  engine has no such unit. The server refuses a ticket for either, so the chip would only lead to a
+ *  refusal in front of the mechanic. */
+export function ticketFits(
+  verdict: Pick<VerdictBlock, 'status' | 'case'> | undefined,
+  check: Pick<SessionBrief, 'fits_engine'> | undefined,
+  coverage: string | undefined,
+): boolean {
+  if (verdict?.status !== 'anomaly') return false
+  return verdict.case !== 'mismatch' && check?.fits_engine !== false && coverage !== 'not_covered'
+}

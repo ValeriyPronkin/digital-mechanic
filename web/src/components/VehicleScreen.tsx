@@ -14,7 +14,7 @@ import {
   type VerdictBlock,
 } from '../api'
 import { copy } from '../copy'
-import { checkLook } from '../lib/checks'
+import { checkLook, ticketFits } from '../lib/checks'
 import { dateShortRu, dateTimeRu } from '../lib/format'
 import { mergeTickets, withTicket } from '../lib/tickets'
 import { CHECKED, scrollsFurther } from '../lib/ui'
@@ -421,8 +421,9 @@ export function VehicleScreen({
   const inThread = new Set(thread.turns.flatMap((t) => (t.role === 'ticket' ? [t.ticket.id] : [])))
   const earlier = tickets.filter((t) => !inThread.has(t.id)) // made in another conversation
   const ticketed = tickets.some((t) => t.session_id === lastVerdict?.session_id)
-  const canTicket =
-    lastVerdict?.status === 'anomaly' && guide?.coverage !== 'not_covered' && !thread.pending && !ticketed
+  const verdictCheck = vehicle.sessions.find((s) => s.session_id === lastVerdict?.session_id)
+  // not for a result that does not fit the engine, nor for a unit the engine has not (lib/checks.ts)
+  const canTicket = ticketFits(lastVerdict, verdictCheck, guide?.coverage) && !thread.pending && !ticketed
   const ticketOpen = thread.pending !== null && thread.pending.pending_id !== dismissed
   const typing = draft.trim() !== '' // a stray space or an empty dictation is not a question being typed
 
