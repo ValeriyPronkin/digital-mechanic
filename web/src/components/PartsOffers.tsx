@@ -7,8 +7,7 @@ import { offerFacts, shownOffers, silentSuppliers, stockTone, webUrl } from '../
  *  goes to ТОиР. A part looked up by its name, not by the designation from the manual, says so. */
 export function PartsOffers({ offers, removed }: { offers: Offers | null | undefined; removed: Set<number> }) {
   const shown = shownOffers(offers, removed)
-  if (!shown) return null
-  if (shown.items.length === 0) return <p className="text-[13px] text-dim">{shown.note}</p>
+  if (!shown) return null // nothing to offer: no block at all, not an empty one
   return (
     <>
       <p className="text-[13px] text-mute">{copy.ticket.offersHint}</p>

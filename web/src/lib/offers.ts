@@ -5,17 +5,18 @@ import { copy } from '../copy.ts'
 
 const NBSP = ' '
 
-/** What there is to show: the server's note when no supplier is connected, else the offers of the parts
- *  still in the ticket. Null when there is nothing to say: no parts in the draft, a draft saved before the
- *  field existed, or every part removed by the mechanic. */
+/** The offers of the parts still in the ticket, or null when there is not one offer to show: no parts in the
+ *  draft, a draft saved before the field existed, every part removed by the mechanic, no supplier connected
+ *  (the stand has none: «Каталог поставщика не подключён» is a fact about the setup, not about the part, and
+ *  the sheet says nothing about it), or no supplier has any of the parts. A part no supplier has stays in a
+ *  list where another part has an offer: its note says so. */
 export function shownOffers(
   offers: PartsOffers | null | undefined,
   removed: Set<number>,
 ): { note: string; items: PartOffersItem[] } | null {
-  if (!offers) return null
-  if (!offers.connected) return offers.note ? { note: offers.note, items: [] } : null
+  if (!offers?.connected) return null
   const items = offers.items.filter((i) => !removed.has(i.index))
-  if (items.length === 0) return offers.items.length === 0 && offers.note ? { note: offers.note, items } : null
+  if (!items.some((i) => i.offers.length > 0)) return null
   return { note: offers.note, items }
 }
 
