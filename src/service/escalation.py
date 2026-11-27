@@ -4,12 +4,14 @@
 и показывает «Передано главному механику на решение (№ N). Пока — безопасное правило: …». Главный механик (или
 поддержка) отправляет вопрос дальше — заводу-изготовителю или в поддержку — и фиксирует ответ:
 
+  known     — известно из реестра (`data/contradictions.json`), механики о нём ещё не спрашивали: главный механик
+              видит весь список сразу и может отправить письмо или записать решение заранее (Валерий, 27.11);
   open      — всплыло в ответе механику (сколько раз, на каких машинах);
   sent      — отправлено: кому (завод-изготовитель / поддержка), когда, кто, текст обращения (черновик письма
               собирает код: двигатель, обе формулировки с документами и страницами, вопрос);
   resolved  — ответ: текст, источник, кто зафиксировал, когда, документ-основание.
 
-После `resolved` агент показывает «Решение по противоречию (источник: …, дата): …» РЯДОМ с обеими формулировками
+После `resolved` агент показывает «Решение по противоречию (№ N; источник: …, дата): …» РЯДОМ с обеими формулировками
 (не вместо них). Письмо код не отправляет: только черновик и отметка «отправлено»; канал отправки — настройка
 `CONTRADICTION_CHANNEL` (пилот; по умолчанию `none`).
 
@@ -53,7 +55,8 @@ def escalation_line(item: dict[str, Any]) -> str:
         when = datetime.fromisoformat(res["at"]).strftime("%d.%m.%Y")
         src = TARGET_WORD.get(res.get("source") or "", res.get("source") or "главный механик")
         doc = f" Основание: {res['document']}." if res.get("document") else ""
-        return f"Решение по противоречию (источник: {src}, {when}): {res['text'].rstrip('.')}.{doc}"
+        # номер — тот же, что на экране главного механика: карточка механика ссылается на решение по нему
+        return f"Решение по противоречию (№ {item['number']}; источник: {src}, {when}): {res['text'].rstrip('.')}.{doc}"
     # правило уже написано строкой «Безопасное правило:» выше — не повторяем; полный текст — в очереди и в письме
     return f"Передано главному механику на решение (№ {item['number']}). Пока — по безопасному правилу выше."
 
@@ -89,32 +92,64 @@ class ContradictionQueue:
                 return item
         raise RuntimeError(f"очередь противоречий: не удалось записать за {MAX_TRIES} попыток")
 
+    @staticmethod
+    def _new_item(queue: dict[str, Any], k: Any, quotes: list[Any], engine: str, status: str) -> dict[str, Any]:
+        """Строка очереди с очередным номером: номер — навсегда, им пользуются карточка механика и письмо."""
+        item = {
+            "id": k.id,
+            "number": queue["next"],
+            "status": status,
+            "engine": engine,
+            "title": k.title,
+            "formulations": [
+                {"label": q.label(), "manual_id": q.doc, "pdf_page": q.page, "quote": q.quote} for q in quotes
+            ],
+            "rule": k.conclusion or None,
+            "safe_rule": safe_rule(k.conclusion),
+            "first_seen": None,
+            "last_seen": None,
+            "count": 0,
+            "vehicles": [],
+        }
+        queue["next"] += 1
+        queue["items"][k.id] = item
+        return item
+
+    # ---- весь реестр известных противоречий — у главного механика сразу ----
+    def seed(self, registry: list[tuple[Any, list[Any], str]]) -> int:
+        """Внести в очередь известные противоречия, которых в ней ещё нет: статус `known`, «в ответах 0», номер —
+        сразу (единообразно: у каждого противоречия в списке есть номер, по нему письмо, «отправлено», решение).
+        `registry` — (Known, подтверждённые цитаты, двигатель). Пишет, только если чего-то не хватает; число
+        добавленных."""
+        queue, _ = self._load()
+        if all(k.id in queue["items"] for k, _q, _e in registry):
+            return 0
+        added: list[str] = []
+
+        def change(q: dict[str, Any]) -> dict[str, Any] | None:
+            added.clear()
+            for k, quotes, engine in registry:
+                if k.id not in q["items"]:
+                    self._new_item(q, k, quotes, engine, "known")
+                    added.append(k.id)
+            return {"added": len(added)} if added else None
+
+        self._update(change)
+        return len(added)
+
     # ---- противоречие всплыло в ответе ----
     def report(self, k: Any, quotes: list[Any], engine: str, vehicle_id: str) -> dict[str, Any]:
         """Поставить в очередь (или посчитать ещё раз). `k` — `contradictions.Known`, `quotes` — подтверждённые
-        цитаты."""
+        цитаты. Известное из реестра (`known`) при первом появлении в ответе становится `open`."""
         now = now_iso(self.clock())
 
         def change(queue: dict[str, Any]) -> dict[str, Any]:
             item = queue["items"].get(k.id)
             if item is None:
-                item = {
-                    "id": k.id,
-                    "number": queue["next"],
-                    "status": "open",
-                    "engine": engine,
-                    "title": k.title,
-                    "formulations": [
-                        {"label": q.label(), "manual_id": q.doc, "pdf_page": q.page, "quote": q.quote} for q in quotes
-                    ],
-                    "rule": k.conclusion or None,
-                    "safe_rule": safe_rule(k.conclusion),
-                    "first_seen": now,
-                    "count": 0,
-                    "vehicles": [],
-                }
-                queue["next"] += 1
-                queue["items"][k.id] = item
+                item = self._new_item(queue, k, quotes, engine, "open")
+            if item["status"] == "known":
+                item["status"] = "open"
+            item["first_seen"] = item.get("first_seen") or now
             item["count"] += 1
             item["last_seen"] = now
             if vehicle_id not in item["vehicles"] and len(item["vehicles"]) < MAX_VEHICLES:

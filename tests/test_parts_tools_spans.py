@@ -23,7 +23,8 @@ def test_spans_mark_parts_and_tools_by_registry() -> None:
     start, end = int(ring["start"]), int(ring["end"])  # type: ignore[call-overload]
     assert text[start:end] == "уплотнительные кольца инжектора"
     assert by_text["упорную шайбу инжектора"]["type"] == "part"  # в другом падеже — по основам слов
-    assert by_text["S=13"]["type"] == "tool" and by_text["S=13"]["page"] is None  # «S=13» — на многих страницах
+    key = by_text["Ключом S=13"]  # размер ключа — вместе со словом «ключ» (web-2, 27.11)
+    assert key["type"] == "tool" and key["designation"] == "S=13" and key["page"] is None  # «S=13» — на многих стр.
     assert "Замените" not in by_text  # глагол — не деталь
 
 

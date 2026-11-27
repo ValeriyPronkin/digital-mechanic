@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getFleet, type FleetView } from './api'
+import { ContradictionQueue } from './components/ContradictionQueue'
 import { FleetList, type Role } from './components/FleetList'
 import { REGISTER, TicketRegister } from './components/TicketRegister'
 import { VehicleScreen } from './components/VehicleScreen'
 import { copy } from './copy'
+import { queueRoute } from './lib/contradictions'
 import { tabTitle } from './lib/ui'
 
 const fromHash = () => decodeURIComponent(window.location.hash.replace(/^#\/?/, '')) || null
@@ -40,7 +42,8 @@ export default function App() {
 
   // The tab says which vehicle it shows: a jury member with two tabs open can tell them apart.
   useEffect(() => {
-    document.title = tabTitle(copy.product, selected === REGISTER ? copy.register.title : selected)
+    const tab = selected === REGISTER ? copy.register.title : queueRoute(selected) ? copy.queue.title : selected
+    document.title = tabTitle(copy.product, tab)
   }, [selected])
 
   const select = (id: string | null) => {
@@ -50,6 +53,8 @@ export default function App() {
     localStorage.setItem('role', next)
     setRole(next)
   }
+
+  const queue = queueRoute(selected)
 
   return (
     <div className="flex h-dvh">
@@ -69,6 +74,8 @@ export default function App() {
       <main className={`min-w-0 flex-1 ${selected ? '' : 'hidden min-[900px]:block'}`}>
         {selected === REGISTER ? (
           <TicketRegister onBack={() => select(null)} />
+        ) : queue ? (
+          <ContradictionQueue route={queue} onBack={() => select(null)} />
         ) : selected ? (
           <VehicleScreen key={selected} vehicleId={selected} onBack={() => select(null)} onTicketsChanged={loadFleet} />
         ) : (

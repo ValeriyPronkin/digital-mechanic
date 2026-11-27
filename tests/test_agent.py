@@ -479,3 +479,26 @@ def test_steps_ran_out_answer_from_found_not_no_time(ml: MLClient, toir: ToirCli
     reply = ag.ask(ag.start("B418HK98", "S-0007"), "Какой зазор клапанов?")
     assert NO_TIME not in reply.text and "на холодном двигателе" in reply.text
     assert llm.seen[-1][-1]["role"] == "user" and "шаги поиска кончились" in llm.seen[-1][-1]["content"]
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["Получить результат диагностики", "Что с двигателем?", "Что с двигателем и что делать?",
+     "что случилось, что теперь делать", "Результат проверки"],
+)  # fmt: skip
+def test_diag_ask_takes_button_and_joined_phrases(question: str) -> None:
+    """С1 «Что с двигателем и что делать?» — вопрос о карточке: поиск кодом по неисправности, без второго круга."""
+    from service.agent import _DIAG_ASK
+
+    assert _DIAG_ASK.search(question)
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["Что с двигателем, если давление масла упало?", "Какой тепловой зазор клапанов?",
+     "Что делать при перегреве?", "Можно ли ехать своим ходом?"],
+)  # fmt: skip
+def test_diag_ask_not_for_real_questions(question: str) -> None:
+    from service.agent import _DIAG_ASK
+
+    assert not _DIAG_ASK.search(question)

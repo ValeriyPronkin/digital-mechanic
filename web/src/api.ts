@@ -134,7 +134,8 @@ export interface ContradictionBlock {
   conclusion: string
   advice: string // since #93 the hand-over to the chief mechanic; before it, advice to ask the maker
   // since #93: the hand-over, its number on the chief mechanic's screen, and whether it is decided
-  escalation?: { line: string; number: number; resolved: boolean } | null
+  // number: null in a decided line of a server before the number was put into it
+  escalation?: { line: string; number: number | null; resolved: boolean } | null
 }
 
 export type Block =
@@ -355,6 +356,18 @@ export type TranscriptEntry =
     }
   | { role: 'ticket'; ticket: TicketView }
 
+/** A row of the vehicle's conversation history (#92). Times are ISO UTC. */
+export interface ThreadRow {
+  thread_id: string
+  started_at: string | null
+  updated_at: string | null
+  session_id: string | null
+  topic: string | null // the first question, without personal data, up to 80 characters
+  status: 'open' | 'ticket_pending' | 'ticket_sent' | string
+  ticket_id: string | null
+  records: number // answers and tickets written for the warranty claim
+}
+
 export interface ThreadView {
   thread_id: string
   session_id: string | null
@@ -438,6 +451,15 @@ export const getVerdict = (vehicleId: string, sessionId: string) =>
   )
 export const getThread = (vehicleId: string) =>
   json<ThreadView | null>(`/api/v2/threads/current?vehicle_id=${encodeURIComponent(vehicleId)}`)
+/** The vehicle's earlier conversations, newest first (#92): the mechanic comes back in an hour or in half a year. */
+export const getThreads = (vehicleId: string) =>
+  json<ThreadRow[]>(`/api/v2/vehicles/${encodeURIComponent(vehicleId)}/threads`)
+/** Continue an earlier conversation on this phone: it becomes the current one, the next question goes to it. */
+export const resumeThread = (threadId: string, vehicleId: string) =>
+  json<ThreadView>(`/api/v2/threads/${encodeURIComponent(threadId)}/resume`, post({ vehicle_id: vehicleId }))
+/** The record for a warranty claim: every answer with its pages, the model and the hash chain; `html` prints. */
+export const exportUrl = (vehicleId: string, threadId: string, format: 'html' | 'json') =>
+  `/api/v2/vehicles/${encodeURIComponent(vehicleId)}/threads/${encodeURIComponent(threadId)}/export?format=${format}`
 /** A manual page; with `quote` (the line found on it) the server also says where that line is printed. */
 export const getPage = (vehicleId: string, manualId: string, page: number, quote?: string) =>
   json<PageView>(
@@ -526,3 +548,68 @@ export async function streamChat(
     }
   }
 }
+
+// ---------- the chief mechanic's queue of contradictions between manuals (#93, docs/api-v2-web.md §6) ----------
+
+export type ContradictionStatus = 'open' | 'sent' | 'resolved'
+export type LetterTo = 'manufacturer' | 'support'
+export type ResolutionSource = LetterTo | 'chief_mechanic'
+
+/** A hand-over to the maker or to support. The server does not send the letter: this is the mark that it went. */
+export interface ContradictionSent {
+  to: LetterTo
+  by: string
+  at: string
+  text: string
+  channel: string // `none`: no channel on the pilot, the chief mechanic sends the text himself
+}
+
+export interface ContradictionResolution {
+  text: string
+  by: string
+  at: string
+  source: ResolutionSource
+  document: string | null
+}
+
+export interface ContradictionItem {
+  number: number
+  id: string
+  status: ContradictionStatus
+  engine: string
+  title: string
+  formulations: { label: string; manual_id: string; pdf_page: number; quote: string }[]
+  rule: string | null
+  safe_rule: string
+  count: number // how many answers it came up in
+  vehicles: string[]
+  first_seen: string
+  last_seen?: string
+  sent?: ContradictionSent[]
+  resolution?: ContradictionResolution | null
+}
+
+export interface ContradictionLetter {
+  to: LetterTo
+  text: string
+  channel: string
+}
+
+/** A line of the journal of decisions: only added to, with the hash of the line before it. */
+export type ContradictionEvent = { number: number; id: string; seq: number; at: string; by: string } & (
+  ({ event: 'sent' } & ContradictionSent) | ({ event: 'resolved' } & ContradictionResolution)
+)
+
+const CONTRADICTIONS = '/api/v2/contradictions'
+export const getContradictions = (status: ContradictionStatus | 'all' = 'all') =>
+  json<ContradictionItem[]>(`${CONTRADICTIONS}?status=${status}`)
+export const getContradictionJournal = () => json<ContradictionEvent[]>(`${CONTRADICTIONS}/journal`)
+export const getContradictionLetter = (number: number, to: LetterTo) =>
+  json<ContradictionLetter>(`${CONTRADICTIONS}/${number}/letter?to=${to}`)
+/** `text` only when the chief mechanic changed the draft: without it the server keeps its own. */
+export const sendContradiction = (number: number, body: { to: LetterTo; by: string; text?: string }) =>
+  json<ContradictionItem>(`${CONTRADICTIONS}/${number}/send`, post(body))
+export const resolveContradiction = (
+  number: number,
+  body: { text: string; by: string; source: ResolutionSource; document?: string },
+) => json<ContradictionItem>(`${CONTRADICTIONS}/${number}/resolve`, post(body))

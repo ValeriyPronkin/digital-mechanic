@@ -16,13 +16,15 @@ import {
 import { copy } from '../copy'
 import { checkLook, ticketFits } from '../lib/checks'
 import { dateShortRu, dateTimeRu } from '../lib/format'
+import { shownBefore, verdictAnchor } from '../lib/verdict'
 import { mergeTickets, withTicket } from '../lib/tickets'
-import { CHECKED, scrollsFurther } from '../lib/ui'
+import { CHECKED, scrollsFurther, scrollStep } from '../lib/ui'
 import { useThread, type AssistantTurn, type Turn } from '../useThread'
 import { ActionLog } from './ActionLog'
 import { Answer } from './Answer'
 import { ContradictionCard } from './ContradictionCard'
 import { GuideCard } from './GuideCard'
+import { ThreadHistory } from './ThreadHistory'
 import { PageSheet } from './PageSheet'
 import { SpeakButton } from './SpeakButton'
 import { levelOf, moreDetail, redoLevel, shorter, type Level } from '../lib/level'
@@ -33,6 +35,8 @@ import { offersRussian } from '../lib/lang'
 import { TicketCard } from './TicketCard'
 import { TicketSheet } from './TicketSheet'
 import { VerdictCard } from './VerdictCard'
+import { queueHref } from '../lib/contradictions'
+import { Explain } from './Explain'
 
 function SessionPicker({
   sessions,
@@ -77,14 +81,50 @@ function SessionPicker({
 const answerLevel = (turn: AssistantTurn): Level | null =>
   levelOf(turn.level_used) ?? levelOf(turn.passport?.question?.level)
 
+/** «По проверке S-0009 от 17 ноя: клапанный механизм ›» — the card of this check is already above in the
+ *  conversation (Валерий, 27.11: the whole card again under every answer). A tap scrolls back to it. */
+function VerdictAgain({ verdict: v }: { verdict: VerdictBlock }) {
+  const what = v.fault_title ?? copy.verdict.word[v.case]
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        document.getElementById(verdictAnchor(v.session_id))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+      title={copy.verdict.againHint}
+      className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg border border-line px-3 py-1.5 text-left text-[13px] text-dim hover:text-text"
+    >
+      <span className="min-w-0">
+        {copy.verdict.again(v.session_id, dateShortRu(v.checked_at), what.charAt(0).toLowerCase() + what.slice(1))}
+      </span>
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 20 20"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="shrink-0 -rotate-90 text-accent"
+        aria-hidden
+      >
+        <path d="M8 4l6 6-6 6" />
+      </svg>
+    </button>
+  )
+}
+
 function AssistantBlock({
   turn,
   sources,
   onOpenSource,
   manualNames,
   onRedo,
+  seenChecks,
 }: {
   onRedo?: (level: Level) => void // the last answer only: «Подробнее / Короче» for this answer
+  seenChecks: Set<string> // checks whose card an earlier turn shows: here they are one line (lib/verdict.ts)
   turn: AssistantTurn
   sources: Record<string, SourceItem>
   onOpenSource: (s: SourceItem, quote?: string, scanned?: boolean) => void
@@ -102,7 +142,13 @@ function AssistantBlock({
   const isGuide = (block: Block) => block.kind === 'guide'
   const show = (block: Block, key: number) =>
     block.kind === 'verdict' ? (
-      <VerdictCard key={key} verdict={block as VerdictBlock} />
+      seenChecks.has((block as VerdictBlock).session_id) ? (
+        <VerdictAgain key={key} verdict={block as VerdictBlock} />
+      ) : (
+        <div key={key} id={verdictAnchor((block as VerdictBlock).session_id)} className="scroll-mt-4">
+          <VerdictCard verdict={block as VerdictBlock} />
+        </div>
+      )
     ) : block.kind === 'guide' ? (
       <GuideCard
         key={key}
@@ -116,11 +162,30 @@ function AssistantBlock({
         {String((block as { message: string }).message)}
       </p>
     ) : null
+  // manuals disagree: right under the direct answer («Коротко»), as the code put it there (D-20), and never
+  // folded: Валерий did not see it at the end of a long answer (27.11)
+  const found = turn.blocks.filter((b) => b.kind === 'contradiction')
+  const contradictions = found.length > 0 && (
+    <div className="space-y-3">
+      {found.map((b, i) => (
+        <ContradictionCard
+          key={`c${i}`}
+          block={b as ContradictionBlock}
+          sources={sources}
+          onOpen={(s, quote) => onOpenSource(s, quote)}
+          onQueue={(n) => {
+            window.location.hash = queueHref({ view: 'item', number: n })
+          }}
+        />
+      ))}
+    </div>
+  )
   return (
     <div className="space-y-3">
       {turn.blocks.map((block, i) => (noModel && isGuide(block) ? null : show(block, i)))}
       {turn.text && (
         <Answer
+          afterLead={contradictions || undefined}
           text={turn.text}
           sources={sources}
           verified={new Set(turn.verification?.verified)}
@@ -178,22 +243,16 @@ function AssistantBlock({
                 {copy.level.shorter}
               </button>
             )}
+            <Explain label={copy.level.explain} icon>
+              <p>{copy.level.explainText}</p>
+            </Explain>
           </div>
         )
       })()}
       {/* the short spoken version: value, document, page — for busy hands (#14) */}
       {!turn.live && turn.speech && <SpeakButton speech={turn.speech} />}
-      {/* manuals disagree: under the direct answer, as the code put it there (D-20) */}
-      {turn.blocks
-        .filter((b) => b.kind === 'contradiction')
-        .map((b, i) => (
-          <ContradictionCard
-            key={`c${i}`}
-            block={b as ContradictionBlock}
-            sources={sources}
-            onOpen={(s, quote) => onOpenSource(s, quote)}
-          />
-        ))}
+      {/* no answer text to stand under: the contradiction stands here, as before */}
+      {!turn.text && contradictions}
       {turn.progress && (
         <p className="text-dim" role="status" aria-live="polite">
           {turn.progress}
@@ -250,6 +309,44 @@ function Header({ title, onBack, children }: { title: ReactNode; onBack: () => v
 }
 
 /** One vehicle: its checks, the result of the selected one, the conversation, the ticket. */
+/** The arrow on the edge of the row of ready-made questions: there are more that way. A round 36 px button
+ *  over the row's end, on a band of the page's colour so it never sits on a question's text; the tap area
+ *  is 48 px. Out of the tab order: the questions themselves are reached by Tab, and the row follows focus. */
+function QuickArrow({ dir, label, onPress }: { dir: 1 | -1; label: string; onPress: () => void }) {
+  return (
+    <div
+      className={`pointer-events-none absolute inset-y-0 flex items-center ${
+        dir > 0
+          ? '-right-4 bg-gradient-to-l pr-2 pl-6 min-[900px]:right-0 min-[900px]:pr-0'
+          : '-left-4 bg-gradient-to-r pr-6 pl-2 min-[900px]:left-0 min-[900px]:pl-0'
+      } from-bg from-55% to-transparent`}
+    >
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label={label}
+        title={label}
+        onClick={onPress}
+        className="pointer-events-auto relative grid size-9 place-items-center rounded-full border border-line bg-surface-2 text-accent before:absolute before:-inset-1.5 before:content-[''] hover:border-accent"
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d={dir > 0 ? 'M8 4l6 6-6 6' : 'M12 4l-6 6 6 6'} />
+        </svg>
+      </button>
+    </div>
+  )
+}
+
 export function VehicleScreen({
   vehicleId,
   onBack,
@@ -287,9 +384,17 @@ export function VehicleScreen({
   // right edge; at its end, and when it fits or wraps (a wide screen), it does not.
   const quickRow = useRef<HTMLDivElement>(null)
   const [quickMore, setQuickMore] = useState(false)
+  const [quickBack, setQuickBack] = useState(false)
   const measureQuick = () => {
     const row = quickRow.current
     setQuickMore(row !== null && scrollsFurther(row.scrollLeft, row.scrollWidth, row.clientWidth))
+    setQuickBack(row !== null && row.scrollLeft > 1)
+  }
+  // The fade alone was not seen on a laptop (Валерий, 27.11): an arrow on the edge says the row goes on, and
+  // a press moves it there. Mouse users have no swipe; on a phone the arrow is a second way to the same place.
+  const scrollQuick = (dir: 1 | -1) => {
+    const row = quickRow.current
+    row?.scrollBy({ left: dir * scrollStep(row.clientWidth), behavior: 'smooth' })
   }
   useLayoutEffect(measureQuick) // after every render: «Создать заявку» comes and goes, the row hides while typing
   useEffect(() => {
@@ -319,6 +424,19 @@ export function VehicleScreen({
   const pick = (id: string) => {
     picked.current = true
     setSessionId(id)
+  }
+  // «Обращения по машине»: asked again when an answer ends (a new conversation may have started)
+  const [historyTick, setHistoryTick] = useState(0)
+  const wasBusy = useRef(false)
+  useEffect(() => {
+    if (wasBusy.current && !thread.busy) setHistoryTick((n) => n + 1)
+    wasBusy.current = thread.busy
+  }, [thread.busy])
+  // An earlier conversation continued: the screen loads it as the current one, on its own check.
+  const resumed = () => {
+    picked.current = false
+    setHistoryTick((n) => n + 1)
+    setAttempt((n) => n + 1)
   }
   const restored = thread.sessionId
   useEffect(() => {
@@ -427,6 +545,8 @@ export function VehicleScreen({
   const ticketOpen = thread.pending !== null && thread.pending.pending_id !== dismissed
   const typing = draft.trim() !== '' // a stray space or an empty dictation is not a question being typed
 
+  // the check's card is drawn whole once; a later turn about the same check carries one line back to it
+  const seenBefore = shownBefore(thread.turns.map((t) => (t.role === 'assistant' ? t.blocks : [])))
   const showTurn = (turn: Turn, i: number) =>
     turn.role === 'user' ? (
       <p
@@ -451,6 +571,7 @@ export function VehicleScreen({
         sources={thread.sources}
         onOpenSource={openSource}
         manualNames={manualNames}
+        seenChecks={seenBefore[i] ?? new Set()}
         onRedo={i === thread.turns.length - 1 && !thread.busy ? (l) => send(copy.level.ask[l], false, l) : undefined}
       />
     )
@@ -520,6 +641,13 @@ export function VehicleScreen({
               {copy.vehicle.diagnose}
             </button>
           </section>
+          <ThreadHistory
+            vehicleId={vehicleId}
+            currentId={thread.threadId}
+            refresh={historyTick}
+            disabled={thread.busy}
+            onResumed={resumed}
+          />
           {earlier.length > 0 && (
             <section className="space-y-3">
               <p className="text-[13px] text-dim">{copy.ticket.earlier}</p>
@@ -554,37 +682,41 @@ export function VehicleScreen({
               else: the level is chosen per question by the server, and changed under the answer (#91). */}
           <div className="space-y-2 min-[900px]:flex min-[900px]:items-center min-[900px]:gap-3 min-[900px]:space-y-0">
             {(canTicket || !typing) && (
-              <div
-                ref={quickRow}
-                data-waits
-                onScroll={measureQuick}
-                onWheel={(e) => {
-                  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY
-                }}
-                className={`no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 min-[900px]:mx-0 min-[900px]:min-w-0 min-[900px]:flex-1 min-[900px]:px-0 ${quickMore ? 'fade-right' : ''}`}
-              >
-                {canTicket && (
-                  <button
-                    type="button"
-                    disabled={thread.busy}
-                    onClick={() => send(copy.thread.createTicketMessage)}
-                    className="min-h-12 shrink-0 rounded-lg border border-accent px-3 font-semibold text-accent enabled:hover:bg-accent/10 disabled:opacity-50 min-[900px]:pointer-fine:min-h-9 min-[900px]:pointer-fine:text-[13px]"
-                  >
-                    {copy.thread.createTicket}
-                  </button>
-                )}
-                {!typing &&
-                  copy.thread.quick.map((q) => (
+              <div className="relative min-[900px]:min-w-0 min-[900px]:flex-1">
+                <div
+                  ref={quickRow}
+                  data-waits
+                  onScroll={measureQuick}
+                  onWheel={(e) => {
+                    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY
+                  }}
+                  className={`no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 min-[900px]:mx-0 min-[900px]:px-0 ${quickMore ? 'fade-right' : ''}`}
+                >
+                  {canTicket && (
                     <button
-                      key={q}
                       type="button"
                       disabled={thread.busy}
-                      onClick={() => send(q)}
-                      className="min-h-12 shrink-0 rounded-lg border border-line px-3 text-[13px] text-dim hover:text-text disabled:opacity-50 min-[900px]:pointer-fine:min-h-9"
+                      onClick={() => send(copy.thread.createTicketMessage)}
+                      className="min-h-12 shrink-0 rounded-lg border border-accent px-3 font-semibold text-accent enabled:hover:bg-accent/10 disabled:opacity-50 min-[900px]:pointer-fine:min-h-9 min-[900px]:pointer-fine:text-[13px]"
                     >
-                      {q}
+                      {copy.thread.createTicket}
                     </button>
-                  ))}
+                  )}
+                  {!typing &&
+                    copy.thread.quick.map((q) => (
+                      <button
+                        key={q}
+                        type="button"
+                        disabled={thread.busy}
+                        onClick={() => send(q)}
+                        className="min-h-12 shrink-0 rounded-lg border border-line px-3 text-[13px] text-dim hover:text-text disabled:opacity-50 min-[900px]:pointer-fine:min-h-9"
+                      >
+                        {q}
+                      </button>
+                    ))}
+                </div>
+                {quickBack && <QuickArrow dir={-1} label={copy.thread.quickPrev} onPress={() => scrollQuick(-1)} />}
+                {quickMore && <QuickArrow dir={1} label={copy.thread.quickNext} onPress={() => scrollQuick(1)} />}
               </div>
             )}
           </div>
