@@ -487,7 +487,20 @@ _DIAG = re.compile(
 _CARD_ASK = re.compile(
     r"что с двигател|что делать|что случил|что (?:это )?значит|почему|неисправност|диагноз|карточк", re.I
 )
+# Кнопка «Получить результат диагностики» и вопросы о карточке без своих слов: в тексте нечего искать.
+_DIAG_ASK = re.compile(
+    r"^\W*(?:получить результат диагностики|результат (?:диагностики|проверки)|что с двигателем|"
+    r"что (?:теперь )?делать|что случилось)\W*$",
+    re.I,
+)
 _DOC_SHORT = {"re": "РЭ", "rk": "РК"}
+
+
+def _fault_query(card: VerdictCard) -> str | None:
+    """Запрос по неисправности из карточки: название и термины руководства из глоссария. Иначе None."""
+    if card.status != "anomaly" or not card.compatible or not card.fault_title:
+        return None
+    return " ".join([card.fault_title, *glossary.expand(card.fault_title)])
 
 
 def _manual_kind(manual: str) -> str:
@@ -1371,8 +1384,11 @@ class Agent:
         guide_only = search_engine() == "nikita" and bool(_CARD_ASK.search(question)) and self._has_guide(conv)
         if PREFETCH_K > 0 and not _TICKET_ASK.search(question) and not skip and not guide_only:
             # план от модели — только для перевода (язык — кодом); русский вопрос ищется сам + глоссарий
+            fault = _fault_query(card) if _DIAG_ASK.search(question) else None
             plan = (
-                self._search_plan(conv, question, request_id, steps)
+                {"lang": "ru", "question_ru": fault, "queries": []}  # по неисправности, не по тексту кнопки
+                if fault
+                else self._search_plan(conv, question, request_id, steps)
                 if self.plan_search and (not deterministic_mode() or glossary.needs_translation(question))
                 else {"lang": "ru", "question_ru": mask_pii(question), "queries": [mask_pii(question)]}
             )
