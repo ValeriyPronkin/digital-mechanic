@@ -19,8 +19,14 @@ COPY --from=web /web/dist ./web/dist
 RUN uv sync --frozen --no-dev && chown -R app:app /app
 
 USER app
+# Версия в /health (поле build): коммит и время сборки — от workflow (`--build-arg`), без .git в образе.
+# Аргументы — после установки зависимостей: новый коммит не сбрасывает кэш слоёв.
+ARG GIT_SHA=unknown
+ARG BUILD_TIME=unknown
 ENV PATH="/app/.venv/bin:$PATH" \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    GIT_SHA=$GIT_SHA \
+    BUILD_TIME=$BUILD_TIME
 # Порт — из PORT (Serverless Containers передаёт его сам, обычно 8080); локально, в compose и смоуке — 8000.
 EXPOSE 8000
 CMD ["sh", "-c", "exec uvicorn service.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
