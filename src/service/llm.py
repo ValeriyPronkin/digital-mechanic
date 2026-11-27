@@ -196,6 +196,91 @@ class DeepSeekProvider:
         )
 
 
+class DeepSeekAnthropicProvider:
+    """DeepSeek через Anthropic-совместимый адрес (`LLM_API=anthropic`): так подключал модель Никита
+    (`LLM_BASE_URL=https://api.deepseek.com/anthropic`, docs/economics.md его репозитория). С `LLM_EFFORT`
+    (у Никиты `low`) модель перед ответом рассуждает (блоки `thinking`); без него — отвечает сразу.
+    Блоки рассуждения ход с инструментами возвращает в следующем запросе как есть — их помнит провайдер."""
+
+    name = "deepseek"
+    BASE_URL = "https://api.deepseek.com/anthropic"
+
+    def __init__(self, api_key: str | None = None, model: str | None = None, http: httpx.Client | None = None) -> None:
+        key = api_key or os.environ.get("DEEPSEEK_API_KEY", "")
+        if not key:
+            raise LLMError("Не задан DEEPSEEK_API_KEY.")
+        self.model = model or os.environ.get("LLM_MODEL") or "deepseek-chat"
+        self.effort = os.environ.get("LLM_EFFORT", "").strip()
+        self.http = http or httpx.Client(base_url=self.BASE_URL, timeout=TIMEOUT)
+        self._auth = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+        self._blocks: dict[str, list[dict[str, Any]]] = {}  # id первого вызова → блоки ответа модели целиком
+
+    def to_wire(self, messages: list[Message]) -> tuple[str, list[dict[str, Any]]]:
+        system = "\n\n".join(str(m["content"]) for m in messages if m["role"] == "system")
+        out: list[dict[str, Any]] = []
+
+        def add(role: str, blocks: list[dict[str, Any]]) -> None:
+            if out and out[-1]["role"] == role:  # подряд идущие ходы одной роли — один ход
+                out[-1]["content"].extend(blocks)
+            else:
+                out.append({"role": role, "content": blocks})
+
+        for m in messages:
+            if m["role"] == "system":
+                continue
+            if m["role"] == "assistant" and m.get("tool_calls"):
+                calls = m["tool_calls"]
+                raw = self._blocks.get(calls[0].id)
+                if raw is None:
+                    raw = [{"type": "text", "text": m["content"]}] if m.get("content") else []
+                    raw += [{"type": "tool_use", "id": c.id, "name": c.name, "input": c.arguments} for c in calls]
+                add("assistant", list(raw))
+            elif m["role"] == "tool":
+                add("user", [{"type": "tool_result", "tool_use_id": m["tool_call_id"], "content": str(m["content"])}])
+            elif m.get("content"):
+                add(m["role"], [{"type": "text", "text": str(m["content"])}])
+        return system, out
+
+    def chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec],
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> LLMReply:
+        system, wire = self.to_wire(messages)
+        body: dict[str, Any] = {
+            "model": self.model,
+            "system": system,
+            "messages": wire,
+            "max_tokens": max_tokens or default_max_tokens(),
+            "temperature": default_temperature() if temperature is None else temperature,
+        }
+        if self.effort:  # рассуждение тратит выходные токены: к пределу ответа — запас (у Никиты предел 4000)
+            body["output_config"] = {"effort": self.effort}
+            body["max_tokens"] += int(os.environ.get("LLM_EFFORT_EXTRA_TOKENS", "3000"))
+        if tools:
+            body["tools"] = [
+                {"name": t.name, "description": t.description, "input_schema": t.parameters} for t in tools
+            ]
+        data = _post(self.http, "/v1/messages", json=body, headers=self._auth)
+        blocks = data.get("content") or []
+        calls = [ToolCall(b["id"], b["name"], _args(b.get("input"))) for b in blocks if b.get("type") == "tool_use"]
+        if calls:
+            self._blocks[calls[0].id] = blocks
+        usage = data.get("usage") or {}
+        cached = int(usage.get("cache_read_input_tokens") or 0)
+        return LLMReply(
+            content="".join(b.get("text", "") for b in blocks if b.get("type") == "text"),
+            tool_calls=calls,
+            tokens_in=int(usage.get("input_tokens") or 0) + cached + int(usage.get("cache_creation_input_tokens") or 0),
+            tokens_out=int(usage.get("output_tokens") or 0),
+            tokens_cached=cached,
+            truncated=data.get("stop_reason") == "max_tokens",
+            model=str(data.get("model", self.model)),
+        )
+
+
 class GigaChatProvider:
     name = "gigachat"
     OAUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
@@ -292,6 +377,8 @@ class GigaChatProvider:
 def provider_from_env() -> LLMProvider:
     name = os.environ.get("LLM_PROVIDER", "deepseek").strip().lower()
     if name == "deepseek":
+        if os.environ.get("LLM_API", "").strip().lower() == "anthropic":  # как у Никиты; по умолчанию — OpenAI
+            return DeepSeekAnthropicProvider()
         return DeepSeekProvider()
     if name == "gigachat":
         return GigaChatProvider()
