@@ -1,4 +1,4 @@
-.PHONY: run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check reset-demo logs spend-probe eval-open eval-golden eval-sweep eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt cost cost-xlsx cost-final index kb-publish kb-fetch pages-render pages-publish
+.PHONY: run-local stop-local mocks-local stop-mocks-local parts-demo stop-parts-demo web web-test engineer-pack demo-check reset-demo logs spend-probe eval-open eval-golden eval-sweep eval-stability setup install run mocks check lint types test stubs third-party secrets hooks smoke fmt materials cost cost-xlsx cost-final index kb-publish kb-fetch pages-render pages-publish
 
 PORT ?= 8000
 
@@ -12,12 +12,17 @@ hooks:
 	git config core.hooksPath .githooks
 	@echo "git-хуки включены: .githooks (pre-commit, pre-push)"
 
-## Одна команда для запуска: зависимости и сервис на http://localhost:$(PORT)
-run: install
+## Материалы задачи (карточки ТС, ответы ML, справочник) — не в git: архив по ссылке MATERIALS_URL из .env →
+## data/ и vendor/neurodvs_mock/data/, сверка с data/materials.lock.json. Повторный запуск ничего не качает
+materials: install
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/materials.py
+
+## Одна команда для запуска: зависимости, материалы задачи и сервис на http://localhost:$(PORT)
+run: install materials
 	uv run $(if $(wildcard .env),--env-file .env,) uvicorn service.main:app --host 0.0.0.0 --port $(PORT)
 
 ## Заглушки заказчика без Docker: Mock ML на :8001, Mock ТОиР на :8002 (Ctrl+C — остановить обе)
-mocks: install
+mocks: install materials
 	uv run uvicorn --app-dir vendor/neurodvs_mock mock_ml.app:app --port 8001 & \
 	uv run uvicorn --app-dir vendor/neurodvs_mock mock_toir.app:app --port 8002; \
 	kill $$! 2>/dev/null; wait

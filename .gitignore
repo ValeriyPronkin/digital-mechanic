@@ -25,3 +25,14 @@ reports/*engineer-pack*.html
 # Матрица «код × двигатель» — 450 цитат руководств, то есть текстовый индекс: в git её нет (#96, шаг 2).
 # Сборка пишет её в data/ и в INDEX_DIR; стенд скачивает её из бакета вместе с индексом (kb_store.FILES).
 data/fault_matrix.json
+
+# Материалы задачи — не в git (указание организаторов 27.11): данные заглушек (ответы диагностики,
+# карточки ТС), справочник неисправностей, PDF и архивы. Приносит `make materials`; в git — только замок
+# data/materials.lock.json (пути, размеры, SHA-256).
+/data/vehicles.json
+/data/fault_types.json
+/vendor/neurodvs_mock/data/*
+*.pdf
+*.PDF
+*.docx
+neurodvs_hackathon_mock_*.zip

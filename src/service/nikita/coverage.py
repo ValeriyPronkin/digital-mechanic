@@ -22,10 +22,14 @@ Coverage = Literal["covered", "general_inspection_only", "not_covered"]
 
 
 class _Faults:
-    """Коды неисправностей из нашего справочника data/fault_types.json (у Никиты — registry/faults.yaml)."""
+    """Коды неисправностей из справочника data/fault_types.json (у Никиты — registry/faults.yaml).
+
+    Справочник — материал задачи вне git (`make materials`); на стенде папку задаёт DATA_DIR."""
 
     def __init__(self) -> None:
-        data = json.loads((ROOT / "data" / "fault_types.json").read_text(encoding="utf-8"))
+        from service.fleet import DATA_DIR
+
+        data = json.loads((DATA_DIR / "fault_types.json").read_text(encoding="utf-8"))
         self.faults = {f["code"]: f["title"] for f in data}
 
 

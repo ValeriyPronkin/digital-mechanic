@@ -16,6 +16,9 @@ services:
       # Внутри compose сервис ходит в заглушки по именам сервисов, а не по адресам из .env.
       MOCK_ML_URL: http://mock-ml:8001
       MOCK_TOIR_URL: http://mock-toir:8002
+      # Материалы задачи вне git: после `make materials` они уже в образе; иначе контейнер скачает их сам.
+      MATERIALS_URL: ${MATERIALS_URL:-}
+      MATERIALS_TOKEN: ${MATERIALS_TOKEN:-}
     depends_on:
       mock-ml:
         condition: service_healthy
@@ -36,6 +39,8 @@ services:
     environment:
       MOCK_APP: mock_ml.app:app
       PORT: "8001"
+      MATERIALS_URL: ${MATERIALS_URL:-}
+      MATERIALS_TOKEN: ${MATERIALS_TOKEN:-}
     ports:
       - "8001:8001"
     healthcheck: &mock-health
@@ -52,6 +57,8 @@ services:
     environment:
       MOCK_APP: mock_toir.app:app
       PORT: "8002"
+      MATERIALS_URL: ${MATERIALS_URL:-}
+      MATERIALS_TOKEN: ${MATERIALS_TOKEN:-}
     ports:
       - "8002:8002"
     healthcheck:

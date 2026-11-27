@@ -1,0 +1,30 @@
+{
+ "about": "Материалы задачи вне git (указание организаторов 27.11): только пути, размеры и SHA-256, без содержимого. Файлы приносит make materials (scripts/materials.py) из архива по ссылке MATERIALS_URL.",
+ "archive": "архив материалов задачи «Цифровой механик»; файлы — во вложенном neurodvs_hackathon_mock_2026-11-16.zip",
+ "files": [
+  {
+   "path": "data/vehicles.json",
+   "member": "neurodvs_hackathon_mock_2026-11-16/data/vehicles.json",
+   "size": 104629,
+   "sha256": "7011e79870b97cba26c08ea8323ba90a316b17bcde185693e59a2582db359ac8"
+  },
+  {
+   "path": "data/fault_types.json",
+   "member": "neurodvs_hackathon_mock_2026-11-16/data/fault_types.json",
+   "size": 1103,
+   "sha256": "021bf7ffc72a659774bc23b43b21a5e26d47f9326fcd6bd2899e31589bb5fe35"
+  },
+  {
+   "path": "vendor/neurodvs_mock/data/vehicles.json",
+   "member": "neurodvs_hackathon_mock_2026-11-16/data/vehicles.json",
+   "size": 104629,
+   "sha256": "7011e79870b97cba26c08ea8323ba90a316b17bcde185693e59a2582db359ac8"
+  },
+  {
+   "path": "vendor/neurodvs_mock/data/fault_types.json",
+   "member": "neurodvs_hackathon_mock_2026-11-16/data/fault_types.json",
+   "size": 1103,
+   "sha256": "021bf7ffc72a659774bc23b43b21a5e26d47f9326fcd6bd2899e31589bb5fe35"
+  }
+ ]
+}

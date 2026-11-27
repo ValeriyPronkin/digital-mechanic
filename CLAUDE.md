@@ -101,7 +101,7 @@
 **Контракты (ТЗ v6, имена полей строго такие):**
 - `POST {MOCK_ML_URL}/diagnose` {vehicle_id, session_id} → status `normal|anomaly|check_failed`, anomaly_type `F01…F14|null`, anomaly_title, anomaly_score, confidence, signal_quality `good|warning|bad`, description, model_version. 404 — нет машины/проверки, 422 — не по схеме.
 - `POST {MOCK_TOIR_URL}/tickets` {vehicle_id, session_id, anomaly_type, conclusion, urgency `low|medium|high`, operations[] непусто, spare_parts[], references[{manual, pdf_page ≥ 1}] непусто} → 201 {ticket_id, status}.
-- Список ТС и история проверок — из `data/vehicles.json`; справочник — `data/fault_types.json`. Модель двигателя — только из карточки ТС.
+- Список ТС и история проверок — из `data/vehicles.json`; справочник — `data/fault_types.json`. Модель двигателя — только из карточки ТС. Оба файла — материалы задачи, **в git не кладём** (указание организаторов 27.11): `make materials` по ссылке `MATERIALS_URL`, замок — `data/materials.lock.json`.
 
 **Правила, которые охраняет код, а не модель:**
 1. Поведение по `status`: `normal` — продолжить эксплуатацию, заявки нет; `anomaly` — тип, уверенность, риск, рекомендация; `check_failed` — никаких выводов о двигателе, попросить повторить запись, заявки нет.
