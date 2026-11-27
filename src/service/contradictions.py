@@ -1,8 +1,10 @@
 """Противоречивые инструкции в руководствах одного двигателя (требование заказчика, 26.11).
 
-Агент не выбирает одну формулировку как бесспорную: показывает все дословно с документом и страницей, отмечает
-«Противоречие в документации» и рекомендует уточнить у производителя двигателя для своей модификации (правило заказчика
-27.11: «к специалисту» не подходит — механик сам специалист).
+Агент не выбирает одну формулировку как бесспорную: показывает все дословно с документом и страницей и отмечает
+«Противоречие в документации». Совета механику («уточните у производителя / специалиста») нет — вместо него действие
+системы (Валерий, 27.11): противоречие ставится в очередь главного механика (`service.escalation`), под формулировками —
+«Передано главному механику на решение (№ N). Пока — безопасное правило: …», а после решения — «Решение по
+противоречию (источник, дата): …» рядом с формулировками, не вместо них.
 
 Два слоя, оба — кодом:
 1. Известные противоречия (`data/contradictions.json`): по двигателю и теме вопроса код сам строит блок с цитатами
@@ -27,7 +29,8 @@ from service.manuals.catalog import DOCS_BY_ID, canonical_engine
 
 PATH = Path(__file__).resolve().parents[2] / "data" / "contradictions.json"
 HEADER = "⚠ Противоречие в документации"
-ADVICE = "Для вашей модификации двигателя уточните у производителя двигателя."
+# строка эскалации под формулировками (её текст — `escalation.escalation_line`); по ней блок находит интерфейс v2
+ESCALATION = re.compile(r"^(?:Передано главному механику на решение|Решение по противоречию)\b.*$", re.M)
 _DOC_SHORT = {"re": "РЭ", "rk": "РК"}
 
 
@@ -97,7 +100,12 @@ def match_answer(engine: str, answer: str) -> Known | None:
 _SENT = re.compile(r"(?<=[.!?])\s+")
 _LIST_PREFIX = re.compile(r"^(\s*(?:\d+[.)]|[-*•])\s+)")
 _NO_CONTRADICTION = re.compile(r"противоречи\w* (?:в документации )?нет", re.I)
-_ADVICE_DUP = re.compile(r"^\s*(?:\W\s*)?уточните у (?:специалиста|производителя)", re.I)
+# совет «уточнить / сообщить / обратиться» от модели — убрать: противоречие передаёт главному механику код
+_ADVICE_DUP = re.compile(
+    r"^\s*(?:\W\s*)?(?:для вашей модификации[^.]*?)?(?:уточните|сообщите|обратитесь|проконсультируйтесь)\s+"
+    r"(?:\w+\s+)?(?:у|к|с)?\s*(?:специалист|производител|завод|дилер|сервис)",
+    re.I,
+)
 _CONCLUSION = re.compile(r"^\s*\**Вывод\**:", re.I)
 
 
@@ -139,15 +147,17 @@ def verified_quotes(k: Known, page_text: Callable[[str, int], str | None] | None
     return out
 
 
-def block(k: Known, quotes: list[Quote], refs: dict[tuple[str, int], str]) -> str:
+def block(k: Known, quotes: list[Quote], refs: dict[tuple[str, int], str], escalation: str) -> str:
+    """Блок кода: формулировки дословно со страницами, вывод заказчика (если есть) и строка эскалации."""
     lines = [f"{HEADER} — {k.title}:"]
     for q in quotes:
         ref = refs.get((q.doc, q.page))
         lines.append(f"- {q.label()}: «{q.quote}»" + (f" [{ref}]" if ref else ""))
     if k.conclusion:
-        lines.append(f"Вывод: {k.conclusion} Основание — {k.basis}. {ADVICE}")
+        lines.append(f"Вывод: {k.conclusion} Основание — {k.basis}.")
     else:  # правила заказчика нет — ни одно значение не выбираем
-        lines.append(f"Какое значение верно для вашего двигателя, руководства не уточняют. {ADVICE}")
+        lines.append("Какое значение верно для вашего двигателя, руководства не уточняют.")
+    lines.append(escalation)
     return "\n".join(lines)
 
 
@@ -168,9 +178,14 @@ _MODEL_HEADER = re.compile(r"^\s*(?:[⚠*#>\-\s]*)противоречи[ея] �
 _QUOTE_REF = re.compile(r"«([^»]{12,})»[^\n]*?\[(R\d+)\]")
 
 
-def check_model_blocks(text: str, source_text: Callable[[str], str | None]) -> tuple[str, list[str]]:
+def check_model_blocks(
+    text: str,
+    source_text: Callable[[str], str | None],
+    escalate: Callable[[list[tuple[str, str]]], str] | None = None,
+) -> tuple[str, list[str]]:
     """Блок «Противоречие в документации» от модели: каждая цитата «…» [R…] — на странице этой ссылки.
-    Меньше двух подтверждённых цитат — блок (заголовок и его строки до пустой строки) убирается."""
+    Меньше двух подтверждённых цитат — блок (заголовок и его строки до пустой строки) убирается. Подтверждённый —
+    без совета модели; `escalate([(цитата, R…), …])` ставит его в очередь и даёт строку эскалации."""
     lines = text.split("\n")
     out: list[str] = []
     notes: list[str] = []
@@ -184,16 +199,16 @@ def check_model_blocks(text: str, source_text: Callable[[str], str | None]) -> t
         while j < len(lines) and lines[j].strip():
             j += 1
         blk = lines[i:j]
-        good = 0
+        good: list[tuple[str, str]] = []
         for ln in blk:
             for quote, ref in _QUOTE_REF.findall(ln):
                 src = source_text(ref)
                 if src and normalize(quote) in normalize(src):
-                    good += 1
-        if good >= 2:
-            out.extend(blk)
-            if not any("уточн" in ln.lower() for ln in blk):
-                out.append(ADVICE)
+                    good.append((quote, ref))
+        if len(good) >= 2:
+            out.extend(ln for ln in blk if not _ADVICE_DUP.search(ln) and not ESCALATION.match(ln))
+            if escalate is not None:
+                out.append(escalate(good))
         else:
             notes.append("Противоречие не подтверждено цитатами со страниц — блок убран.")
         i = j
