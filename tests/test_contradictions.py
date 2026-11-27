@@ -1,5 +1,5 @@
 """Противоречивые инструкции (требование заказчика, 26.11): обе формулировки дословно со страницами, отметка
-противоречия, совет уточнить у производителя двигателя; известный кейс ЯМЗ-236 — вывод «регулировать на холодном»."""
+противоречия, безопасное правило из страниц; известный кейс ЯМЗ-236 — вывод «регулировать на холодном»."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from service.clients import MLClient, ToirClient
-from service.contradictions import ESCALATION, HEADER, check_model_blocks, known, verified_quotes
+from service.contradictions import ESCALATION, HEADER, RULE, check_model_blocks, known, verified_quotes
 from service.manual_search import ManualHit
 from test_agent import make_agent, say
 
@@ -48,7 +48,7 @@ def _ask(ml: MLClient, toir: ToirClient, answer: str, question: str = QUESTION, 
 def test_known_case_shows_all_quotes_marks_and_concludes_cold(ml: MLClient, toir: ToirClient) -> None:
     reply, _ = _ask(ml, toir, "Можно в течение 15 минут после остановки [R1].")
     text = reply.text
-    assert HEADER in text and ADVICE in text
+    assert HEADER in text and "уточните" not in text
     for quote in (RE31, RK269, RK276):
         assert quote in text  # каждая формулировка — дословно
     assert "стр. 31" in text and "стр. 269" in text and "стр. 276" in text
@@ -93,7 +93,8 @@ def test_safe_line_once_outside_list(ml: MLClient, toir: ToirClient) -> None:
 
 def test_model_own_conclusion_dropped_one_conclusion_left(ml: MLClient, toir: ToirClient) -> None:
     reply, _ = _ask(ml, toir, "Нет, дайте остыть.\n\nВывод: можно через 15 минут.\n\n1. Снять крышки [R1].")
-    assert reply.text.count("Вывод:") == 1 and "можно через 15 минут" not in reply.text
+    assert "Вывод:" not in reply.text and reply.text.count("Безопасное правило:") == 1
+    assert "можно через 15 минут" not in reply.text
     assert "\n\n\n" not in reply.text
 
 
@@ -116,8 +117,9 @@ def test_without_page_text_no_contradiction_claimed(ml: MLClient, toir: ToirClie
 def test_model_block_kept_only_with_two_verified_quotes() -> None:
     sources = {"R1": PAGES[("yamz-236-re", 31)], "R2": PAGES[("yamz-236-rk", 269)]}
     good = f"Ответ.\n\nПротиворечие в документации:\n- «{RE31}» [R1]\n- «{RK269}» [R2]"
-    text, notes = check_model_blocks(good, sources.get, lambda found: f"{ADVICE}9). Пока — …")
-    assert RE31 in text and RK269 in text and ADVICE in text and not notes and ESCALATION.search(text)
+    line = f"{ADVICE}9). Пока — по безопасному правилу выше."
+    text, notes = check_model_blocks(good, sources.get, lambda found: line)
+    assert RE31 in text and RK269 in text and RULE in text and ADVICE in text and not notes and ESCALATION.search(text)
     fake = f"Ответ.\n\nПротиворечие в документации:\n- «{RE31}» [R1]\n- «Регулировать на горячем двигателе сразу.» [R2]"
     text, notes = check_model_blocks(fake, sources.get)
     assert "Противоречие" not in text and "горячем" not in text and notes  # вторая цитата не со страницы — убрано
@@ -172,7 +174,7 @@ def test_main_bearing_torque_both_values_no_pick(ml: MLClient, toir: ToirClient)
     ag, _ = make_agent([say("Затянуть 430-470 Н·м [R1].\n\n1. В три приёма.")], ml, toir, TorquePages())
     question = "С каким моментом тянуть болты крышек коренных подшипников?"
     text = ag.ask(ag.start("B418HK98", "S-0007"), question).text
-    assert HEADER in text and ADVICE in text and "Вывод:" not in text  # правила заказчика нет — не выбираем
+    assert HEADER in text and RULE in text and "Вывод:" not in text  # правила заказчика нет — правило из страниц
     assert "421-461" in text and "430-470 (43-47)" in text
     for page in (41, 56, 248, 286):
         assert f"стр. {page}" in text

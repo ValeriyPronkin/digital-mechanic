@@ -32,7 +32,9 @@ def test_no_draft_on_drive_question(ml: MLClient, toir: ToirClient) -> None:
     refused = [m for m in llm.seen[-1] if m["role"] == "tool" and m.get("name") == "draft_ticket"]
     assert refused and TICKET_NOT_ASKED in str(refused[0]["content"])
     first = reply.text.split("\n\n")[0]
-    assert first.startswith("**Ездить нельзя:**") and "не эксплуатировать" in first  # вердикт — кодом, первым
+    # вердикт кода — первым, но рекомендация, а не запрет: запрет — только словами руководства с его страницей
+    assert first.startswith("**Прямого запрета эксплуатации") and "дефектовка до выпуска в рейс" in first
+    assert "нельзя" not in first and "не эксплуатировать" not in first
 
 
 def test_model_verdict_kept(ml: MLClient, toir: ToirClient) -> None:

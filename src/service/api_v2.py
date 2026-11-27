@@ -319,10 +319,11 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
     while end < len(lines) and lines[end].startswith("- "):
         item_lines.append(lines[end])
         end += 1
-    conclusion_line = end < len(lines) and not contradictions.ESCALATION.match(lines[end])
-    esc_at = end + 1 if conclusion_line else end  # строка вывода (если есть), затем строка эскалации
-    if esc_at >= len(lines) or not contradictions.ESCALATION.match(lines[esc_at]) or len(item_lines) != len(quotes):
+    last = lines[end] if end < len(lines) else ""
+    if not last.startswith(contradictions.RULE) or len(item_lines) != len(quotes):
         return None, text
+    # под правилом — строка эскалации (если очередь её дала)
+    esc_at = end + 1 if end + 1 < len(lines) and contradictions.ESCALATION.match(lines[end + 1]) else None
     pages = {(q.doc, q.page) for q in quotes}
     refs = {(s.manual_id, s.pdf_page): s.ref for s in conv.sources.values() if (s.manual_id, s.pdf_page) in pages}
     items = []
@@ -339,23 +340,18 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
                 "note": tail.strip().strip("()").strip() or None,
             }
         )
-    conclusion = (
-        f"{k.conclusion} Основание — {k.basis}."
-        if k.conclusion
-        else "Какое значение верно для вашего двигателя, руководства не уточняют."
-    )
-    line = lines[esc_at]
-    rest_lines = lines[:start] + lines[esc_at + 1 :]
+    conclusion = last  # безопасное правило — как в тексте (`contradictions.block`)
+    line = lines[esc_at] if esc_at is not None else ""
+    rest_lines = lines[:start] + lines[(esc_at if esc_at is not None else end) + 1 :]
     rest = "\n\n".join(p for p in (part.strip() for part in "\n".join(rest_lines).split("\n\n")) if p)
     block = {
         "kind": "contradiction",
         "title": k.title,
         "items": items,
         "conclusion": conclusion,
-        # строка эскалации вместо совета (Валерий, 27.11): «Передано главному механику на решение (№ N). Пока — …»
-        # или «Решение по противоречию (источник, дата): …» — рядом с формулировками, не вместо них
+        # строка эскалации (Валерий, 27.11) — рядом с правилом, не вместо него
         "advice": line,  # прежнее поле — для текущего web/
-        "escalation": escalation_view(line),
+        "escalation": escalation_view(line) if line else None,
     }
     return block, rest
 
