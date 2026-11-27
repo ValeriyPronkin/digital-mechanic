@@ -242,3 +242,25 @@ def test_card_explanation_with_disputed_timing_gets_block_and_escalation(ml: MLC
     block, rest = api_v2.contradiction_block(conv, reply.text)
     assert block is not None and len(block["items"]) >= 2 and block["escalation"] is not None
     assert "Безопасное правило" not in rest  # правило — в блоке, а не простым текстом
+
+
+def test_uzbek_question_gets_block_not_disputed_fact(ml: MLClient, toir: ToirClient) -> None:
+    """Стенд 28.11 (видео), B418HK98: «Klapan tirqishi qancha?» — шаг «sovuq dvigatelda yoki to'xtagandan keyin
+    15 daqiqadan kechiktirmasdan» (формулировка РЭ стр. 31) как факт, без блока. По-русски — блок противоречия."""
+    from service import api_v2
+
+    plan = say('{"lang": "uz", "question_ru": "Какой тепловой зазор клапанов?", "queries": ["зазор клапанов"]}')
+    answer = (
+        "Klapanlarning issiqlik tirqishi 0,25–0,30 mm [R1].\n\n"
+        "1. Tirqishni sovuq dvigatelda yoki to'xtagandan keyin 15 daqiqadan kechiktirmasdan tekshiring [R1].\n"
+        "2. Shchup bilan o'lchang [R1]."
+    )
+    translation = say('["Sovuq dvigatelda sozlang.", "Iqtibos 1", "Iqtibos 2", "Iqtibos 3"]')
+    ag, _ = make_agent([plan, say(answer), translation] + [say("[]")] * 3, ml, toir, Manual236())
+    conv = ag.start("B418HK98", "S-0007")
+    reply = ag.ask(conv, "Bu dvigatelda klapanlarning issiqlik tirqishi qancha bo'lishi kerak?")
+    assert conv.contradiction is not None
+    assert "15 daqiqadan" not in reply.text  # спорная формулировка — не фактом в тексте ответа
+    block, rest = api_v2.contradiction_block(conv, reply.text)
+    assert block is not None and len(block["items"]) >= 2 and block["escalation"] is not None
+    assert "0,25–0,30 mm" in rest and "Безопасное правило" not in rest

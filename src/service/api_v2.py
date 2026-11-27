@@ -356,7 +356,15 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
     items = []
     for q, line in by_line:
         ref = refs.get((q.doc, q.page))
+        # ответ не по-русски: перевод цитаты (агент, `_translate_contradiction`) — отдельным полем и строкой под ней
+        tr = re.search(r"\s*\(перевод: (.*?)\)(?=\s*\(|\s*$)", line)
+        translation = tr.group(1).strip() if tr else None
+        if tr:
+            line = line[: tr.start()] + line[tr.end() :]
         tail = line.split(f"[{ref}]", 1)[1] if ref and f"[{ref}]" in line else line.split("»", 1)[-1]
+        note = tail.strip().strip("()").strip() or None
+        if translation:
+            note = " · ".join(x for x in (note, f"Перевод: {translation}") if x)
         items.append(
             {
                 "handle": handle(ref) if ref else None,
@@ -364,7 +372,8 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
                 "quote": q.quote,
                 "manual_id": q.doc,
                 "pdf_page": q.page,
-                "note": tail.strip().strip("()").strip() or None,
+                "note": note,
+                "translation": translation,
             }
         )
     conclusion = last  # безопасное правило — как в тексте (`contradictions.block`)
