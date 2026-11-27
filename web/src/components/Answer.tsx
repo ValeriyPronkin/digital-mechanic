@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { SourceItem, Verification } from '../api'
 import { copy } from '../copy'
 import {
@@ -175,9 +175,16 @@ const wide = () => typeof window !== 'undefined' && window.matchMedia('(min-widt
 export function Answer({
   text,
   verification,
+  afterLead,
   onOpen,
   ...marks
-}: { text: string; verification?: Verification } & Props) {
+}: {
+  text: string
+  verification?: Verification
+  // Always in sight, never folded under «Весь ответ»: right under «Коротко» (the manuals disagree, D-20 —
+  // Валерий, 27.11: folded, it was not seen). Without a lead, at the top of the answer.
+  afterLead?: ReactNode
+} & Props) {
   const [more, setMore] = useState(wide)
   const withClaims = attachWithdrawn(parseAnswer(text), verification?.withdrawn)
   const withRuns = markRepeats(withClaims, (handle) => marks.sources[handle]?.manual_id)
@@ -195,6 +202,7 @@ export function Answer({
           <div className="text-[18px] leading-[1.4] font-medium">
             <Blocks nodes={[lead]} {...line} />
           </div>
+          {afterLead}
           {more && <Blocks nodes={rest} {...line} />}
           <button
             type="button"
@@ -220,7 +228,10 @@ export function Answer({
           </button>
         </>
       ) : (
-        <Blocks nodes={rest} {...line} />
+        <>
+          {afterLead}
+          <Blocks nodes={rest} {...line} />
+        </>
       )}
       <Pages docs={docs} {...marks} onOpen={open} />
       <CheckSummary verification={verification} />
