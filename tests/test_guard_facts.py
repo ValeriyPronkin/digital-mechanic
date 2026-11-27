@@ -83,5 +83,5 @@ def test_numbers_from_ml_description_are_not_facts(ml: MLClient, toir: ToirClien
 
 def test_bare_reference_is_not_a_number(ml: MLClient, toir: ToirClient) -> None:
     text, notes = _answer(ml, toir, "Источник: R1 — Руководство по ремонту [R1].")
-    assert "R1 — Руководство" in text
+    assert "Руководство по ремонту [R1]" in text and "R1 —" not in text  # номер ссылки без скобок не показывается
     assert CUT_NOTE not in notes

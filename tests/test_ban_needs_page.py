@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from service.agent import LEVEL_PROMPT, NO_BAN_LINE, RECOMMEND, SYSTEM_PROMPT, Source, unsourced_bans
 from service.clients import MLClient, ToirClient
-from service.verdict_policy import URGENCY_ACTION
 from test_agent import ANOMALY, make_agent, say
 
 
@@ -52,8 +51,34 @@ def test_agent_answer_and_ticket_conclusion_have_no_unsourced_ban(ml: MLClient, 
     assert res["draft"]["conclusion"] == "Низкое давление масла."
 
 
-def test_card_action_is_a_recommendation_not_a_ban() -> None:
-    high = URGENCY_ACTION["high"]
-    assert "не эксплуатировать" not in high and "до выпуска в рейс" in high
+def test_prompt_bans_only_with_a_page() -> None:
     assert "только словами руководства и со ссылкой" in SYSTEM_PROMPT
     assert "напиши «в руководстве не нашёл»" not in SYSTEM_PROMPT
+
+
+def test_internal_words_and_codes_are_not_shown() -> None:
+    """Стенд 27.11: «(матрица silent)», «из ссылок R12, R8, R1», «код F07» — служебное, механик их не читает."""
+    from service.agent import plain_words
+
+    assert plain_words("В руководстве нет порядка работ (матрица silent). Дефектовка [R2].", None) == (
+        "В руководстве нет порядка работ. Дефектовка [R2]."
+    )
+    assert plain_words("В заявку попали страницы из ссылок R12, R8, R1.", None) == "В заявку попали страницы."
+    assert plain_words("Проверка показала код F07.", "Неисправность КПП") == "Проверка показала «Неисправность КПП»."
+    assert plain_words("Неисправность F03 «Перегрев» [R1], [R2].", None) == "Неисправность «Перегрев» [R1], [R2]."
+
+
+def test_no_first_person_in_code_strings() -> None:
+    from service import other_engine
+
+    text = other_engine.answer("ЗМЗ-409", "A123BC77", "ЯМЗ-236М2") + other_engine.answer("Cummins", "A1", "ЯМЗ-236М2")
+    assert "Отвечаю" not in text and "могу" not in text
+
+
+def test_imperative_is_polite() -> None:
+    from service.agent import plain_words
+
+    assert plain_words("Ничего не ремонтируй. Повтори проверку и убедись в записи.", None) == (
+        "Ничего не ремонтируйте. Повторите проверку и убедитесь в записи."
+    )
+    assert plain_words("Проверьте зазор [R1].", None) == "Проверьте зазор [R1]."

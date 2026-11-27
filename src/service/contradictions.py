@@ -296,6 +296,11 @@ def safe_rule(k: Known, quotes: list[Quote], page_text: PageText | None = None) 
             if tv and tv.unit and len(same) > 1 and len({v.alt for _, v in same}) > 1:
                 where = _where([(_short(q.doc), str(q.page)) for q, _ in same])
                 rule += f". В {tv.unit} это значение совпадает ({where}); расходится только пересчёт в скобках"
+            others = [(q, v) for q in quotes if (v := first_value(q.quote)) and (q, v) not in same]
+            for q, v in others:  # значение, которое раздел не подтверждает, — названо целиком со своей страницей
+                where = f"{_short(q.doc)}, стр. {q.page}"
+                head = f"Приложение ({where}) даёт" if (q.doc, q.page) in k.appendix else f"На {where} —"
+                rule += f". {head} {v.text}: при отсылке действует раздел"
             return rule + "."
     appendix = {(_short(d), str(p)) for d, p in k.appendix}
     return derive([(q.quote, _short(q.doc), str(q.page)) for q in quotes], appendix)
@@ -305,6 +310,18 @@ def safe_rule(k: Known, quotes: list[Quote], page_text: PageText | None = None) 
 
 _MODEL_HEADER = re.compile(r"^\s*(?:[⚠*#>\-\s]*)противоречи[ея] в документации", re.I)
 _QUOTE_REF = re.compile(r"«([^»]{12,})»[^\n]*?\[(R\d+)\]")
+
+
+# фраза, которая отсылает к блоку противоречия («противоречие, см. ниже»): без блока она — обрывок
+_ANNOUNCE = re.compile(r"[^.!?\n]*противоречи\w*[^.!?\n]*(?:ниже|выше|см\.)[^.!?\n]*[.!?]?", re.I)
+
+
+def drop_announcement(text: str) -> str:
+    """Блока «Противоречие в документации» в ответе нет — убрать фразы, которые на него отсылают."""
+    if HEADER in text or re.search(_MODEL_HEADER.pattern, text, re.I | re.M):
+        return text
+    out = _ANNOUNCE.sub("", text)
+    return re.sub(r"\n{3,}", "\n\n", re.sub(r"[ \t]{2,}", " ", out)).strip()
 
 
 def check_model_blocks(text: str, source_text: Callable[[str], str | None]) -> tuple[str, list[str]]:
@@ -336,4 +353,4 @@ def check_model_blocks(text: str, source_text: Callable[[str], str | None]) -> t
         else:
             notes.append("Противоречие не подтверждено цитатами со страниц — блок убран.")
         i = j
-    return "\n".join(out), notes
+    return drop_announcement("\n".join(out)), notes

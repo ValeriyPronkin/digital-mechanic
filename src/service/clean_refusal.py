@@ -66,7 +66,8 @@ def clean(text: str) -> tuple[str, bool]:
 _SPECIALIST = re.compile(
     r"специалист|(?:обрат|уточн|проконсульт|свяж|запрос|узна)\w*\s+(?:\w+\s+){0,3}?(?:у|к|с|в)\s+"
     r"(?:\w+\s+)?(?:производител|изготовител|завод|дилер|сервис|главн\w* механик)"
-    r"|(?:сообщ|доложи|передай)\w*\s+(?:\w+\s+){0,2}?(?:производител|изготовител|завод|дилер|главн\w* механик)",
+    r"|(?:сообщ|доложи|передай)\w*\s+(?:\w+\s+){0,2}?(?:производител|изготовител|завод|дилер|главн\w* механик)"
+    r"|через\s+диспетчер",
     re.I,
 )
 _REF = re.compile(r"\[R\d+\]")
@@ -106,3 +107,37 @@ def complete(text: str, action: str, nearest: str | None) -> tuple[str, list[str
     if not added:
         return text, []
     return f"{text.rstrip()}\n\n" + "\n".join(added), added
+
+
+_STEP_KEEP = re.compile(r"дефектовк|повтор\w*\s+(?:проверк|запис)|раздел|не из руководства|предположени", re.I)
+_NUMBERED = re.compile(r"^(\s*)(\d+)([.)])(\s+)")
+
+
+def drop_unsourced_steps(text: str) -> tuple[str, int]:
+    """Отказ «в руководстве нет»: пункты списка без ссылки [R…] — порядок работ не из руководства — убрать
+    (ответ организаторов 27.11: общие сведения — только с пометкой «не из руководства», без чисел и порядка работ).
+    Конкретный шаг (дефектовка, повторная проверка, раздел руководства) и помеченное предположение остаются.
+    Нумерация после удаления — подряд."""
+    if not is_refusal(text):
+        return text, 0
+    out, removed = [], 0
+    for line in text.split("\n"):
+        if _LIST.match(line) and not _REF.search(line) and not _STEP_KEEP.search(line):
+            removed += 1
+            continue
+        out.append(line)
+    return renumber("\n".join(out)), removed
+
+
+def renumber(text: str) -> str:
+    """Нумерованный список без пропусков: «1. / 3. / 4.» → «1. / 2. / 3.». Список кончается на строке без номера."""
+    out, n = [], 0
+    for line in text.split("\n"):
+        m = _NUMBERED.match(line)
+        if m:
+            n += 1
+            line = f"{m.group(1)}{n}{m.group(3)}{m.group(4)}{line[m.end() :]}"
+        elif line.strip():
+            n = 0
+        out.append(line)
+    return "\n".join(out)

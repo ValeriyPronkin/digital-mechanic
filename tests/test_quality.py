@@ -114,7 +114,7 @@ def test_deepseek_without_tools_sends_no_tools_key() -> None:
     assert isinstance(ScriptedLLM, type)
 
 
-OPINION = "(мнение помощника, не из руководства)"
+OPINION = "(предположение, не из руководства)"
 
 
 def _guarded(ml: MLClient, toir: ToirClient, text: str) -> str:
@@ -204,7 +204,7 @@ def test_unrelated_question_gets_matrix_link_line_and_button(ml: MLClient, toir:
     assert last.startswith("К найденной неисправности это не относится. По руководству при «Клапанный механизм»")
     cell = cell_for("F01", "ЯМЗ-236М2")
     assert cell is not None and str(cell.operations[0].page) in last  # работы и страницы — из ячейки матрицы
-    assert "мнение помощника" not in last  # строка кода, не рассуждение модели
+    assert "предположение, не из руководства" not in last  # строка кода, не рассуждение модели
     assert reply.followup == {
         "label": "Проверка по «Клапанный механизм»",
         "question": "Что проверить по неисправности F01 «Клапанный механизм»?",

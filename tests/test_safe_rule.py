@@ -48,7 +48,8 @@ def test_page_that_refers_to_a_section_gives_the_rule_of_that_section() -> None:
     assert "не менее, чем в три приема" in rule and "от 421 до 461 Нм" in rule
     assert "«вторая опора, третья, первая и четвертая опоры»" in rule  # очерёдность — словами страницы
     assert "совпадает (РК, стр. 41, 56, 248); расходится только пересчёт" in rule  # 43-47 против 42-46 кгс·м
-    assert "430" not in rule and "производител" not in rule and "специалист" not in rule
+    assert "Приложение (РК, стр. 286) даёт 430-470: при отсылке действует раздел" in rule  # названо, не выбрано
+    assert "производител" not in rule and "специалист" not in rule
 
 
 def test_reference_not_on_the_page_is_not_trusted() -> None:
