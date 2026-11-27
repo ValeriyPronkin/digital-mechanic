@@ -101,7 +101,8 @@ class Store:
             cols = {r[1] for r in self._db.execute("PRAGMA table_info(tickets)")}
             if "fingerprint" not in cols:  # база от S2
                 self._db.execute("ALTER TABLE tickets ADD COLUMN fingerprint TEXT")
-            for col in ("outcome", "outcome_note", "urgency_proposed"):  # исход дефектовки (интерфейс v2, #52)
+            # исход дефектовки (интерфейс v2, #52); lines — работы и запчасти со страницами, в ТОиР не уходят
+            for col in ("outcome", "outcome_note", "urgency_proposed", "lines"):
                 if col not in cols:
                     self._db.execute(f"ALTER TABLE tickets ADD COLUMN {col} TEXT")
 
@@ -226,6 +227,13 @@ class Store:
 
     def set_urgency_proposed(self, ticket_id: str, urgency: str) -> None:
         self._exec("UPDATE tickets SET urgency_proposed=? WHERE ticket_id=?", (urgency, ticket_id))
+
+    def set_lines(self, ticket_id: str, lines: dict[str, Any] | None) -> None:
+        """Работы и запчасти отправленной заявки, каждая со своей страницей. Рядом с телом, не в нём."""
+        if lines is not None:
+            self._exec(
+                "UPDATE tickets SET lines=? WHERE ticket_id=?", (json.dumps(lines, ensure_ascii=False), ticket_id)
+            )
 
     def vehicle_memory(self, vehicle_id: str, limit: int = 10) -> dict[str, list[dict[str, Any]]]:
         views = self._rows(

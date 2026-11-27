@@ -41,7 +41,7 @@ from service.fleet_status import STATUS_LABEL, trend, vehicle_status
 from service.manuals.catalog import DOCS_BY_ID, documents_for_engine
 from service.parts_supplier import offers_for_parts
 from service.store import Store
-from service.verdict_policy import URGENCY_ACTION, VerdictCard, heard_text, urgency_for
+from service.verdict_policy import CONFIDENCE_LOW, URGENCY_ACTION, VerdictCard, heard_text, urgency_for
 from service.voice import speech_for, speech_lang
 
 log = logging.getLogger(__name__)
@@ -259,6 +259,8 @@ def verdict_block(conv: Conversation) -> dict[str, Any] | None:
         "fault_title": card.fault_title,
         "anomaly_score": diag.anomaly_score,
         "confidence": confidence,
+        # порог правила кода (verdict_policy.CONFIDENCE_LOW): ниже него вывод предварительный
+        "confidence_threshold": CONFIDENCE_LOW,
         "confidence_word": None
         if confidence is None
         else ("высокая" if confidence >= 0.8 else "средняя" if confidence >= 0.6 else "низкая"),
@@ -478,6 +480,61 @@ def manual_designations(conv: Conversation, code: str) -> dict[str, str]:
     return {_part_label(r): r.designation for r in cell.spare_parts if r.designation}
 
 
+def _line(conv: Conversation, text: str, manual_id: str | None, page: int | None) -> dict[str, Any]:
+    """Работа или запчасть со своей страницей: руководство (id и обозначение, как в `references`), стр. PDF и
+    метка S…, если страница есть среди найденного в разговоре. Страница неизвестна — поля пустые, строка есть."""
+    src = next((s for s in conv.sources.values() if s.manual_id == manual_id and s.pdf_page == page), None)
+    doc = DOCS_BY_ID.get(manual_id or "")
+    designation = doc.designation if doc else (src.manual if src else None)
+    if manual_id is None or page is None or designation is None:
+        return {"text": text, "source": "", "manual_id": None, "manual": None, "short": None, "pdf_page": None,
+                "quote": "", "scanned": False}  # fmt: skip
+    return {
+        "text": text,
+        "source": handle(src.ref) if src else "",
+        "manual_id": manual_id,
+        "manual": designation,
+        "short": short_name(manual_id, designation),
+        "pdf_page": page,
+        "quote": "",
+        "scanned": False,
+    }
+
+
+def ticket_lines(conv: Conversation) -> dict[str, list[dict[str, Any]]] | None:
+    """Каждая работа и запчасть черновика — со страницей, откуда она взята. В ТОиР это не уходит: в теле заявки
+    работы — текстом, а страницы — общим списком `references` (контракт ТОиР). Работа — страница её ссылки R…
+    (`TicketDraft.op_pages`); запчасть — строка перечня проверенной ячейки матрицы (`_part_label`) или ссылка [R…]
+    в её тексте."""
+    from service.agent import REF_MARK, _part_label
+    from service.fault_matrix import cell_for
+
+    d = conv.draft
+    if d is None:
+        return None
+    body = d.body
+    cell = cell_for(body.anomaly_type, conv.vehicle.engine_model)
+    matrix = cell if cell is not None and cell.status == "confirmed" else None
+    op_quote = {o.quote: (o.doc, o.page) for o in matrix.operations} if matrix else {}
+    part_label = {_part_label(p): (p.doc, p.page) for p in matrix.spare_parts} if matrix else {}
+
+    def by_ref(text: str) -> tuple[str | None, int | None]:
+        marks = REF_MARK.findall(text)
+        src = conv.sources.get(marks[0]) if marks else None
+        return (src.manual_id, src.pdf_page) if src else (None, None)
+
+    ops = []
+    for i, text in enumerate(body.operations):
+        if len(d.op_pages) == len(body.operations):
+            manual, page = d.op_pages[i]  # обозначение руководства, как в references
+            src = next((s for s in conv.sources.values() if s.manual == manual and s.pdf_page == page), None)
+            ops.append(_line(conv, text, src.manual_id if src else None, page))
+        else:  # черновик из состояния до op_pages: работа из матрицы — её страница
+            ops.append(_line(conv, text, *op_quote.get(text, (None, None))))
+    parts = [_line(conv, t, *(part_label.get(t) or by_ref(t))) for t in body.spare_parts]
+    return {"operations": ops, "spare_parts": parts}
+
+
 def parts_offers(conv: Conversation, body: dict[str, Any], parts: Any | None) -> dict[str, Any] | None:
     """Предложения поставщиков по запчастям черновика (`parts_offers`); нет запчастей или поставщика — None."""
     if parts is None or not body["spare_parts"]:
@@ -505,8 +562,8 @@ def ticket_pending(conv: Conversation, parts: Any | None = None) -> dict[str, An
         "type": "ticket_pending",
         "pending_id": d.fingerprint,
         "payload": body,
-        "operations": [{"text": t, "source": "", "quote": "", "scanned": False} for t in body["operations"]],
-        "spare_parts": [{"text": t, "source": "", "quote": "", "scanned": False} for t in body["spare_parts"]],
+        # каждая работа и запчасть — со своей страницей (руководство, стр. PDF, метка S…); в ТОиР — только payload
+        **(ticket_lines(conv) or {"operations": [], "spare_parts": []}),
         "urgency": {
             "level": level,
             "word": URGENCY_WORD[level],
@@ -622,6 +679,8 @@ def ticket_view(row: dict[str, Any]) -> dict[str, Any]:
         "created_at": datetime.fromtimestamp(row["ts"], UTC).isoformat(),
         "payload": payload,
         "urgency_proposed": row.get("urgency_proposed") or payload.get("urgency"),
+        # работы и запчасти со страницами — как механик их отправил; заявка, сохранённая раньше, — null
+        "lines": json.loads(row["lines"]) if row.get("lines") else None,
         "outcome": row.get("outcome"),
         "outcome_note": row.get("outcome_note"),
     }
@@ -995,12 +1054,14 @@ def build_router(
                 tools=conv.draft.tools,
                 op_pages=[op_pages[i] for i in kept] if len(op_pages) == len(body["operations"]) else [],
             )
+        lines = ticket_lines(conv)  # до отправки: то, что уйдёт в ТОиР, со страницей каждой работы и запчасти
         try:
             resp = ag.confirm_ticket(conv, conv.draft.fingerprint)
         except ServiceError as exc:
             raise HTTPException(exc.http_status, exc.message) from exc
         store = get_store()
         store.set_urgency_proposed(resp.ticket_id, proposed)
+        store.set_lines(resp.ticket_id, lines)
         row = next(r for r in store.tickets(decision.vehicle_id) if r["ticket_id"] == resp.ticket_id)
         view = ticket_view(row)
         view["urgency_note"] = note
@@ -1194,6 +1255,29 @@ def build_router(
     def tickets(vehicle_id: str) -> list[dict[str, Any]]:
         vehicle_or_404(vehicle_id)
         return [ticket_view(r) for r in get_store().tickets(vehicle_id)]
+
+    @router.get("/tickets")
+    def ticket_register() -> list[dict[str, Any]]:
+        """Реестр главного механика: все заявки парка, новые сверху — машина, проверка, неисправность, приоритет
+        предложенный и выбранный, исход дефектовки, работы и запчасти со страницами. Без вызова модели."""
+        fleet = get_fleet()
+        out = []
+        for row in get_store().tickets():
+            view = ticket_view(row)
+            v = fleet.vehicle(row["vehicle_id"])
+            session = next((s for s in v.sessions if s.session_id == row["session_id"]), None) if v else None
+            code = view["payload"]["anomaly_type"]
+            out.append(
+                {
+                    **view,
+                    "garage_no": v.garage_no if v else None,  # None: машины уже нет в парке
+                    "vehicle_name": v.display_name if v else None,
+                    "engine_model": v.engine_model if v else None,
+                    "checked_at": session.checked_at if session else None,
+                    "fault_title": fleet.fault_titles.get(code) or code,
+                }
+            )
+        return out
 
     @router.post("/tickets/{ticket_pk}/outcome")
     def outcome(ticket_pk: int, body: OutcomeIn) -> dict[str, Any]:
