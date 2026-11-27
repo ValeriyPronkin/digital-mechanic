@@ -129,3 +129,40 @@ def test_russian_answer_has_no_back_translation(ml: MLClient, toir: ToirClient) 
 def test_hindi_no_voice() -> None:
     sp = speech_for("दबाव 0,30 мм [R1].", _src(), "hi")
     assert sp.text.startswith("Озвучки на языке «хинди» нет")
+
+
+# ---------- таджикский против узбекской кириллицы (приёмщик 27.11: ответ пришёл узбекской кириллицей) ----------
+
+TG_SHARED = [  # только общие буквы ҳ қ ғ, без ӣ ӯ ҷ — решают слова
+    "Моменти кашидани болтҳои сарпушҳои подшипникҳои асосии ин муҳаррик чанд аст?",
+    "Гайкаҳои сарпушҳои подшипникҳои асосиро бо кадом момент тоб медиҳанд?",
+    "Мошинро бо қувваи худаш то база бурдан мумкин аст ё не?",
+    "Тирқиши клапанҳоро чи тавр тафтиш ва танзим мекунанд — тирқиш чанд аст?",
+]
+UZ_CYRL = [
+    "Двигателда мой босими қанча бўлиши керак?",
+    "Қопқоқ болтлари учун тортиш моменти қанча?",
+    "Бу машинани ҳайдаш мумкинми, двигател тақиллаяпти?",
+    "Клапан тирқишини қандай текшириш керак?",  # без ў: узбекские слова
+]
+
+
+@pytest.mark.parametrize("text", TG_SHARED)
+def test_tajik_with_shared_letters_only(text: str) -> None:
+    assert not any(c in text for c in "ӣӯҷ")
+    assert language.detect(text) == "tg"
+
+
+@pytest.mark.parametrize("text", UZ_CYRL)
+def test_uzbek_cyrillic_stays_uzbek(text: str) -> None:
+    assert language.detect(text) == "uz-cyrl"
+
+
+def test_tajik_letters_win_and_tajik_without_keyboard() -> None:
+    assert language.detect("Ин мошинро ҳоло рондан мумкин аст? Чӣ кор кунам?") == "tg"  # ӣ — только таджикский
+    assert language.detect("Хаст мухаррик барои ин мошин чи гуна кор мекунад?") == "tg"  # без особых букв — по словам
+
+
+def test_tajik_answer_is_not_uzbek() -> None:
+    assert language.matches("Моменти кашидан 98…107,9 Н·м аст [R1]. Болтҳоро бо ду қабул кашед.", "tg")
+    assert not language.matches("Тортиш моменти 98…107,9 Н·м бўлиши керак [R1].", "tg")
