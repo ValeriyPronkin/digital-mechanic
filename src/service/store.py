@@ -8,14 +8,20 @@ issue #16); окружение `LLM_PRICE_IN_RUB` / `LLM_PRICE_OUT_RUB` / `LLM_P
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from service.ticket_book import SharedTickets, stable_id
+
+log = logging.getLogger(__name__)
 
 PRICES_PATH = Path(__file__).resolve().parents[2] / "data" / "prices.json"
 
@@ -85,7 +91,8 @@ def cost_rub(provider: str, tokens_in: int, tokens_out: int, tokens_cached: int 
 
 
 class Store:
-    def __init__(self, path: Path | str | None = None) -> None:
+    def __init__(self, path: Path | str | None = None, shared: SharedTickets | None = None) -> None:
+        self.shared = shared  # стенд: отправленные заявки — общие для экземпляров (ticket_book); None — только SQLite
         path = path or os.environ.get("STATE_DB", ".state/agent.db")
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -190,10 +197,15 @@ class Store:
         )
 
     def ticket_for(self, fingerprint: str) -> str | None:
+        shared = self._shared_rows()
+        hit = next((r for r in shared or [] if fingerprint and r.get("fingerprint") == fingerprint), None)
+        if hit is not None:
+            return str(hit["ticket_id"])
         rows = self._rows("SELECT ticket_id FROM tickets WHERE fingerprint=? LIMIT 1", (fingerprint,))
         return str(rows[0]["ticket_id"]) if rows else None
 
     def remember_ticket(self, ticket_id: str, body: dict[str, Any], fingerprint: str = "") -> None:
+        ts = time.time()
         self._exec(
             "INSERT INTO tickets (ticket_id, vehicle_id, session_id, anomaly_type, urgency, body, ts, fingerprint)"
             " VALUES (?,?,?,?,?,?,?,?)",
@@ -204,45 +216,93 @@ class Store:
                 body["anomaly_type"],
                 body["urgency"],
                 json.dumps(body, ensure_ascii=False),
-                time.time(),
+                ts,
                 fingerprint,
             ),
         )
+        if self.shared is not None:
+            row = {
+                "id": stable_id(fingerprint, ticket_id),
+                "ticket_id": ticket_id,
+                "vehicle_id": body["vehicle_id"],
+                "session_id": body["session_id"],
+                "anomaly_type": body["anomaly_type"],
+                "urgency": body["urgency"],
+                "body": json.dumps(body, ensure_ascii=False),
+                "ts": ts,
+                "fingerprint": fingerprint,
+                "outcome": None,
+                "outcome_note": None,
+                "urgency_proposed": None,
+                "lines": None,
+            }
+            self._shared_write(lambda sh: sh.add(row))
+
+    # ---- заявки: на стенде — общие для экземпляров (`ticket_book`), локально и при сбое бакета — SQLite ----
+    def _shared_rows(self) -> list[dict[str, Any]] | None:
+        if self.shared is None:
+            return None
+        try:
+            return self.shared.all()
+        except Exception as exc:
+            log.warning("заявки из бакета не прочитаны: %s — показываю заявки этого экземпляра", exc)
+            return None
+
+    def _shared_write(self, fn: Callable[[SharedTickets], None]) -> None:
+        if self.shared is None:
+            return
+        try:
+            fn(self.shared)
+        except Exception as exc:
+            log.warning("заявка в бакет не записана: %s — она есть только у этого экземпляра", exc)
 
     def tickets(self, vehicle_id: str | None = None) -> list[dict[str, Any]]:
         """Заявки (новые сверху) с исходом дефектовки — для интерфейса v2 и выгрузки outcomes.csv."""
+        shared = self._shared_rows()
+        if shared is not None:
+            return [r for r in shared if vehicle_id is None or r["vehicle_id"] == vehicle_id]
         if vehicle_id is None:
             return self._rows("SELECT * FROM tickets ORDER BY id DESC")
         return self._rows("SELECT * FROM tickets WHERE vehicle_id=? ORDER BY id DESC", (vehicle_id,))
 
     def ticket(self, pk: int) -> dict[str, Any] | None:
+        shared = self._shared_rows()
+        if shared is not None:
+            return next((r for r in shared if r["id"] == pk), None)
         rows = self._rows("SELECT * FROM tickets WHERE id=?", (pk,))
         return rows[0] if rows else None
 
     def set_outcome(self, pk: int, outcome: str, note: str | None) -> None:
-        if note is None:
-            self._exec("UPDATE tickets SET outcome=? WHERE id=?", (outcome, pk))
+        fields: dict[str, Any] = (
+            {"outcome": outcome} if note is None else {"outcome": outcome, "outcome_note": note or None}
+        )
+        shared = self._shared_rows()
+        row = next((r for r in shared if r["id"] == pk), None) if shared is not None else None
+        if row is not None:
+            self._shared_write(lambda sh: sh.update(lambda r: r["id"] == pk, **fields))
+            where, key = "ticket_id=?", row["ticket_id"]  # копия у экземпляра — по номеру ТОиР
         else:
-            self._exec("UPDATE tickets SET outcome=?, outcome_note=? WHERE id=?", (outcome, note or None, pk))
+            where, key = "id=?", pk
+        sets = ", ".join(f"{k}=?" for k in fields)
+        self._exec(f"UPDATE tickets SET {sets} WHERE {where}", (*fields.values(), key))  # noqa: S608
 
     def set_urgency_proposed(self, ticket_id: str, urgency: str) -> None:
         self._exec("UPDATE tickets SET urgency_proposed=? WHERE ticket_id=?", (urgency, ticket_id))
+        self._shared_write(lambda sh: sh.update(lambda r: r["ticket_id"] == ticket_id, urgency_proposed=urgency))
 
     def set_lines(self, ticket_id: str, lines: dict[str, Any] | None) -> None:
         """Работы и запчасти отправленной заявки, каждая со своей страницей. Рядом с телом, не в нём."""
-        if lines is not None:
-            self._exec(
-                "UPDATE tickets SET lines=? WHERE ticket_id=?", (json.dumps(lines, ensure_ascii=False), ticket_id)
-            )
+        if lines is None:
+            return
+        text = json.dumps(lines, ensure_ascii=False)
+        self._exec("UPDATE tickets SET lines=? WHERE ticket_id=?", (text, ticket_id))
+        self._shared_write(lambda sh: sh.update(lambda r: r["ticket_id"] == ticket_id, lines=text))
 
     def vehicle_memory(self, vehicle_id: str, limit: int = 10) -> dict[str, list[dict[str, Any]]]:
         views = self._rows(
             "SELECT session_id, status, fault_code, ts FROM card_views WHERE vehicle_id=? ORDER BY id DESC LIMIT ?",
             (vehicle_id, limit),
         )
-        tickets = self._rows(
-            "SELECT ticket_id, session_id, anomaly_type, urgency, ts FROM tickets WHERE vehicle_id=?"
-            " ORDER BY id DESC LIMIT ?",
-            (vehicle_id, limit),
-        )
+        keep = ("ticket_id", "session_id", "anomaly_type", "urgency", "ts")
+        tickets = [{k: r[k] for k in keep} for r in self.tickets(vehicle_id)[:limit]]
         return {"viewed_cards": views, "tickets": tickets}

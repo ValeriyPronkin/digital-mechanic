@@ -99,7 +99,33 @@ def _session_brief(fleet: Fleet, v: Vehicle, s: Any) -> dict[str, Any]:
     }
 
 
-def _fleet_view(fleet: Fleet, v: Vehicle) -> dict[str, Any]:
+OUTCOME_BADGE = {
+    "confirmed": "дефектовка: подтвердилось",
+    "not_confirmed": "дефектовка: не подтвердилось",
+    "other_fault": "дефектовка: другая неисправность",
+}
+
+Sent = dict[tuple[str, str], dict[str, Any]]
+
+
+def sent_by_check(rows: list[dict[str, Any]]) -> Sent:
+    """Отправленные заявки по (машина, проверка); у проверки с несколькими заявками — последняя."""
+    out: Sent = {}
+    for r in rows:  # новые сверху: первая встреченная — последняя по времени
+        out.setdefault((r["vehicle_id"], r["session_id"]), r)
+    return out
+
+
+def ticket_badges(v: Vehicle, session_id: str | None, sent: Sent) -> list[dict[str, str]]:
+    """«заявка создана» у машины, по последней проверке которой отправлена заявка; когда механик отметил исход
+    дефектовки — сам исход. Заявка по более старой проверке о том, что машина показывает сейчас, не говорит."""
+    row = sent.get((v.vehicle_id, session_id or ""))
+    if row is None:
+        return []
+    return [{"code": "ticket_created", "label": OUTCOME_BADGE.get(row.get("outcome") or "", "заявка создана")}]
+
+
+def _fleet_view(fleet: Fleet, v: Vehicle, sent: Sent | None = None) -> dict[str, Any]:
     st = vehicle_status(v, fleet.fault_titles)
     last = st.last
     urgency = None
@@ -108,7 +134,7 @@ def _fleet_view(fleet: Fleet, v: Vehicle) -> dict[str, Any]:
     return {
         "status": None if st.status == "rerecord" else st.status,
         "label": STATUS_LABEL[st.status],
-        "badges": [],
+        "badges": ticket_badges(v, last.session_id if last else None, sent or {}),
         "urgency": urgency,
         "session_id": last.session_id if last else None,
         "fault_title": fleet.fault_titles.get(last.anomaly_type or "") if last and last.anomaly_type else None,
@@ -129,17 +155,17 @@ def _vehicle(v: Vehicle) -> dict[str, Any]:
     }
 
 
-def vehicle_brief(fleet: Fleet, v: Vehicle) -> dict[str, Any]:
+def vehicle_brief(fleet: Fleet, v: Vehicle, sent: Sent | None = None) -> dict[str, Any]:
     sessions = sorted(v.sessions, key=lambda s: s.checked_at)
     return {
         **_vehicle(v),
         "sessions_count": len(sessions),
         "last_session": _session_brief(fleet, v, sessions[-1]) if sessions else None,
-        "fleet": _fleet_view(fleet, v),
+        "fleet": _fleet_view(fleet, v, sent),
     }
 
 
-def vehicle_detail(fleet: Fleet, v: Vehicle) -> dict[str, Any]:
+def vehicle_detail(fleet: Fleet, v: Vehicle, sent: Sent | None = None) -> dict[str, Any]:
     sessions = sorted(v.sessions, key=lambda s: s.checked_at)  # от старых к новым: интерфейс берёт последнюю
     manuals = [
         {"id": d.doc_id, "short": short_name(d.doc_id, d.designation), "title": d.designation, "pages": d.pages}
@@ -149,7 +175,7 @@ def vehicle_detail(fleet: Fleet, v: Vehicle) -> dict[str, Any]:
         **_vehicle(v),
         "sessions": [_session_brief(fleet, v, s) for s in sessions],
         "manuals": manuals,
-        "fleet": _fleet_view(fleet, v),
+        "fleet": _fleet_view(fleet, v, sent),
         "trend": trend(v)["trend"],
     }
 
@@ -656,18 +682,20 @@ def build_router(
     @router.get("/vehicles")
     def vehicles() -> list[dict[str, Any]]:
         f = get_fleet()
-        return [vehicle_brief(f, v) for v in f.vehicles]
+        sent = sent_by_check(get_store().tickets())
+        return [vehicle_brief(f, v, sent) for v in f.vehicles]
 
     @router.get("/fleet")
     def fleet() -> dict[str, Any]:
         f = get_fleet()
-        briefs = [vehicle_brief(f, v) for v in f.vehicles]
+        rows = get_store().tickets()  # один раз на запрос: на стенде — чтение из бакета
+        sent = sent_by_check(rows)
+        briefs = [vehicle_brief(f, v, sent) for v in f.vehicles]
         order = {"quarantine": 0, "attention": 1, None: 2, "normal": 3}
         briefs.sort(key=lambda b: (order.get(b["fleet"]["status"], 2), -(b["fleet"]["anomaly_score"] or 0)))
         counts: dict[str, int] = {"normal": 0, "attention": 0, "quarantine": 0, "no_valid_check": 0}
         for b in briefs:
             counts[b["fleet"]["status"] or "no_valid_check"] += 1
-        rows = get_store().tickets()
         recorded = [r for r in rows if r.get("outcome")]
         return {
             "counts": counts,
@@ -681,7 +709,8 @@ def build_router(
 
     @router.get("/vehicles/{vehicle_id}")
     def vehicle(vehicle_id: str) -> dict[str, Any]:
-        return vehicle_detail(get_fleet(), vehicle_or_404(vehicle_id))
+        v = vehicle_or_404(vehicle_id)
+        return vehicle_detail(get_fleet(), v, sent_by_check(get_store().tickets(vehicle_id)))
 
     @router.get("/languages")
     def languages() -> list[dict[str, Any]]:
