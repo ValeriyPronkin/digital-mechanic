@@ -81,6 +81,7 @@ def test_chunk_text_limits_size_and_keeps_all_lines() -> None:
 # ---------- карта двигателей ----------
 
 
+@pytest.mark.materials
 def test_engine_map_covers_fleet_engines() -> None:
     import json
     from pathlib import Path

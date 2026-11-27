@@ -28,7 +28,7 @@ services:
       timeout: 3s
       retries: 3
 
-  # Заглушки заказчика из vendor/neurodvs_mock (код не меняем, только образ).
+  # Заглушки заказчика из vendor/neurodvs_mock (код не меняем, только образ). Не в git — до сборки make fetch-materials.
   mock-ml:
     build:
       context: .

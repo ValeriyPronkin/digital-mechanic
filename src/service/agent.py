@@ -1265,6 +1265,7 @@ class Agent:
         final, bans = unsourced_bans(
             final, conv.card.urgency if conv.card else None, replace=not conv.passport.get("drive_rule")
         )  # запрет — только со страницей
+        final, cited = self._absent_head(conv, final, cited)  # «У <двигателя> нет <узла>» — первой строкой
         final = self._mismatch_steps(conv, final)  # узла у двигателя нет — оба пути: повторить проверку и дефектовка
         if bans:
             notes.append("Запрет эксплуатации без страницы руководства заменён рекомендацией по срочности.")
@@ -1476,6 +1477,33 @@ class Agent:
         if conv.card is not None and conv.card.status == "check_failed":
             return [t for t in tools() if t.name not in ("search_manual", "read_pages")]
         return tools()
+
+    def _absent_head(self, conv: Conversation, text: str, cited: list[Source]) -> tuple[str, list[Source]]:
+        """Проверка назвала узел, которого у двигателя нет: первой строкой — «У <двигателя> нет <узла>» и факт
+        конструкции со страницей (absent_parts), затем ответ (скрытая половина 27.11: на main так и было, на поезде —
+        только «нужна дефектовка узла», без прямого «нет»). Строку пишет код — только в русском ответе."""
+        card = conv.card
+        if card is None or card.compatible or card.status != "anomaly" or not card.fault_code:
+            return text, cited
+        if (conv.passport.get("answer_lang") or "ru") != "ru":
+            return text, cited
+        engine = conv.vehicle.engine_model
+        a = absent_parts.for_code(engine, card.fault_code, card.fault_title or "")
+        if a is None:
+            return text, cited
+        head = absent_parts.head(engine, a)
+        if head.rstrip(".").lower() in text.lower():
+            return text, cited
+        quotes = absent_parts.verified(a, getattr(self.searcher, "page_text", None))
+        if not quotes:
+            return text, cited
+        q = quotes[0]
+        src = self._source_for(conv, q.doc, q.page, a.part, q.quote)
+        if src not in cited:
+            cited = [*cited, src]
+        conv.passport["absent_head"] = a.id
+        line = f"**{head}** {a.statement} По руководству: «{q.quote}» — стр. {q.page} [{src.ref}]."
+        return f"{line}\n\n{text}".strip(), cited
 
     def _mismatch_steps(self, conv: Conversation, text: str) -> str:
         """Проверка назвала узел, которого у двигателя нет (код несовместим): в ответе — оба пути, повторить проверку и
@@ -1693,6 +1721,10 @@ class Agent:
                     "handles": handles,
                 }
             )
+            if (conv.passport.get("answer_lang") or "ru") != "ru":
+                # ответ не по-русски: русская пометка — служебная вставка в чужом языке (скрытая 27.11, узбекский);
+                # снятое утверждение — только в событии verification (`withdrawn`), в тексте его просто нет
+                return ""
             return note + "".join(f" [{r}]" for r in handles)
 
         for line in text.split("\n"):
@@ -1722,11 +1754,14 @@ class Agent:
                     good.append(withdraw(part, own, "unverified", "other_row", set()))
                     continue
                 good.append(part)
+            good = [g for g in good if g.strip()]  # снятое без пометки (ответ не по-русски) — пустая часть
             if good:
                 kept.append(_unmask(prefix + " ".join(good), labels))
             elif not line.strip():
                 kept.append("")
         text = "\n".join(kept).strip()
+        if withdrawn and (conv.passport.get("answer_lang") or "ru") != "ru":
+            text = clean_refusal.renumber(text)  # шаг снят целиком — номера подряд
         text = _fill_sources(text, cited)
         text = _drop_no_link_card_lines(text)
         text, opinions = _mark_opinions(text)

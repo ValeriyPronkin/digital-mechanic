@@ -19,5 +19,9 @@ dist/
 web/node_modules/
 web/dist/
 
-# Пакеты инженера: выгрузки страниц руководств, в открытый репозиторий не кладём (#96). Хранить в бакете или локально.
-reports/*engineer-pack*.html
+# Материалы задачи (ответ организаторов 27.11, п. 9.1): не в git — make fetch-materials по TASK_MATERIALS_URL
+/vendor/neurodvs_mock/
+/data/vehicles.json
+/data/fault_types.json
+# Пакет для инженера — в нём ответы заглушек (описания диагностики): локально, не в git
+/reports/*engineer-pack*.html

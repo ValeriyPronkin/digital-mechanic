@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
@@ -33,10 +34,17 @@ BANNER_CONFIRM = "Подтвердите повторной записью. Пр
 _DANGER = json.loads((Path(__file__).resolve().parents[2] / "data" / "danger_classes.json").read_text(encoding="utf-8"))
 SCORE_HIGH = float(_DANGER["score_high"])
 CONFIDENCE_LOW = float(_DANGER["confidence_low"])
-_TITLES = {
-    f["code"]: f["title"]
-    for f in json.loads((Path(__file__).resolve().parents[2] / "data" / "fault_types.json").read_text(encoding="utf-8"))
-}
+_FAULT_TYPES = Path(__file__).resolve().parents[2] / "data" / "fault_types.json"
+
+
+@lru_cache(maxsize=1)
+def _titles() -> dict[str, str]:
+    """Справочник — из материалов задачи (`make fetch-materials`), читается при первом вызове, а не при импорте."""
+    if not _FAULT_TYPES.exists():
+        return {}
+    return {f["code"]: f["title"] for f in json.loads(_FAULT_TYPES.read_text(encoding="utf-8"))}
+
+
 # Класс 3 — работа двигателя грозит разрушением: срочность высокая независимо от оценки (data/danger_classes.json).
 CRITICAL_CODES = {c: v["basis"] for c, v in _DANGER["classes"].items() if v["class"] == 3}
 

@@ -86,6 +86,17 @@ def items() -> tuple[Absent, ...]:
     return tuple(out)
 
 
+def for_code(engine: str, code: str, title: str = "") -> Absent | None:
+    """Запись «узла нет» для кода неисправности из карточки: ячейка матрицы этого двигателя, иначе — по названию."""
+    canon = canonical_engine(engine)
+    by_id = {a.id: a for a in items()}
+    return by_id.get(f"matrix-{code}-{canon}") or (match(engine, title) if title else None)
+
+
+def head(engine: str, a: Absent) -> str:
+    return a.header or f"У {engine} нет {a.part}."
+
+
 def match(engine: str, question: str) -> Absent | None:
     canon = canonical_engine(engine)
     for a in items():
@@ -116,8 +127,7 @@ def verified(a: Absent, page_text: PageText | None) -> list[Quote] | None:
 def answer(
     engine: str, a: Absent, quotes: list[Quote], refs: dict[tuple[str, int], str], label: Callable[[Quote], str]
 ) -> str:
-    head = a.header or f"У {engine} нет {a.part}."
-    lines = [f"**{head}** {a.statement}", "", "По руководству этого двигателя:"]
+    lines = [f"**{head(engine, a)}** {a.statement}", "", "По руководству этого двигателя:"]
     for q in quotes:
         ref = refs.get((q.doc, q.page))
         lines.append(f"- {label(q)}: «{q.quote}»" + (f" [{ref}]" if ref else ""))
