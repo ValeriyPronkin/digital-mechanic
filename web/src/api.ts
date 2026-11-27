@@ -169,6 +169,39 @@ export interface TicketPending {
   // before the choice existed: that one goes with the proposed priority.
   urgency_choices?: { level: Urgency; word: string; action: string }[]
   warning: string[] // why the result is preliminary; not empty means the mechanic must confirm he has read it
+  // What the connected parts suppliers have for the parts of the draft (PR #84); null without parts, absent
+  // in a draft saved before the field existed. For reference only: it does not go to ТОиР.
+  parts_offers?: PartsOffers | null
+}
+
+/** One supplier's offer for a part, as the supplier gave it; the server sorts them (in stock, lead, price). */
+export interface PartOffer {
+  supplier: string | null
+  name: string | null
+  designation: string | null
+  available: string | null // the supplier's own words: «есть, 12 шт.», «под заказ»
+  in_stock: boolean | null // read from `available` by the server; null — not said
+  price_rub: number | null
+  lead_days: number | null
+  url: string | null
+}
+
+/** The offers for one line of `payload.spare_parts` (by `index`). */
+export interface PartOffersItem {
+  index: number
+  part: string
+  query: string // what was looked for: the designation from the manual, or the name without it
+  by: 'designation' | 'name'
+  check: string // «по названию, проверьте» when looked up by name; empty otherwise
+  note: string // why there is nothing: no supplier has it, or none answered
+  offers: PartOffer[]
+  suppliers: { name: string; status: 'ok' | 'empty' | 'failed'; note: string }[]
+}
+
+export interface PartsOffers {
+  connected: boolean // false: no supplier is connected, `note` says so and `items` is empty
+  note: string
+  items: PartOffersItem[]
 }
 
 export interface TicketView {
