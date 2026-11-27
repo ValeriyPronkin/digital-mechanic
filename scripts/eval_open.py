@@ -101,6 +101,7 @@ def main() -> int:
     ap.add_argument("--only", help="номера через запятую, например Q02,Q20")
     ap.add_argument("--show", action="store_true", help="печатать ответы (для разбора; в отчёт не идут)")
     ap.add_argument("--set", default="open", choices=["open", "multi"], help="multi — многоязычный набор")
+    ap.add_argument("--level", default="auto", help="уровень механика: auto (по вопросу), novice, mechanic, master")
     args = ap.parse_args()
     default = DEFAULT if args.set == "open" else str(ROOT / ".state" / "questions_multi.jsonl")
     path = Path(os.environ.get("EVAL_OPEN" if args.set == "open" else "EVAL_MULTI", default)).expanduser()
@@ -115,7 +116,7 @@ def main() -> int:
         conv = ag.start(q["vehicle_id"], q["session_id"])
         t0 = time.monotonic()
         try:
-            reply = ag.ask(conv, q["question"])
+            reply = ag.ask(conv, q["question"], args.level)
         except Exception as exc:  # сбой одного вопроса — провал вопроса, не прогона
             results.append({"id": q["id"], "type": q["type"], "ok": False, "error": type(exc).__name__, "rub": 0})
             print(f"{q['id']}: ОШИБКА {exc}")
@@ -127,6 +128,7 @@ def main() -> int:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         s["ms"] = int((time.monotonic() - t0) * 1000)
         s.update({"id": q["id"], "type": q["type"], "tags": q.get("tags", []), "rub": reply.trace["cost_rub"],
+                  "level": getattr(reply, "level_used", None),
                   "calls": sum(1 for x in reply.trace["steps"] if x["kind"] == "llm")})  # fmt: skip
         results.append(s)
         mark = "✅" if s["ok"] else "❌"

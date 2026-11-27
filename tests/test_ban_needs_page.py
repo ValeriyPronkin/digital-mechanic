@@ -36,7 +36,7 @@ def test_empty_safety_line_is_dropped_real_one_kept() -> None:
     assert "Безопасность" not in text and text.startswith("Понадобится: ключ.\n\n1. Шаг")
     kept = "Безопасность: двигатель заглушён и остыл [R1].\n\n1. Шаг [R1]."
     assert unsourced_bans(kept, None) == (kept, 0)
-    assert "если их нет — строку не пиши" in LEVEL_PROMPT["steps"]
+    assert "если их нет — строку не пиши" in LEVEL_PROMPT["novice"]
 
 
 def test_agent_answer_and_ticket_conclusion_have_no_unsourced_ban(ml: MLClient, toir: ToirClient) -> None:

@@ -70,7 +70,8 @@ jobs:
           set -eu
           IMAGE="cr.yandex/${YC_REGISTRY_ID}/service:pr-${PR_NUMBER}-$(printf '%s' "$HEAD_SHA" | cut -c1-7)"
           docker login --username json_key --password-stdin cr.yandex < "$KEY_FILE"
-          docker build -t "$IMAGE" .
+          docker build --build-arg "GIT_SHA=$HEAD_SHA" --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t "$IMAGE" .  # коммит PR и время сборки — в /health (поле build)
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 

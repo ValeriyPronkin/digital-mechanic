@@ -140,7 +140,9 @@ jobs:
           IMAGE="cr.yandex/${YC_REGISTRY_ID}/service:$TAG"
           MOCK_IMAGE="cr.yandex/${YC_REGISTRY_ID}/neurodvs-mock:$TAG"
           docker login --username json_key --password-stdin cr.yandex < "$KEY_FILE"
-          docker build -t "$IMAGE" .
+          # коммит и время сборки — в /health (поле build), чтобы приёмщик сверил версию стенда с main
+          docker build --build-arg "GIT_SHA=$GITHUB_SHA" --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t "$IMAGE" .
           docker build -t "$MOCK_IMAGE" -f docker/mock.Dockerfile .
           docker push "$IMAGE"
           docker push "$MOCK_IMAGE"

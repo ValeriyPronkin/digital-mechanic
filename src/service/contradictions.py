@@ -4,6 +4,9 @@
 «Противоречие в документации» и даёт безопасное правило, выведенное из самих страниц (`safe_rule`). Отсылки
 «к специалисту / производителю / главному механику» нет: механик сам специалист, решение — сейчас (ответы
 организаторов 27.11: обе формулировки со страницами и безопасное правило; у заказчика своего правила нет).
+Рядом с правилом, не вместо него, — эскалация (Валерий, 27.11): противоречие ставится в очередь главного механика
+(`service.escalation`), под правилом — «Передано главному механику на решение (№ N)…», после решения — «Решение по
+противоречию (источник, дата): …».
 
 Два слоя, оба — кодом:
 1. Известные противоречия (`data/contradictions.json`): по двигателю и теме вопроса код сам строит блок с цитатами
@@ -29,6 +32,8 @@ from service.manuals.catalog import DOCS_BY_ID, canonical_engine
 PATH = Path(__file__).resolve().parents[2] / "data" / "contradictions.json"
 HEADER = "⚠ Противоречие в документации"
 RULE = "Безопасное правило:"  # строка правила под формулировками; по ней блок находит интерфейс v2
+# строка эскалации под правилом (её текст — `escalation.escalation_line`)
+ESCALATION = re.compile(r"^(?:Передано главному механику на решение|Решение по противоречию)\b.*$", re.M)
 _DOC_SHORT = {"re": "РЭ", "rk": "РК"}
 
 
@@ -105,7 +110,7 @@ _SENT = re.compile(r"(?<=[.!?])\s+")
 _LIST_PREFIX = re.compile(r"^(\s*(?:\d+[.)]|[-*•])\s+)")
 _NO_CONTRADICTION = re.compile(r"противоречи\w* (?:в документации )?нет", re.I)
 _ADVICE_DUP = re.compile(
-    r"^\s*(?:\W\s*)?(?:для вашей модификации[^.]*?)?(?:уточните|обратитесь|проконсультируйтесь|свяжитесь)\s+"
+    r"^\s*(?:\W\s*)?(?:для вашей модификации[^.]*?)?(?:уточните|сообщите|обратитесь|проконсультируйтесь|свяжитесь)\s+"
     r"(?:\w+\s+)?(?:у|к|с)?\s*(?:специалист|производител|изготовител|завод|дилер|сервис|главн\w* механик)",
     re.I,
 )
@@ -150,7 +155,14 @@ def verified_quotes(k: Known, page_text: Callable[[str, int], str | None] | None
     return out
 
 
-def block(k: Known, quotes: list[Quote], refs: dict[tuple[str, int], str], page_text: PageText | None = None) -> str:
+def block(
+    k: Known,
+    quotes: list[Quote],
+    refs: dict[tuple[str, int], str],
+    escalation: str = "",
+    page_text: PageText | None = None,
+) -> str:
+    """Блок кода: формулировки дословно со страницами, безопасное правило и строка эскалации (если есть)."""
     lines = [f"{HEADER} — {k.title}:"]
     for q in quotes:
         ref = refs.get((q.doc, q.page))
@@ -158,6 +170,8 @@ def block(k: Known, quotes: list[Quote], refs: dict[tuple[str, int], str], page_
     # правило из данных (зазоры ЯМЗ-236: «на холодном» удовлетворяет обеим формулировкам) или выведенное из страниц;
     # основание из данных механику не показывается (своего правила у заказчика нет — ответ организаторов 27.11)
     lines.append(f"{RULE} {k.conclusion or safe_rule(k, quotes, page_text)}")
+    if escalation:
+        lines.append(escalation)
     return "\n".join(lines)
 
 
@@ -278,7 +292,7 @@ def _short(doc: str) -> str:
 def safe_rule(k: Known, quotes: list[Quote], page_text: PageText | None = None) -> str:
     """Безопасное правило известного противоречия без правила заказчика. Первым — отсылка: страница отсылает к
     разделу — действует он, его словами и со страницей (слова отсылки сверяются со страницей). Затем `derive`."""
-    r = k.refers
+    r = getattr(k, "refers", None)  # противоречие, замеченное моделью, — без отсылок и приложений
     if r and page_text is not None:
         src = page_text(r["doc"], int(r["page"]))
         to_doc, to_page = r["to"][0], int(r["to"][1])
@@ -298,10 +312,11 @@ def safe_rule(k: Known, quotes: list[Quote], page_text: PageText | None = None) 
             others = [(q, v) for q in quotes if (v := first_value(q.quote)) and (q, v) not in same]
             for q, v in others:  # значение, которое раздел не подтверждает, — названо целиком со своей страницей
                 where = f"{_short(q.doc)}, стр. {q.page}"
-                head = f"Приложение ({where}) даёт" if (q.doc, q.page) in k.appendix else f"На {where} —"
+                in_appendix = (q.doc, q.page) in getattr(k, "appendix", ())
+                head = f"Приложение ({where}) даёт" if in_appendix else f"На {where} —"
                 rule += f". {head} {v.text}: при отсылке действует раздел"
             return rule + "."
-    appendix = {(_short(d), str(p)) for d, p in k.appendix}
+    appendix = {(_short(d), str(p)) for d, p in getattr(k, "appendix", ())}
     return derive([(q.quote, _short(q.doc), str(q.page)) for q in quotes], appendix)
 
 
@@ -323,9 +338,14 @@ def drop_announcement(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", re.sub(r"[ \t]{2,}", " ", out)).strip()
 
 
-def check_model_blocks(text: str, source_text: Callable[[str], str | None]) -> tuple[str, list[str]]:
+def check_model_blocks(
+    text: str,
+    source_text: Callable[[str], str | None],
+    escalate: Callable[[list[tuple[str, str]]], str] | None = None,
+) -> tuple[str, list[str]]:
     """Блок «Противоречие в документации» от модели: каждая цитата «…» [R…] — на странице этой ссылки.
-    Меньше двух подтверждённых цитат — блок (заголовок и его строки до пустой строки) убирается."""
+    Меньше двух подтверждённых цитат — блок (заголовок и его строки до пустой строки) убирается. Подтверждённый —
+    без совета модели, с правилом кода; `escalate([(цитата, R…), …])` ставит его в очередь и даёт строку эскалации."""
     lines = text.split("\n")
     out: list[str] = []
     notes: list[str] = []
@@ -347,8 +367,11 @@ def check_model_blocks(text: str, source_text: Callable[[str], str | None]) -> t
                     good.append((quote, ref))
         if len(good) >= 2:
             # совет «уточните у …» и своё правило модели — убрать; правило выводит код из подтверждённых цитат
-            out.extend(ln for ln in blk if not _ADVICE_DUP.search(ln) and not _MODEL_RULE.match(ln))
+            keep = (ln for ln in blk if not _ADVICE_DUP.search(ln) and not _MODEL_RULE.match(ln))
+            out.extend(ln for ln in keep if not ESCALATION.match(ln))
             out.append(f"{RULE} {derive([(q, '', f'[{ref}]') for q, ref in good])}")
+            if escalate is not None:
+                out.append(escalate(good))
         else:
             notes.append("Противоречие не подтверждено цитатами со страниц — блок убран.")
         i = j

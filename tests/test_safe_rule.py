@@ -95,7 +95,7 @@ def test_disjoint_values_two_appendices_ask_for_defect_inspection() -> None:
 
 def test_known_items_have_a_rule_and_no_hand_off() -> None:
     for k in known():
-        text = block(k, list(k.quotes), {}, page_text)
+        text = block(k, list(k.quotes), {}, page_text=page_text)
         last = text.split("\n")[-1]
         assert last.startswith(RULE), k.id
         assert not re.search(r"уточните|специалист|производител|главн\w* механик", text, re.I), k.id
@@ -103,7 +103,7 @@ def test_known_items_have_a_rule_and_no_hand_off() -> None:
 
 def test_customer_rule_is_kept() -> None:
     k = next(k for k in known() if k.conclusion)
-    last = block(k, list(k.quotes), {}, page_text).split("\n")[-1]
+    last = block(k, list(k.quotes), {}, page_text=page_text).split("\n")[-1]
     assert last == f"{RULE} {k.conclusion}" and "заказчика" not in last and "демо" not in last
 
 
