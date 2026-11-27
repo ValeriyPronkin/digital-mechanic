@@ -12,9 +12,11 @@ import {
   type Passport,
   type SpeechInfo,
   type Verification,
+  type LanguageInfo,
 } from './api'
 import { copy } from './copy'
 import { getLevel, type Level } from './lib/level'
+import { chatLang, getLang } from './lib/lang'
 
 export interface AssistantTurn {
   role: 'assistant'
@@ -25,6 +27,8 @@ export interface AssistantTurn {
   verification?: Verification
   passport?: Passport // our request passport (#31): steps, context, tokens, ₽
   speech?: SpeechInfo // the short spoken version (#14) for «Прослушать»
+  language?: LanguageInfo // the language the answer was given in (PR #83)
+  back_translation?: string | null // the answer in Russian when it is in another language: «Показать по-русски»
   progress?: string // the line shown while a tool runs
   error?: string
   reason?: string
@@ -84,6 +88,12 @@ function apply(turn: AssistantTurn, e: ChatEvent): AssistantTurn {
       const { type: _, ...speech } = e
       return { ...turn, speech }
     }
+    case 'language': {
+      const { type: _, ...language } = e
+      return { ...turn, language }
+    }
+    case 'back_translation':
+      return { ...turn, back_translation: e.text }
     case 'error':
       return { ...turn, error: e.message, progress: undefined }
     case 'done': {
@@ -160,6 +170,7 @@ export function useThread(vehicleId: string, attempt = 0) {
             session_id: options.sessionId,
             new_thread: options.newThread,
             level: options.level ?? getLevel(),
+            lang: chatLang(getLang()),
           },
           onEvent,
           abort.current.signal,

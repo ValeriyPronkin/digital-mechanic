@@ -26,6 +26,8 @@ import { PageSheet } from './PageSheet'
 import { SpeakButton } from './SpeakButton'
 import { LEVEL_EVENT, REDO, getLevel, otherLevel, redoLevel, setLevel, type Level } from '../lib/level'
 import { ScoreChart } from './ScoreChart'
+import { LanguageSwitch } from './LanguageSwitch'
+import { offersRussian } from '../lib/lang'
 import { TicketCard } from './TicketCard'
 import { TicketSheet } from './TicketSheet'
 import { VerdictCard } from './VerdictCard'
@@ -118,6 +120,33 @@ function AssistantBlock({
           verification={turn.verification}
           onOpen={onOpenSource}
         />
+      )}
+      {/* An answer in another language, in Russian: for the one who checks it (PR #86). Its numbers were
+          checked by the server; the chips are the same pages. */}
+      {!turn.live && turn.back_translation && offersRussian(turn) && (
+        <details className="group">
+          <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 text-[13px] text-accent [&::-webkit-details-marker]:hidden">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              className="shrink-0 transition-transform group-open:rotate-90"
+              aria-hidden
+            >
+              <path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            {copy.lang.showRu}
+          </summary>
+          <div className="border-l-2 border-line pl-3">
+            <Answer
+              text={turn.back_translation}
+              sources={sources}
+              verified={new Set(turn.verification?.verified)}
+              scanned={new Set(turn.verification?.scanned)}
+              onOpen={onOpenSource}
+            />
+          </div>
+        </details>
       )}
       {/* the short spoken version: value, document, page — for busy hands (#14) */}
       {(() => {
@@ -416,6 +445,8 @@ export function VehicleScreen({
             </p>
             <ScoreChart sessions={vehicle.sessions} selected={sessionId} onSelect={pick} trend={vehicle.trend} />
             <SessionPicker sessions={vehicle.sessions} selected={sessionId} onSelect={pick} />
+            {/* set once on the device, so it scrolls away with the vehicle details */}
+            <LanguageSwitch />
             <button
               type="button"
               disabled={thread.busy}
