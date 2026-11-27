@@ -22,6 +22,7 @@ from service import (
     INSTANCE_ID,
     __version__,
     api_v2,
+    case_log,
     conv_state,
     kb_store,
     language,
@@ -535,5 +536,6 @@ app.include_router(
         lambda: page_marks(),
         lambda: slog.put if (slog := journal()) is not None else None,
         get_parts=lambda: parts_supplier(),
+        case_log=case_log.CaseLog.from_env(),
     )
 )

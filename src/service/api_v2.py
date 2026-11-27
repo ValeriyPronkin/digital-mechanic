@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import html
 import io
 import json
 import logging
@@ -28,11 +29,12 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from service import conv_state, language, passport
 from service.agent import Agent, AgentReply, Conversation
+from service.case_log import CaseLog, verify
 from service.clients import ServiceError, TicketRequest
 from service.fleet import Fleet, Vehicle
 from service.fleet_status import STATUS_LABEL, trend, vehicle_status
@@ -503,6 +505,94 @@ def ticket_pending(conv: Conversation, parts: Any | None = None) -> dict[str, An
     }
 
 
+def _commit() -> str:
+    sha = os.environ.get("GIT_SHA", "").strip()
+    return sha if sha and sha != "unknown" else "unknown"
+
+
+def _index_version() -> str | None:
+    from service import kb_store
+    from service.manuals.index import index_dir
+
+    try:
+        return kb_store.installed_version(index_dir())
+    except Exception:
+        return None
+
+
+def topic_of(question: str) -> str:
+    """Тема обращения — первый вопрос нити, без ПДн и короче 80 знаков."""
+    from service.agent import mask_pii
+
+    q = " ".join(mask_pii(question).split())
+    return q if len(q) <= 80 else q[:79].rstrip() + "…"
+
+
+def answer_record(conv: Conversation, reply: AgentReply, question: str, text: str) -> dict[str, Any]:
+    """Запись для рекламации об ответе: что спросили, что ответили, по каким страницам, чем и какой версией."""
+    from service.agent import mask_pii
+
+    models = sorted({str(s.get("name")) for s in reply.trace.get("steps") or [] if s.get("kind") == "llm"})
+    card = conv.card
+    return {
+        "kind": "answer",
+        "session_id": conv.session_id,
+        "engine": conv.vehicle.engine_model,
+        "verdict": {"status": card.status, "fault_code": card.fault_code} if card else None,
+        "question": mask_pii(question),
+        "answer": text,
+        "pages": [
+            {"handle": f"S{s['ref'][1:]}", "manual": s["manual"], "pdf_page": s["pdf_page"], "quote": s.get("quote")}
+            for s in reply.sources
+        ],
+        "provider": reply.trace.get("provider"),
+        "models": models,
+        "index_version": _index_version(),
+        "commit": _commit(),
+        "level": getattr(reply, "level_used", None),
+        "lang": reply.lang,
+        "request_id": reply.trace.get("request_id"),
+    }
+
+
+def export_html(vehicle: Any, row: dict[str, Any], records: list[dict[str, Any]], check: tuple[bool, str]) -> str:
+    """Выгрузка нити для печати (рекламация): шапка, проверка цепочки, записи по порядку."""
+    E = html.escape
+    ok, why = check
+    out = [
+        "<!doctype html><html lang=ru><meta charset=utf-8>",
+        f"<title>Обращение {E(row['thread_id'])} — {E(vehicle.vehicle_id)}</title>",
+        "<style>body{font:14px/1.45 system-ui,sans-serif;max-width:48rem;margin:1rem auto;padding:0 1rem}"
+        "h1{font-size:1.3rem}.rec{border-top:1px solid #999;padding:.5rem 0}.meta{color:#555;font-size:.85rem}"
+        "blockquote{margin:.3rem 0;padding:.2rem .6rem;border-left:3px solid #999}.bad{color:#b42318}"
+        "@media print{a{color:inherit}}</style>",
+        f"<h1>Обращение по машине {E(vehicle.vehicle_id)} · {E(vehicle.engine_model)}</h1>",
+        f"<p>Нить {E(row['thread_id'])} · проверка {E(str(row.get('session_id') or '—'))} · "
+        f"с {E(row.get('started_at', ''))} по {E(row.get('updated_at', ''))} (UTC) · "
+        f"тема: {E(row.get('topic', ''))}</p>",
+        f'<p class="{"" if ok else "bad"}"><b>Целостность записи:</b> {"✓" if ok else "✗"} {E(why)}</p>',
+    ]
+    for r in records:
+        head = f"№{r['seq']} · {r.get('at', '')} UTC"
+        if r.get("kind") == "ticket":
+            out.append(f'<div class="rec"><b>{E(head)} · заявка {E(str(r.get("ticket_id")))}</b>')
+            out.append(f"<p>{E(str(r.get('conclusion', '')))}</p>")
+        else:
+            out.append(f'<div class="rec"><b>{E(head)}</b><p><b>Вопрос:</b> {E(r.get("question", ""))}</p>')
+            out.append(f"<p><b>Ответ:</b><br>{E(r.get('answer', '')).replace(chr(10), '<br>')}</p>")
+            for pg in r.get("pages") or []:
+                out.append(
+                    f"<blockquote>[{E(pg['handle'])}] {E(pg['manual'])}, стр. PDF {pg['pdf_page']}: "
+                    f"{E((pg.get('quote') or '')[:600])}</blockquote>"
+                )
+        out.append(
+            f'<p class="meta">модель: {E(", ".join(r.get("models") or []) or "—")} ({E(str(r.get("provider")))}) · '
+            f"индекс {E(str(r.get('index_version')))} · коммит {E(str(r.get('commit'))[:12])} · "
+            f"sha256 {E(r['sha256'][:16])}…</p></div>"
+        )
+    return "".join(out) + "</html>"
+
+
 def ticket_view(row: dict[str, Any]) -> dict[str, Any]:
     payload = json.loads(row["body"])
     return {
@@ -553,6 +643,10 @@ class TicketDecision(BaseModel):
     urgency: Literal["low", "medium", "high"] | None = None
 
 
+class ResumeIn(BaseModel):
+    vehicle_id: str = Field(min_length=1)
+
+
 class OutcomeIn(BaseModel):
     outcome: Literal["confirmed", "not_confirmed", "other_fault"]
     note: str | None = Field(default=None, max_length=1000)
@@ -569,8 +663,21 @@ def build_router(
     get_marks: Callable[[], Any] | None = None,
     get_log_put: Callable[[], Callable[[str, bytes], None] | None] | None = None,
     get_parts: Callable[[], Any] | None = None,
+    case_log: CaseLog | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v2")
+    cases = case_log or CaseLog()
+
+    def remember(vehicle_id: str, thread: dict[str, Any], record: dict[str, Any] | None, **row: Any) -> None:
+        """Долгая сессия: нить целиком по номеру, строка в истории машины, запись для рекламации. Сбой бакета
+        механику ответ не ломает — пишется в журнал."""
+        try:
+            cases.save_thread(thread["thread_id"], {**thread, "vehicle_id": vehicle_id})
+            meta = cases.touch(vehicle_id, thread["thread_id"], session_id=thread.get("session_id"), **row)
+            if record is not None:
+                cases.append(vehicle_id, thread["thread_id"], record, start=int(meta.get("records") or 0) + 1)
+        except Exception as exc:
+            log.warning("история обращений не записана: %s", type(exc).__name__)
 
     def parts_source() -> Any | None:
         """Поставщики запчастей (`parts_supplier.from_env`); без них — поля `parts_offers` нет."""
@@ -747,7 +854,15 @@ def build_router(
             ]
             thread["pending"] = {k: pending[k] for k in pending if k != "type"} if pending else None
             thread["state"] = conv_state.dump(conv)
+            thread.setdefault("topic", topic_of(req.message))  # тема обращения — первый вопрос нити
             threads.put(b, v.vehicle_id, thread)
+            remember(
+                v.vehicle_id,
+                thread,
+                answer_record(conv, reply, req.message, text),
+                topic=thread["topic"],
+                status="ticket_pending" if pending else None,
+            )
             yield _sse({"type": "done", "reason": "end"})
 
         resp = StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-store"})
@@ -815,10 +930,80 @@ def build_router(
             turn["passport"]["rules"].append(f"Заявка {resp.ticket_id}. {note}")
             passport.write(turn["passport"], time.time(), put=log_put())
         data["transcript"].append({"role": "ticket", "ticket": view})
+        ticket_rec = {
+            "kind": "ticket",
+            "session_id": conv.session_id,
+            "ticket_id": resp.ticket_id,
+            "conclusion": view["payload"].get("conclusion"),
+            "payload": view["payload"],
+            "commit": _commit(),
+            "index_version": _index_version(),
+        }
         data["pending"] = None
         data["state"] = conv_state.dump(conv)
         threads.put(b, decision.vehicle_id, data)
+        remember(decision.vehicle_id, data, ticket_rec, status="ticket_sent", ticket_id=resp.ticket_id)
         return view
+
+    # ---------- долгая сессия: история обращений, продолжение, выгрузка для рекламации ----------
+
+    @router.get("/vehicles/{vehicle_id}/threads")
+    def vehicle_threads(vehicle_id: str) -> list[dict[str, Any]]:
+        """История обращений по машине (новые сверху): дата, проверка, тема, статус, число записей."""
+        vehicle_or_404(vehicle_id)
+        return [
+            {
+                "thread_id": r["thread_id"],
+                "started_at": r.get("started_at"),
+                "updated_at": r.get("updated_at"),
+                "session_id": r.get("session_id"),
+                "topic": r.get("topic"),
+                "status": r.get("status") or "open",
+                "ticket_id": r.get("ticket_id"),
+                "records": r.get("records", 0),
+            }
+            for r in cases.threads(vehicle_id)
+        ]
+
+    @router.post("/threads/{thread_id}/resume")
+    def resume_thread(thread_id: str, body: ResumeIn, request: Request) -> Response:
+        """Продолжить нить (через час или через полгода, с любого телефона): она становится текущей у браузера."""
+        v = vehicle_or_404(body.vehicle_id)
+        row = cases.thread_row(v.vehicle_id, thread_id)
+        data = cases.load_thread(thread_id) if row else None
+        if not data or data.get("vehicle_id") != v.vehicle_id:
+            raise HTTPException(404, "Обращение не найдено или срок хранения истёк.")
+        data.pop("vehicle_id", None)
+        b = browser(request) or secrets.token_hex(16)
+        threads.put(b, v.vehicle_id, data)
+        resp = JSONResponse({k: data.get(k) for k in ("thread_id", "session_id", "transcript", "sources", "pending")})
+        if browser(request) != b:
+            resp.set_cookie(
+                COOKIE, b, max_age=30 * 86400, httponly=True, samesite="lax", secure=request.url.scheme == "https"
+            )
+        return resp
+
+    @router.get("/vehicles/{vehicle_id}/threads/{thread_id}/export", response_model=None)
+    def export_thread(vehicle_id: str, thread_id: str, format: Literal["json", "html"] = "json") -> Any:
+        """Запись для рекламации: все записи нити по порядку и проверка цепочки (номера, хэши, пропуски)."""
+        v = vehicle_or_404(vehicle_id)
+        row = cases.thread_row(v.vehicle_id, thread_id)
+        if row is None:
+            raise HTTPException(404, "Обращение не найдено или срок хранения истёк.")
+        records = cases.records(v.vehicle_id, thread_id)
+        ok, why = verify(records)
+        if ok and len(records) < int(row.get("records") or 0):
+            ok, why = False, f"записей {len(records)}, а должно быть {row['records']} — часть отсутствует"
+        if format == "html":
+            return HTMLResponse(export_html(v, row, records, (ok, why)))
+        return {
+            "vehicle_id": v.vehicle_id,
+            "engine": v.engine_model,
+            "thread": row,
+            "integrity": {"ok": ok, "detail": why},
+            "retention_days": cases.retention_days,
+            "records": records,
+        }
 
     @router.post("/tickets/{pending_id}/reject", status_code=204)
     def reject(pending_id: str, decision: TicketDecision, request: Request) -> Response:
