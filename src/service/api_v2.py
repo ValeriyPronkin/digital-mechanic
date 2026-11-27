@@ -360,11 +360,24 @@ def quote_line(answer: str, ref: str, source_text: str) -> str:
     return ""
 
 
+# причина снятия guard → ключ `copy.thread.withdrawnWhy` интерфейса; неизвестный ключ интерфейс читает как «other»
+WITHDRAWN_REASON = {"not_on_page": "not_on_page", "no_source": "no_source", "other_row": "other"}
+
+
 def verification(reply: AgentReply, text: str) -> dict[str, Any]:
     """Что проверил код (`agent.guard`): страницы, на которые опирается ответ, и сколько снято. Наш guard не
     зачёркивает, а убирает предложение с цифрой не из фрагмента — оно считается снятым. `verified` — только
     страницы, на которых нашлось число из ответа (так их читает интерфейс: ✓ «на странице найдено число»)."""
-    rules = reply.trace.get("rules") or {}
+    withdrawn = [
+        {
+            "text": to_handles(w["text"]),
+            "state": w["state"],
+            "missing": w.get("missing", []),
+            "reason": WITHDRAWN_REASON.get(w.get("reason") or "", w.get("reason")),
+            "handles": [handle(r) for r in w.get("handles", [])],
+        }
+        for w in reply.withdrawn
+    ]
     lines = {handle(s["ref"]): quote_line(reply.text, s["ref"], s.get("quote") or "") for s in reply.sources}
     quotes = {h: line for h, line in lines.items() if line}
     verified = list(quotes)
@@ -373,12 +386,14 @@ def verification(reply: AgentReply, text: str) -> dict[str, Any]:
         "text": text,
         "verified": verified,
         "quotes": quotes,
+        # снятые guard утверждения — по одному на пометку «Утверждение снято» в тексте, в том же порядке (как
+        # WithdrawnClaim в web/src/api.ts); ссылки — метками S…, как в тексте
         "counts": {
             "verified": len(verified),
-            "unverified": int(rules.get("numbers_dropped") or 0),
-            "uncited": int(rules.get("opinions_marked") or 0),
+            "unverified": sum(1 for w in withdrawn if w["state"] == "unverified"),
+            "uncited": sum(1 for w in withdrawn if w["state"] == "uncited"),
         },
-        "withdrawn": [],
+        "withdrawn": withdrawn,
         "scanned": [],
     }
 

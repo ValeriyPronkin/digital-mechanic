@@ -11,7 +11,7 @@ from service.clients import MLClient, ToirClient
 from service.fleet import fleet
 from test_agent import ANOMALY, FixtureSearch, call, make_agent, say
 
-CUT_NOTE = "Часть цифр не нашёл в руководстве — убрал их. Точные значения уточнит дефектовка."
+CUT_NOTE = "Часть чисел не подтвердилась на страницах руководства: эти утверждения сняты и отмечены."
 
 
 def _answer(ml: MLClient, toir: ToirClient, text: str, *, search: bool = True) -> tuple[str, list[str]]:

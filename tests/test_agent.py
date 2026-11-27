@@ -256,7 +256,9 @@ def test_numbers_outside_fragment_removed(ml: MLClient, toir: ToirClient) -> Non
     reply = ag.ask(ag.start(*ANOMALY), "какое давление?")
     assert "0,1 МПа" in reply.text and "45" not in reply.text and "Прогрейте" in reply.text
     assert reply.grounded and reply.sources[0]["pdf_page"] == 42
-    assert any("не нашёл в руководстве" in n for n in reply.notes)
+    assert any("не подтвердилась" in n for n in reply.notes)
+    assert "Утверждение снято: для числа не указана страница руководства." in reply.text  # на месте, не молча
+    assert reply.withdrawn[0]["text"] == "Момент затяжки пробки 45 Н·м." and reply.withdrawn[0]["state"] == "uncited"
 
 
 def test_numbers_without_source_removed_and_marked(ml: MLClient, toir: ToirClient) -> None:
