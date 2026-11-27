@@ -23,6 +23,7 @@ INDEX = Path(os.environ.get("INDEX_DIR", ".index"))
 
 # (код, группа источника) → (документ, первая страница): первая страница ячейки в реестре покрытия
 SIGNED = {
+    ("F01", "ЯМЗ-236М2"): ("yamz-236-re", 53),  # B418HK98 S-0009 в видео: «Двигатель стучит» — строка таблицы
     ("F02", "ЯМЗ-236М2"): ("yamz-236-re", 53),
     ("F03", "ЯМЗ-236М2"): ("yamz-236-re", 54),
     ("F04", "ЯМЗ-236М2"): ("yamz-236-re", 28),
@@ -47,13 +48,31 @@ def test_signed_cell_lists_registry_pages_and_operations(code: str, group: str) 
     cell = SRC["codes"][code]["cells"][group]
     assert cell["applicable"] == "true" and cell["signed"]
     assert (cell["pages"][0]["doc"], cell["pages"][0]["page"]) == SIGNED[(code, group)]
-    assert len(cell["operations"]) >= 4
+    assert len(cell["operations"]) >= 2
     for row in cell["operations"] + cell.get("safety", []):
         # в git — только якорь строки, не её текст (#96): не больше 7 слов на строку
         assert "quote" not in row and row["words"] >= len(re.findall(r"\w+", row["anchor"]))
         assert len(re.findall(r"\w+", row["anchor"] + " " + row.get("last", ""))) <= ANCHOR_WORDS
         for engine in SRC["groups"][group]:  # документ — этого двигателя, страница есть в PDF
             assert ref_problem(Ref(doc=row["doc"], page=row["page"], quote=row["anchor"]), engine, None) is None
+
+
+def test_valve_knock_cites_troubleshooting_row_first() -> None:
+    """F01 × ЯМЗ-236М2: первая страница и первая работа — строка таблицы неисправностей РЭ стр. 53 «Двигатель стучит →
+    Нарушена регулировка клапанного механизма → Отрегулировать тепловые зазоры». Без неё ответ говорил, что пункта
+    по стуку клапанов в таблице нет; прежние страницы и работа (РК стр. 269) остаются."""
+    cell = SRC["codes"]["F01"]["cells"]["ЯМЗ-236М2"]
+    first = cell["operations"][0]
+    assert (first["doc"], first["page"]) == ("yamz-236-re", 53)
+    assert first["anchor"].startswith("Нарушена регулировка клапанного")
+    assert [(p["doc"], p["page"]) for p in cell["pages"]] == [
+        ("yamz-236-re", 53),
+        ("yamz-236-re", 31),
+        ("yamz-236-rk", 229),
+        ("yamz-236-rk", 269),
+        ("yamz-236-re", 34),
+    ]
+    assert ("yamz-236-rk", 269) in {(o["doc"], o["page"]) for o in cell["operations"]}
 
 
 def test_anchor_expands_to_the_line_on_the_page() -> None:

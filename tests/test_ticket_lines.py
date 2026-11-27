@@ -123,7 +123,7 @@ def test_works_and_parts_from_the_matrix_carry_their_pages(
         json={"vehicle_id": vid, "keep_operations": [0], "keep_spare_parts": []},
     ).json()
     assert rec.bodies[0]["spare_parts"] == [] and view["lines"]["spare_parts"] == []
-    assert view["lines"]["operations"] == ops
+    assert view["lines"]["operations"] == ops[:1]  # оставлена только первая работа (keep_operations=[0])
 
 
 @pytest.mark.usefixtures("without_matrix")  # сценарий C1 из фикстуры поиска — как в CI, без матрицы
