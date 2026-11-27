@@ -823,6 +823,13 @@ _DRIVE_CONTEXT = re.compile(
     re.I,
 )
 _SERVICE_ONLY = re.compile(r"промыва|промыть|заправля|хранени|транспортир|консервац|упаковк|буксир", re.I)
+# прямой запрет работы двигателя — при равном совпадении слов важнее: «немедленно заглушить… не заводить»
+# (ЗМЗ-5234, стр. 23)
+# против «остановить двигатель и через 10 минут проверить уровень масла» (стр. 30) — Q24, 27.11
+_STRONG_BAN = re.compile(r"немедленно|не эксплуатир|не заводить|не запускать|запрещ|не допуска", re.I)
+_RULE_LEAD = re.compile(
+    r"^(?:но|однако|при этом|а)?[\s,]*(?:в\s+)?руководств\w*\s+(?:требует|сказано|указано|говорит\w*)\s*:?\s*", re.I
+)  # «но руководство требует: …» — вводные слова модели перед правилом
 _LEMMA_ALIAS = {"стучать": "стук", "стучит": "стук", "шуметь": "шум", "низкий": "давление"}
 _DRIVE_STOP = {"можно", "пока", "ездить", "ехать", "машина", "двигатель", "база", "свой", "ход", "перегнать",
                "дальше", "ещё", "еще", "доехать", "работа", "время"}  # fmt: skip
@@ -2586,9 +2593,12 @@ class Agent:
         if not paras:
             return text
         head = re.sub(r"\s*Рекомендация по проверке:[^.]*\.", "", paras[0]).strip()  # что делать — строкой ниже
-        if not (_REF.search(head) and (_BAN_RULE.search(head) or _OPERATION_RULE.search(head))):
-            rule = self._drive_rule_sentence("\n\n".join(paras[1:]))
-            if rule:  # правило руководства со страницей, которое модель написала ниже (Q24: стр. 23, «заглушить»)
+        has_rule = bool(_REF.search(head) and (_BAN_RULE.search(head) or _OPERATION_RULE.search(head)))
+        if not (has_rule and _STRONG_BAN.search(head)):
+            # прямой запрет руководства со страницей, который модель написала ниже (Q24: стр. 23, «немедленно
+            # заглушить… не заводить») — после вердикта; при уже найденном кодом пределе — только прямой запрет
+            rule = self._drive_rule_sentence("\n\n".join(paras[1:]), strong=has_rule)
+            if rule and rule not in head:
                 head = f"{head} По руководству: {rule[:1].lower()}{rule[1:]}"
         action = self._drive_action(conv)
         failed = conv.card is None or conv.card.status == "check_failed"
@@ -2597,7 +2607,7 @@ class Agent:
         return "\n\n".join(out)
 
     @staticmethod
-    def _drive_rule_sentence(text: str) -> str | None:
+    def _drive_rule_sentence(text: str, strong: bool = False) -> str | None:
         """Первая фраза со ссылкой [R…] — запрет или предел работы двигателя; не «Понадобится», не «Безопасное
         правило» (вывод кода о другом), не проверка результата."""
         for ln in text.split("\n"):
@@ -2606,8 +2616,10 @@ class Agent:
                 continue
             for sent in _SENTENCE.split(ln):
                 if _REF.search(sent) and (_BAN_RULE.search(sent) or _OPERATION_RULE.search(sent)):
+                    if strong and not _STRONG_BAN.search(sent):
+                        continue
                     if _DRIVE_CONTEXT.search(sent) and not _SERVICE_ONLY.search(sent):
-                        return sent.strip()
+                        return _RULE_LEAD.sub("", sent.strip())
         return None
 
     @staticmethod
@@ -2638,7 +2650,7 @@ class Agent:
         engine = canonical_engine(conv.vehicle.engine_model) or conv.vehicle.engine_model
         title = conv.card.fault_title if conv.card is not None and conv.card.status == "anomaly" else ""
         want = {_LEMMA_ALIAS.get(t, t) for t in tokenize(f"{question} {title or ''}")} - _DRIVE_STOP
-        best: tuple[int, int, int, Any, str] | None = None
+        best: tuple[int, int, int, int, Any, str] | None = None
         for n, limit in enumerate(nk_coverage.limits_for(engine)):
             full = str(page_text(limit.manual, limit.page) or "")
             sents = _RULE_SENT.split(re.sub(r"\s+", " ", full))
@@ -2651,12 +2663,12 @@ class Agent:
                 hit = len(want & {_LEMMA_ALIAS.get(t, t) for t in tokenize(around)})
                 if hit:
                     tier = 2 if _BAN_RULE.search(sent) else 1 if _OPERATION_RULE.search(sent) else 0
-                    key = (hit, tier, -n)
-                    if best is None or key > best[:3]:
+                    key = (hit, int(bool(_STRONG_BAN.search(sent))), tier, -n)  # при равных словах — прямой запрет
+                    if best is None or key > best[:4]:
                         best = (*key, limit, sent.strip())
         if best is None:
             return None
-        limit, sent = best[3], re.sub(r"^\d+\.\s+", "", best[4])
+        limit, sent = best[4], re.sub(r"^\d+\.\s+", "", best[5])
         src = next((s for s in conv.sources.values() if s.manual_id == limit.manual and s.pdf_page == limit.page), None)
         if src is None:
             doc = DOCS_BY_ID.get(limit.manual)
