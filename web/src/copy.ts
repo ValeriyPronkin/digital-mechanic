@@ -115,6 +115,8 @@ export const copy = {
       'Какой нужен инструмент',
     ],
     createTicket: 'Создать заявку',
+    quickNext: 'Ещё вопросы',
+    quickPrev: 'К началу вопросов',
     createTicketMessage: 'Создать заявку на дефектовку',
     working: 'Готовим ответ…',
     withdrawn: 'Утверждение снято:',

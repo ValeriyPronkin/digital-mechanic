@@ -17,7 +17,7 @@ import { copy } from '../copy'
 import { checkLook, ticketFits } from '../lib/checks'
 import { dateShortRu, dateTimeRu } from '../lib/format'
 import { mergeTickets, withTicket } from '../lib/tickets'
-import { CHECKED, scrollsFurther } from '../lib/ui'
+import { CHECKED, scrollsFurther, scrollStep } from '../lib/ui'
 import { useThread, type AssistantTurn, type Turn } from '../useThread'
 import { ActionLog } from './ActionLog'
 import { Answer } from './Answer'
@@ -255,6 +255,44 @@ function Header({ title, onBack, children }: { title: ReactNode; onBack: () => v
 }
 
 /** One vehicle: its checks, the result of the selected one, the conversation, the ticket. */
+/** The arrow on the edge of the row of ready-made questions: there are more that way. A round 36 px button
+ *  over the row's end, on a band of the page's colour so it never sits on a question's text; the tap area
+ *  is 48 px. Out of the tab order: the questions themselves are reached by Tab, and the row follows focus. */
+function QuickArrow({ dir, label, onPress }: { dir: 1 | -1; label: string; onPress: () => void }) {
+  return (
+    <div
+      className={`pointer-events-none absolute inset-y-0 flex items-center ${
+        dir > 0
+          ? '-right-4 bg-gradient-to-l pr-2 pl-6 min-[900px]:right-0 min-[900px]:pr-0'
+          : '-left-4 bg-gradient-to-r pr-6 pl-2 min-[900px]:left-0 min-[900px]:pl-0'
+      } from-bg from-55% to-transparent`}
+    >
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label={label}
+        title={label}
+        onClick={onPress}
+        className="pointer-events-auto relative grid size-9 place-items-center rounded-full border border-line bg-surface-2 text-accent before:absolute before:-inset-1.5 before:content-[''] hover:border-accent"
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d={dir > 0 ? 'M8 4l6 6-6 6' : 'M12 4l-6 6 6 6'} />
+        </svg>
+      </button>
+    </div>
+  )
+}
+
 export function VehicleScreen({
   vehicleId,
   onBack,
@@ -292,9 +330,17 @@ export function VehicleScreen({
   // right edge; at its end, and when it fits or wraps (a wide screen), it does not.
   const quickRow = useRef<HTMLDivElement>(null)
   const [quickMore, setQuickMore] = useState(false)
+  const [quickBack, setQuickBack] = useState(false)
   const measureQuick = () => {
     const row = quickRow.current
     setQuickMore(row !== null && scrollsFurther(row.scrollLeft, row.scrollWidth, row.clientWidth))
+    setQuickBack(row !== null && row.scrollLeft > 1)
+  }
+  // The fade alone was not seen on a laptop (Валерий, 27.11): an arrow on the edge says the row goes on, and
+  // a press moves it there. Mouse users have no swipe; on a phone the arrow is a second way to the same place.
+  const scrollQuick = (dir: 1 | -1) => {
+    const row = quickRow.current
+    row?.scrollBy({ left: dir * scrollStep(row.clientWidth), behavior: 'smooth' })
   }
   useLayoutEffect(measureQuick) // after every render: «Создать заявку» comes and goes, the row hides while typing
   useEffect(() => {
@@ -579,37 +625,41 @@ export function VehicleScreen({
               else: the level is chosen per question by the server, and changed under the answer (#91). */}
           <div className="space-y-2 min-[900px]:flex min-[900px]:items-center min-[900px]:gap-3 min-[900px]:space-y-0">
             {(canTicket || !typing) && (
-              <div
-                ref={quickRow}
-                data-waits
-                onScroll={measureQuick}
-                onWheel={(e) => {
-                  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY
-                }}
-                className={`no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 min-[900px]:mx-0 min-[900px]:min-w-0 min-[900px]:flex-1 min-[900px]:px-0 ${quickMore ? 'fade-right' : ''}`}
-              >
-                {canTicket && (
-                  <button
-                    type="button"
-                    disabled={thread.busy}
-                    onClick={() => send(copy.thread.createTicketMessage)}
-                    className="min-h-12 shrink-0 rounded-lg border border-accent px-3 font-semibold text-accent enabled:hover:bg-accent/10 disabled:opacity-50 min-[900px]:pointer-fine:min-h-9 min-[900px]:pointer-fine:text-[13px]"
-                  >
-                    {copy.thread.createTicket}
-                  </button>
-                )}
-                {!typing &&
-                  copy.thread.quick.map((q) => (
+              <div className="relative min-[900px]:min-w-0 min-[900px]:flex-1">
+                <div
+                  ref={quickRow}
+                  data-waits
+                  onScroll={measureQuick}
+                  onWheel={(e) => {
+                    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY
+                  }}
+                  className={`no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 min-[900px]:mx-0 min-[900px]:px-0 ${quickMore ? 'fade-right' : ''}`}
+                >
+                  {canTicket && (
                     <button
-                      key={q}
                       type="button"
                       disabled={thread.busy}
-                      onClick={() => send(q)}
-                      className="min-h-12 shrink-0 rounded-lg border border-line px-3 text-[13px] text-dim hover:text-text disabled:opacity-50 min-[900px]:pointer-fine:min-h-9"
+                      onClick={() => send(copy.thread.createTicketMessage)}
+                      className="min-h-12 shrink-0 rounded-lg border border-accent px-3 font-semibold text-accent enabled:hover:bg-accent/10 disabled:opacity-50 min-[900px]:pointer-fine:min-h-9 min-[900px]:pointer-fine:text-[13px]"
                     >
-                      {q}
+                      {copy.thread.createTicket}
                     </button>
-                  ))}
+                  )}
+                  {!typing &&
+                    copy.thread.quick.map((q) => (
+                      <button
+                        key={q}
+                        type="button"
+                        disabled={thread.busy}
+                        onClick={() => send(q)}
+                        className="min-h-12 shrink-0 rounded-lg border border-line px-3 text-[13px] text-dim hover:text-text disabled:opacity-50 min-[900px]:pointer-fine:min-h-9"
+                      >
+                        {q}
+                      </button>
+                    ))}
+                </div>
+                {quickBack && <QuickArrow dir={-1} label={copy.thread.quickPrev} onPress={() => scrollQuick(-1)} />}
+                {quickMore && <QuickArrow dir={1} label={copy.thread.quickNext} onPress={() => scrollQuick(1)} />}
               </div>
             )}
           </div>
