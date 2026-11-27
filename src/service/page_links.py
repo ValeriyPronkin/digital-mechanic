@@ -53,3 +53,16 @@ def continues(page: str, nxt: str) -> bool:
         return True
     text = [ln for ln in lines if _HAS_LETTER.search(ln) and not _CAPTION.match(ln)]
     return bool(text) and bool(_OPEN_END.search(text[-1]))
+
+
+_TOC_LINE = re.compile(r"(?:\.{3,}|…|\s)\s*\d{1,3}\s*$")
+
+
+def is_contents(text: str) -> bool:
+    """Оглавление: строк с буквами ≥ 8, и ≥ 60 % из них кончаются номером страницы («Разборка двигателя ....... 112»).
+    В нём названия всех разделов, поэтому оно первым находится по названию раздела («перечень деталей разового
+    монтажа» → стр. 4 вместо 229, M12), а ответа в нём нет. Строки таблиц с «|» не в счёт."""
+    lines = [ln for ln in _lines(text) if _HAS_LETTER.search(ln)]  # подписи рисунка «3 2», «4 5» — не строки
+    if len(lines) < 8:
+        return False
+    return sum(1 for ln in lines if "|" not in ln and _TOC_LINE.search(ln)) / len(lines) >= 0.6

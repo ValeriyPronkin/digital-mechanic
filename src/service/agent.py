@@ -70,7 +70,8 @@ FINAL_NOTE = (
     "[Код сервиса: шаги поиска кончились. Ответь сейчас по уже найденным фрагментам, без новых вызовов "
     "инструментов; чего в них нет — так и скажи.]"
 )
-LINKED_PAGES = 4  # соседних страниц-продолжений на один поиск (page_links): таблица/порядок через границу страницы
+# соседних страниц-продолжений на один поиск (page_links): таблица/порядок через границу страницы
+LINKED_PAGES = int(os.environ.get("LINKED_PAGES", "4"))
 LINKED_FROM = 3  # от скольких лучших найденных страниц искать продолжения
 LINKED_FOLLOW = 3  # вперёд по цепочке продолжений от одной найденной страницы
 
@@ -1768,8 +1769,15 @@ class Agent:
         return out
 
     def _search_many(self, queries: list[str], engine: str, k: int) -> list[Any]:
-        """Несколько запросов → одна выдача: по очереди лучшие из каждого, без повторов страниц."""
-        lists = [self.searcher.search(q, engine, k=k) for q in dict.fromkeys(queries) if q]
+        """Несколько запросов → одна выдача: по очереди лучшие из каждого, без повторов страниц. Оглавления — нет:
+        ответа в них нет, а по названию раздела они находятся первыми (M12: стр. 4 вместо 229)."""
+        page_text = getattr(self.searcher, "page_text", None)
+
+        def useful(h: Any) -> bool:
+            return page_text is None or not page_links.is_contents(str(page_text(h.manual_id, h.pdf_page) or ""))
+
+        lists = [[h for h in self.searcher.search(q, engine, k=k + 1) if useful(h)][:k]
+                 for q in dict.fromkeys(queries) if q]  # fmt: skip
         merged: list[Any] = []
         seen: set[tuple[str, int]] = set()
         for rank in range(k):

@@ -73,3 +73,12 @@ def test_abbreviation_does_not_leave_a_stub(ml: MLClient, toir: ToirClient) -> N
     text, *_ = ag.guard(conv, "Зазор должен быть св. 0,7 мм. Поэтому проверьте щупом.")
     assert "св." not in text and "Поэтому проверьте щупом." in text
     assert isinstance(ag, Agent)
+
+
+def test_contents_page_is_recognised() -> None:
+    toc = "\n".join(f"Раздел номер {i} ........................ {i * 7}" for i in range(1, 12))
+    assert page_links.is_contents(f"4\n{toc}")
+    figure = "Установка головки\n" + "\n".join(f"{i} {i + 1}" for i in range(20)) + "\nДовернуть болты на 90"
+    assert not page_links.is_contents(figure)  # подписи рисунка — не оглавление
+    table = "\n".join(f"{i} | Кольцо уплотнительное | {i}" for i in range(1, 12))
+    assert not page_links.is_contents(table)
