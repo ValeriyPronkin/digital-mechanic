@@ -82,7 +82,7 @@ def vehicle_status(v: Vehicle, fault_titles: dict[str, str] | None = None) -> Ve
         if urgency == "high":
             return VehicleStatus("quarantine", [f"{name}: {why}"], last)
         reasons = [f"{name}: {why}"]
-        if last.signal_quality == "warning":
+        if last.signal_quality == "warning" and "помех" not in why:
             reasons.append("запись с помехами, уверенность снижена")
         return VehicleStatus("attention", reasons, last)
     reasons = []

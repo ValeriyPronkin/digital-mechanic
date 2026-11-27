@@ -21,6 +21,7 @@ from service.fleet_status import (
 
 client = TestClient(main.app)
 CRITICAL = {"F02", "F03", "F14"}
+HARMLESS = {"F05", "F11"}  # класс 1: двигателю не грозит — не выше среднего
 
 
 def expected_status(v: Vehicle) -> str:
@@ -32,7 +33,8 @@ def expected_status(v: Vehicle) -> str:
         code = last.anomaly_type or ""
         if code and not is_compatible(code, v.engine_model):
             return "quarantine"
-        if code in CRITICAL or (last.anomaly_score or 0) >= 0.85:
+        doubtful = (last.confidence or 0) < 0.6 or last.signal_quality == "warning"
+        if code in CRITICAL or ((last.anomaly_score or 0) >= 0.85 and code not in HARMLESS and not doubtful):
             return "quarantine"
         return "attention"
     if last.signal_quality == "warning" or (last.anomaly_score or 0) >= 0.30:

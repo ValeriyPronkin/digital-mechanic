@@ -57,25 +57,37 @@ def risk_line(code: str) -> str:
     return f"Чем грозит (оценка инженера, не из руководства): {basis}" if basis else ""
 
 
+def preliminary(diag: Diagnosis) -> bool:
+    """Вывод предварительный: уверенность модели ниже порога или запись с помехами."""
+    return (diag.confidence or 0) < CONFIDENCE_LOW or diag.signal_quality == "warning"
+
+
+_STEPS: tuple[Urgency, ...] = ("low", "medium", "high")
+_BASE: dict[int, Urgency] = {1: "low", 2: "medium", 3: "high"}
+
+
 def _urgency_rule(diag: Diagnosis) -> tuple[Urgency, str]:
-    """Срочность — правило в коде, с основанием простыми словами: на чём основан предложенный приоритет.
-    Одно и то же для карточки, заявки и сводки парка (issue #40 п. 1). Название неисправности здесь не
-    повторяется: оно стоит рядом, в заголовке карточки и в строке парка."""
+    """Срочность — правило в коде, с основанием простыми словами (подписано инженером, наше решение №86):
+    базовый уровень по классу опасности; высокая оценка поднимает не больше чем на ступень, класс 1 («двигателю
+    не грозит») — не выше среднего; предварительный вывод не поднимает и опускает на ступень, кроме класса 3.
+    Одно и то же для карточки, заявки и сводки парка. Название неисправности здесь не повторяется."""
     code = diag.anomaly_type or ""
     cls = danger_class(code) or 2
     score = diag.anomaly_score or 0
     if cls == 3:
         return "high", f"Опасная неисправность: {CRITICAL_CODES[code]}"
-    if score >= SCORE_HIGH:
-        return "high", f"Оценка отклонения {_num(score)}, порог высокого приоритета {_num(SCORE_HIGH)}"
-    if (diag.confidence or 0) < CONFIDENCE_LOW or diag.signal_quality == "warning":
+    base = _STEPS.index(_BASE[cls])
+    if preliminary(diag):
         pct, low = round((diag.confidence or 0) * 100), round(CONFIDENCE_LOW * 100)
         noisy = diag.signal_quality == "warning"
         why = "Запись с помехами" if noisy else f"Уверенность модели {pct}\u00a0%, порог {low}\u00a0%"
-        return "low", f"{why}: сначала повторить запись или провести дефектовку"
-    if cls == 1:
-        return "low", f"Оценка отклонения {_num(score)} ниже порога {_num(SCORE_HIGH)}, двигателю узел не грозит"
-    return "medium", f"Оценка отклонения {_num(score)} ниже порога {_num(SCORE_HIGH)}"
+        return _STEPS[max(base - 1, 0)], f"{why}: сначала повторить запись или провести дефектовку"
+    if score >= SCORE_HIGH:
+        top = 1 if cls == 1 else 2
+        level = _STEPS[min(base + 1, top)]
+        cap = ", для этого класса не выше среднего" if cls == 1 else ""
+        return level, f"Оценка отклонения {_num(score)}, порог {_num(SCORE_HIGH)}: на ступень выше{cap}"
+    return _STEPS[base], f"Оценка отклонения {_num(score)} ниже порога {_num(SCORE_HIGH)}"
 
 
 def urgency_for(diag: Diagnosis) -> tuple[Urgency, str]:
@@ -266,7 +278,9 @@ def _build_card(diag: Diagnosis, fault_titles: dict[str, str], engine: str | Non
     return VerdictCard(
         status="anomaly",
         color="red",
-        title=f"Вероятно: {title[:1].lower()}{title[1:]}" if known and title else "Неисправность неизвестного типа",
+        title=f"{'Предварительно' if preliminary(diag) else 'Вероятно'}: {title[:1].lower()}{title[1:]}"
+        if known and title
+        else "Неисправность неизвестного типа",
         action=URGENCY_ACTION[urgency]
         if urgency
         else "Тип неисправности не распознан. Повторите проверку; заявку по такому результату не оформляем.",
