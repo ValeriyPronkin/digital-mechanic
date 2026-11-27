@@ -663,6 +663,45 @@ def own_source_check() -> bool:
     return os.environ.get("GUARD_OWN_SOURCE", "1") != "0"
 
 
+def _only_translation(tr: str, src: str) -> str:
+    """Перевод без русского исходника: модель иногда возвращает «исходник» (перевод) — берём скобки; иначе пусто."""
+    tr = tr.strip()
+    if src[:25].lower() not in tr.lower():
+        return tr
+    m = re.search(r"\(([^()]{10,})\)\s*$", tr)
+    return m.group(1).strip() if m and src[:25].lower() not in m.group(1).lower() else ""
+
+
+def _quote_numbers(quotes: list[Any]) -> set[str]:
+    """Числа спорных формулировок: «15» из «…менее чем через 15 минут…»."""
+    return set().union(*(numbers(q.quote) for q in quotes)) if quotes else set()
+
+
+def _drop_numbers(text: str, nums: set[str]) -> str:
+    """Убрать фразы (и пункты списка), где есть число из `nums`: спорное значение — только в блоке кода."""
+    if not nums:
+        return text
+    out = []
+    for ln in text.split("\n"):
+        mark = _LIST_MARK.match(ln)
+        prefix = mark.group(0) if mark else ""
+        parts = [p for p in _SENTENCE.split(ln[len(prefix) :]) if p]
+        kept = [p for p in parts if not (numbers(p) & nums)]
+        if not parts:
+            out.append(ln)
+        elif kept:
+            out.append(prefix + " ".join(kept))
+    n = 0
+    for i, ln in enumerate(out):  # шаг снят — нумерация подряд, а не «2.» первым пунктом
+        m = re.match(r"^(\s*)\d+\.\s", ln)
+        if m:
+            n += 1
+            out[i] = f"{m.group(1)}{n}. {ln[m.end() :]}"
+        elif ln.strip() and not ln.startswith(" "):
+            n = 0
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+
+
 def numbers(text: str) -> set[str]:
     return {_norm_num(n) for n in _NUM.findall(_REF_BARE.sub(" ", _REF.sub(" ", text)))}
 
@@ -1305,6 +1344,7 @@ class Agent:
         final, grounded, notes, cited = self.guard(conv, text)
         withdrawn = list(conv.withdrawn)  # back-перевод ниже снова вызывает guard
         final, cited, more = self._contradiction_text(conv, final, cited)
+        final = self._translate_contradiction(conv, final, target, request_id, steps)
         notes += more
         final, _ = clean_refusal.unmark_absence(final)  # «в руководстве нет» — без ссылок на страницы
         final = _mark_bench(final, conv.sources)
@@ -2260,6 +2300,9 @@ class Agent:
     ) -> tuple[str, list[Source], list[str]]:
         """Известное противоречие (по вопросу или по ответу модели) — блок кода сразу после прямого ответа, а строки
         модели, выбравшие одну формулировку, — вывод заказчика. Иначе — блоки модели сверяются с цитатами страниц."""
+        foreign = (conv.passport.get("answer_lang") or "ru") not in ("ru", "rus")
+        if conv.contradiction is None and foreign:
+            self._foreign_contradiction(conv, text)  # шаблоны тем и формулировок — русские (стенд 28.11, узб.)
         if conv.contradiction is None:
             # блок — только под ответом на вопрос о спорной теме (зазоры), а не под диагнозом или «можно ли ехать»
             k = contradictions.match_answer(conv.vehicle.engine_model, text)
@@ -2296,6 +2339,8 @@ class Agent:
         pages = {(q.doc, q.page) for q in quotes}
         refs = {(s.manual_id, s.pdf_page): s.ref for s in conv.sources.values() if (s.manual_id, s.pdf_page) in pages}
         stripped, _ = contradictions.check_model_blocks(text, lambda ref: None)  # свои блоки модели — убрать
+        if foreign:  # русские шаблоны формулировок узбекскую фразу не узнают: спорное число — только в блоке
+            stripped = _drop_numbers(stripped, _quote_numbers(quotes))
         parts = contradictions.neutralize(k, stripped).split("\n\n", 1)
         page_text = getattr(self.searcher, "page_text", None)
         blk = contradictions.block(k, quotes, refs, self._escalate(conv, k, quotes), page_text)
@@ -2304,6 +2349,84 @@ class Agent:
             if conv.sources[ref] not in cited:
                 cited.append(conv.sources[ref])
         return text, cited, ["Противоречие в документации: показаны все формулировки со страницами."]
+
+    def _foreign_contradiction(self, conv: Conversation, text: str) -> None:
+        """Ответ не по-русски: тема — по русскому переводу вопроса из плана поиска, а спорная формулировка — по числу
+        из цитат («15» в «…15 daqiqadan kechiktirmasdan»). Стенд 28.11, B418HK98: «Klapan tirqishi qancha?» — шаг
+        с формулировкой РЭ стр. 31 как факт, без блока; по-русски тот же вопрос давал блок."""
+        question_ru = str((conv.passport.get("plan") or {}).get("question_ru") or _last_question(conv))
+        canon = canonical_engine(conv.vehicle.engine_model)
+        page_text = getattr(self.searcher, "page_text", None)
+        said = numbers(text)
+        cited_pages = {(s.manual_id, s.pdf_page) for r, s in conv.sources.items() if f"[{r}]" in text}
+        for k in contradictions.known():
+            if canon not in k.engines:
+                continue
+            quotes = contradictions.verified_quotes(k, page_text)
+            if len(quotes) < 2:
+                continue
+            # тема — по переводу вопроса или по ссылке ответа на страницу спорной цитаты (плана поиска может не быть)
+            if not (k.topic.search(question_ru) or cited_pages & {(q.doc, q.page) for q in quotes}):
+                continue
+            if k.trigger.search(question_ru) or said & _quote_numbers(quotes):
+                for q in quotes:
+                    self._source_for(conv, q.doc, q.page, k.title, q.quote, f"противоречие в руководствах: {k.title}")
+                conv.contradiction = (k, quotes)
+                return
+
+    def _translate_contradiction(
+        self, conv: Conversation, text: str, target: str, request_id: str, steps: list[dict[str, Any]]
+    ) -> str:
+        """Ответ не по-русски: в блоке противоречия цитаты остаются дословно по-русски (так в руководстве), рядом —
+        перевод; безопасное правило — по-русски и на языке ответа. Один вызов модели; сбой — блок по-русски."""
+        if conv.contradiction is None or target in ("ru", "rus"):
+            return text
+        _, quotes = conv.contradiction
+        lines = text.split("\n")
+        rule_at = next((i for i, ln in enumerate(lines) if ln.startswith(contradictions.RULE)), None)
+        if rule_at is None:
+            return text
+        rule = lines[rule_at][len(contradictions.RULE) :].strip()
+        src = [rule, *(q.quote for q in quotes)]
+        # термины — как в ответе механику на этом языке («klapan», «tirqish»), а не дословно (стенд 28.11: «клапанный»
+        # без контекста переводился как «klaviatura»)
+        context = re.sub(r"\[[RS]\d+\]", "", "\n".join(lines[:rule_at])).strip()[:900]
+        msgs: list[Message] = [
+            {"role": "system", "content": "Это цитаты из руководства по эксплуатации и ремонту двигателя автомобиля. "
+                                          "Технические термины переводи так же, как в этом ответе механику:\n"
+                                          f"{context}\n\n"
+                                          f"Переведи каждую строку JSON-списка. {language.instruction(target)} "
+                                          "Числа и единицы не меняй. В каждом элементе — только перевод, без "
+                                          "русского исходника, кавычек и скобок. Верни только JSON-список той же "
+                                          "длины."},
+            {"role": "user", "content": json.dumps(src, ensure_ascii=False)},
+        ]  # fmt: skip
+        try:
+            self.check_budget()
+            t0 = time.monotonic()
+            reply = self.provider.chat(msgs, [], max_tokens=900)
+            ms = int((time.monotonic() - t0) * 1000)
+            m = re.search(r"\[.*\]", reply.content, re.S)
+            out = json.loads(m.group(0)) if m else []
+        except (LLMError, BudgetExceededError, ValueError):
+            return text
+        cost = self._spend(request_id, len(steps) + 1, reply, ms)
+        steps.append({"step": len(steps) + 1, "kind": "llm", "name": reply.model + " (перевод блока противоречия)",
+                      "tokens_in": reply.tokens_in, "tokens_out": reply.tokens_out,
+                      "tokens_cached": reply.tokens_cached, "cost_rub": round(cost, 4), "ms": ms})  # fmt: skip
+        if not isinstance(out, list) or len(out) != len(src) or not all(isinstance(x, str) for x in out):
+            return text
+        if numbers(" ".join(out)) - numbers(" ".join(src)):
+            return text  # перевод добавил число — не показываем
+        out = [_only_translation(tr, s) for tr, s in zip(out, src, strict=True)]
+        if not all(out):
+            return text  # модель вернула исходник вместо перевода — блок по-русски
+        lines[rule_at] = f"{contradictions.RULE} {rule} — {out[0].strip()}"
+        for q, tr in zip(quotes, out[1:], strict=True):
+            at = next((i for i, ln in enumerate(lines) if ln.startswith("- ") and q.quote[:40] in ln), None)
+            if at is not None:
+                lines[at] = f"{lines[at]} (перевод: {tr.strip()})"
+        return "\n".join(lines)
 
     def _escalate(self, conv: Conversation, k: Any, quotes: list[Any]) -> str:
         """Противоречие — в очередь главного механика; строка «передано на решение / решение по противоречию».
