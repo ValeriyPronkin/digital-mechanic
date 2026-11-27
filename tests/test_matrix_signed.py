@@ -60,7 +60,7 @@ def test_signed_cell_lists_registry_pages_and_operations(code: str, group: str) 
 def test_valve_knock_cites_troubleshooting_page_first_and_works_are_clean() -> None:
     """F01 × ЯМЗ-236М2 (B418HK98 в видео): первая страница и основание — таблица неисправностей РЭ стр. 53 «Двигатель
     стучит → Нарушена регулировка клапанного механизма». Строка оттуда работой не стала: в текстовом слое PDF столбцы
-    перемешаны («механи … зма ры»), а работа — строка листа заявки. Первая работа — РК стр. 269, затем РЭ 31, 34."""
+    перемешаны («механи … зма ры»), а работа — строка листа заявки. Работы — РК стр. 269 и РЭ стр. 34."""
     cell = SRC["codes"]["F01"]["cells"]["ЯМЗ-236М2"]
     assert [(p["doc"], p["page"]) for p in cell["pages"]] == [
         ("yamz-236-re", 53),
@@ -70,7 +70,29 @@ def test_valve_knock_cites_troubleshooting_page_first_and_works_are_clean() -> N
         ("yamz-236-re", 34),
     ]
     ops = [(o["doc"], o["page"]) for o in cell["operations"]]
-    assert ops[0] == ("yamz-236-rk", 269) and ("yamz-236-re", 53) not in ops
+    assert ops == [("yamz-236-rk", 269), ("yamz-236-re", 34), ("yamz-236-re", 34), ("yamz-236-re", 34)]
+
+
+F01_WORKS = [
+    "Проверить и подрегулировать тепловые зазоры клапанного механизма",
+    "Клапанные зазоры рекомендуется регулировать в порядке работы цилиндров",
+    "После регулировки зазоров пустить двигатель и прослушать его работу",
+    "При появлении стука клапанов остановить двигатель и вновь проверить зазоры",
+]
+
+
+@needs_matrix
+def test_valve_knock_ticket_works() -> None:
+    """Работы F01 × ЯМЗ-236М2 — строки листа заявки в видео. Без «обкатки» (машина в эксплуатации) и без срока
+    «15 мин»: РК стр. 269 («не ранее, чем через 15 мин») и РЭ стр. 31 («или менее чем через 15 минут») расходятся —
+    это известное противоречие (data/contradictions.json), ему место в ответе, а не в двух работах заявки."""
+    from service.fault_matrix import cell_for
+
+    cell = cell_for("F01", "ЯМЗ-236М2")
+    assert cell is not None
+    works = [o.quote for o in cell.operations]
+    assert works == F01_WORKS
+    assert not [w for w in works if "обкатк" in w.lower() or "15 мин" in w]
 
 
 # Короткие слова, которые бывают в строке руководства; иное слово в 1–3 буквы (не аббревиатура) — обрывок слова,
