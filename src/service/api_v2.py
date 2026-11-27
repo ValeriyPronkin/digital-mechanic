@@ -169,17 +169,20 @@ class ThreadStore:
     def key(browser: str, vehicle_id: str) -> str:
         return hashlib.sha256(f"{browser}|{vehicle_id}".encode()).hexdigest()[:32]
 
-    def get(self, browser: str, vehicle_id: str) -> dict[str, Any] | None:
+    def get(self, browser: str, vehicle_id: str, fresh: bool = False) -> dict[str, Any] | None:
+        """`fresh` — из бакета, а не из памяти экземпляра (подтверждение заявки: нить мог изменить другой
+        экземпляр — ревью 27.11). Бакет недоступен — копия в памяти."""
         k = self.key(browser, vehicle_id)
         with self._lock:
-            if k in self._mem:
+            if k in self._mem and not (fresh and self.bucket is not None):
                 return self._mem[k]
         if self.bucket is None:
             return None
         try:
             data: dict[str, Any] = json.loads(self.bucket.get(f"v2/threads/{k}.json"))
         except Exception:  # нет нити или бакет недоступен
-            return None
+            with self._lock:
+                return self._mem.get(k)
         with self._lock:
             self._mem[k] = data
         return data
@@ -547,8 +550,9 @@ class ChatIn(BaseModel):
 
 class TicketDecision(BaseModel):
     vehicle_id: str = Field(min_length=1)
-    keep_operations: list[int] = Field(default_factory=list)
-    keep_spare_parts: list[int] = Field(default_factory=list)
+    # None (поле не передано) — весь показанный состав; [] — механик снял всё (работы — отказ, запчасти — без них)
+    keep_operations: list[int] | None = None
+    keep_spare_parts: list[int] | None = None
     warning_acknowledged: bool = False
     urgency: Literal["low", "medium", "high"] | None = None
 
@@ -759,7 +763,7 @@ def build_router(
 
     def thread_with_pending(request: Request, vehicle_id: str, pending_id: str) -> tuple[str, dict[str, Any]]:
         b = browser(request)
-        data = threads.get(b, vehicle_id) if b else None
+        data = threads.get(b, vehicle_id, fresh=True) if b else None
         if not data or not data.get("pending") or data["pending"]["pending_id"] != pending_id:
             raise HTTPException(409, "Черновик заявки устарел — попросите подготовить заявку заново.")
         return b or "", data
@@ -776,13 +780,15 @@ def build_router(
         if conv.draft is None or conv.draft.fingerprint != pending_id:
             raise HTTPException(409, "Черновик заявки устарел — попросите подготовить заявку заново.")
         body = conv.draft.body.model_dump()
-        ops = [body["operations"][i] for i in decision.keep_operations if 0 <= i < len(body["operations"])]
-        parts = [body["spare_parts"][i] for i in decision.keep_spare_parts if 0 <= i < len(body["spare_parts"])]
-        if not decision.keep_operations:
-            ops = body["operations"]  # ничего не отмечено — механик подтверждает показанный состав целиком
-            parts = body["spare_parts"] if not decision.keep_spare_parts else parts
+        # поле не передано — показанный состав целиком; пустой список — механик снял всё (ревью 27.11: раньше
+        # пустой список работ отправлял весь состав)
+        keep_ops = range(len(body["operations"])) if decision.keep_operations is None else decision.keep_operations
+        keep_parts = range(len(body["spare_parts"])) if decision.keep_spare_parts is None else decision.keep_spare_parts
+        kept = list(dict.fromkeys(i for i in keep_ops if 0 <= i < len(body["operations"])))  # без повторов
+        ops = [body["operations"][i] for i in kept]
+        parts = [body["spare_parts"][i] for i in keep_parts if 0 <= i < len(body["spare_parts"])]
         if not ops:
-            raise HTTPException(409, "В заявке должна остаться хотя бы одна работа.")
+            raise HTTPException(409, "В заявке должна остаться хотя бы одна работа. Отметьте работы и отправьте снова.")
         proposed = pending["payload"]["urgency"]
         chosen = decision.urgency or proposed
         note = urgency_note(proposed, chosen, conv.draft.urgency_reason)
@@ -793,11 +799,21 @@ def build_router(
             from service.agent import TicketDraft, fingerprint
 
             conclusion = body["conclusion"] if chosen == proposed else f"{body['conclusion']} {note}"
+            refs = body["references"]
+            op_pages = conv.draft.op_pages
+            if len(op_pages) == len(body["operations"]):  # страница убранной работы — тоже из заявки
+                dropped = {op_pages[i] for i in range(len(op_pages)) if i not in kept} - {op_pages[i] for i in kept}
+                refs = [r for r in refs if (r["manual"], r["pdf_page"]) not in dropped]
             new_body = TicketRequest.model_validate(
-                {**body, "operations": ops, "spare_parts": parts, "urgency": chosen, "conclusion": conclusion}
-            )
+                {**body, "operations": ops, "spare_parts": parts, "urgency": chosen, "conclusion": conclusion,
+                 "references": refs}
+            )  # fmt: skip
             conv.draft = TicketDraft(
-                body=new_body, urgency_reason=conv.draft.urgency_reason, fingerprint=fingerprint(new_body)
+                body=new_body,
+                urgency_reason=conv.draft.urgency_reason,
+                fingerprint=fingerprint(new_body),
+                tools=conv.draft.tools,
+                op_pages=[op_pages[i] for i in kept] if len(op_pages) == len(body["operations"]) else [],
             )
         try:
             resp = ag.confirm_ticket(conv, conv.draft.fingerprint)
