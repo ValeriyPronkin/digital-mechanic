@@ -1,0 +1,10 @@
+{
+ "_comment": "Поставщик 2 — HTTP API (kind http). ВЫМЫШЛЕННЫЙ: локальная заглушка `make parts-demo` (порт 8003), данные придуманы. Ключ — только имя переменной (env:…), значение — в .env; для заглушки ключ не нужен.",
+ "kind": "http",
+ "supplier": "Демо-API (вымышленный)",
+ "url": "http://127.0.0.1:8003/search?q={query}",
+ "items_key": "items",
+ "headers": {"Authorization": "env:DEMO_PARTS_API_TOKEN"},
+ "timeout_s": 3,
+ "fields": {"designation": "article", "name": "title", "available": "stock", "price_rub": "price", "lead_days": "delivery_days", "url": "link"}
+}

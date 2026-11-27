@@ -37,6 +37,7 @@ from service.clients import ServiceError, TicketRequest
 from service.fleet import Fleet, Vehicle
 from service.fleet_status import STATUS_LABEL, trend, vehicle_status
 from service.manuals.catalog import DOCS_BY_ID, documents_for_engine
+from service.parts_supplier import offers_for_parts
 from service.store import Store
 from service.verdict_policy import URGENCY_ACTION, VerdictCard, urgency_for
 from service.voice import speech_for
@@ -445,7 +446,29 @@ def tool_events(reply: AgentReply, conv: Conversation, verdict_sent: bool) -> tu
     return events, verdict_sent
 
 
-def ticket_pending(conv: Conversation) -> dict[str, Any] | None:
+def manual_designations(conv: Conversation, code: str) -> dict[str, str]:
+    """Строка запчасти черновика → обозначение из руководства (матрица, цитата сверена со страницей; D-29)."""
+    from service.agent import _part_label
+    from service.fault_matrix import cell_for
+
+    cell = cell_for(code, conv.vehicle.engine_model)
+    if cell is None or cell.status != "confirmed":
+        return {}
+    return {_part_label(r): r.designation for r in cell.spare_parts if r.designation}
+
+
+def parts_offers(conv: Conversation, body: dict[str, Any], parts: Any | None) -> dict[str, Any] | None:
+    """Предложения поставщиков по запчастям черновика (`parts_offers`); нет запчастей или поставщика — None."""
+    if parts is None or not body["spare_parts"]:
+        return None
+    try:
+        return offers_for_parts(parts, body["spare_parts"], manual_designations(conv, body["anomaly_type"]))
+    except Exception as exc:  # поставщики не мешают черновику заявки
+        log.warning("предложения поставщиков не получены: %s", type(exc).__name__)
+        return {"connected": True, "note": "Поставщики сейчас не ответили — повторите позже.", "items": []}
+
+
+def ticket_pending(conv: Conversation, parts: Any | None = None) -> dict[str, Any] | None:
     d = conv.draft
     if d is None or conv.card is None:
         return None
@@ -476,6 +499,7 @@ def ticket_pending(conv: Conversation) -> dict[str, Any] | None:
             for u in URGENCY_LEVELS
         ],
         "warning": warning,
+        "parts_offers": parts_offers(conv, body, parts),
     }
 
 
@@ -528,8 +552,13 @@ def build_router(
     get_pages: Callable[[], Any] | None = None,
     get_marks: Callable[[], Any] | None = None,
     get_log_put: Callable[[], Callable[[str, bytes], None] | None] | None = None,
+    get_parts: Callable[[], Any] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v2")
+
+    def parts_source() -> Any | None:
+        """Поставщики запчастей (`parts_supplier.from_env`); без них — поля `parts_offers` нет."""
+        return get_parts() if get_parts is not None else None
 
     def log_put() -> Callable[[str, bytes], None] | None:
         """`put` журнала стенда для копии паспорта (#27, `PASSPORT_LOG=bucket`); без журнала — None."""
@@ -637,7 +666,7 @@ def build_router(
             yield _sse({"type": "text", "text": text, "round": 1})
             ver = verification(reply, text)
             yield _sse(ver)
-            pending = ticket_pending(conv)
+            pending = ticket_pending(conv, parts_source())
             if pending is not None:
                 yield _sse(pending)
             usage = usage_events(reply)
@@ -745,6 +774,7 @@ def build_router(
         row = next(r for r in store.tickets(decision.vehicle_id) if r["ticket_id"] == resp.ticket_id)
         view = ticket_view(row)
         view["urgency_note"] = note
+        view["parts_offers"] = pending.get("parts_offers")  # предложения, показанные на листе заявки
         # паспорт ответа, предложившего заявку: строка о приоритете — и копия в журнал стенда (PASSPORT_LOG)
         turn = next((t for t in reversed(data["transcript"]) if t.get("role") == "assistant"), None)
         if turn and turn.get("passport"):

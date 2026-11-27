@@ -1,0 +1,12 @@
+{
+ "_comment": "ВЫМЫШЛЕННЫЕ ДАННЫЕ для HTTP-заглушки поставщика (service.parts_demo_api). Не цены, не остатки и не сроки реального поставщика.",
+ "items": [
+  {"article": "236-1007118", "title": "Втулка коромысла (демо-API)", "stock": "есть, 3 шт.", "price": 120, "delivery_days": 2, "link": "http://127.0.0.1:8003/item/236-1007118"},
+  {"article": "236-1007186", "title": "Втулка толкателя (демо-API)", "stock": "есть, 8 шт.", "price": 140, "delivery_days": 2, "link": "http://127.0.0.1:8003/item/236-1007186"},
+  {"article": "7511.1007180", "title": "Толкатель (демо-API)", "stock": "под заказ", "price": 300, "delivery_days": 10, "link": null},
+  {"article": "5340.1007010", "title": "Клапан впускной и выпускной (демо-API)", "stock": "есть, 2 шт.", "price": 90, "delivery_days": 3, "link": null},
+  {"article": "536.1003206-10", "title": "Прокладка головки цилиндров (демо-API)", "stock": "есть, 5 шт.", "price": 210, "delivery_days": 1, "link": null},
+  {"article": "", "title": "Термостат ЯМЗ-536 (демо-API)", "stock": "есть, 4 шт.", "price": 180, "delivery_days": 2, "link": null},
+  {"article": "", "title": "Водяной насос ЯМЗ-536 (демо-API)", "stock": "под заказ", "price": 950, "delivery_days": 7, "link": null}
+ ]
+}
