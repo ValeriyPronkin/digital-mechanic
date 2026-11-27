@@ -15,6 +15,7 @@ import { CHECKED, nextChoice, PRESSED_STATUS } from '../lib/ui'
 import { QueueRow } from './ContradictionQueue'
 import { REGISTER } from './TicketRegister'
 import { ThemeSelect } from './ThemeSelect'
+import { VersionFooter } from './VersionFooter'
 
 export type Role = 'mechanic' | 'chief'
 
@@ -352,6 +353,8 @@ export function FleetList({
           ))}
           {outcomesAt === shown.length && outcomes}
         </ul>
+        {/* the version the jury looks at (§7), at the end of the list, out of the way */}
+        <VersionFooter />
       </div>
     </div>
   )

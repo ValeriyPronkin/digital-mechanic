@@ -2,6 +2,7 @@
 import { getLang, voiceLang } from './lib/lang'
 
 import type { LevelChoice } from './lib/level'
+import type { BuildInfo } from './lib/version'
 
 export type Status = 'normal' | 'anomaly' | 'check_failed'
 export type SignalQuality = 'good' | 'warning' | 'bad'
@@ -441,6 +442,8 @@ const post = (body: unknown): RequestInit => ({
 })
 
 export const getFleet = () => json<FleetView>('/api/v2/fleet')
+/** `build` of /health (§7): the commit and the time of the build, for the footer. */
+export const getBuild = () => json<{ build?: BuildInfo }>('/health').then((h) => h.build ?? null)
 export const getLanguages = () => json<LanguageInfo[]>('/api/v2/languages')
 export const getVehicle = (id: string) => json<VehicleDetail>(`/api/v2/vehicles/${encodeURIComponent(id)}`)
 /** The check's card alone, from the ML fields and the server's rules, no model: it is ready in a fraction of a

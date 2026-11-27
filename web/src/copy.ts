@@ -44,6 +44,11 @@ export const copy = {
     mechanic: 'Механик',
     chief: 'Главный механик',
   },
+  // the version in the footer (§7): «версия 2ce108f · 27.11 13:30»
+  version: {
+    line: (sha: string, at?: string) => (at ? `версия ${sha} · ${at}` : `версия ${sha}`),
+    unknown: 'версия неизвестна',
+  },
   // the theme of the screen: kept on the device (lib/theme.ts)
   theme: {
     label: 'Тема экрана',
