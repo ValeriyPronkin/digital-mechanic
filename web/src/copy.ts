@@ -355,6 +355,8 @@ export const copy = {
     json: 'JSON',
     loadFailed: 'Не получилось загрузить обращения',
     resumeFailed: 'Не получилось открыть обращение. Попробуйте ещё раз',
+    showAll: (n: number) => `Показать все (${n})`,
+    showFewer: 'Свернуть',
   },
   contradiction: {
     title: (what: string) => `Противоречие в документации — ${what}`,

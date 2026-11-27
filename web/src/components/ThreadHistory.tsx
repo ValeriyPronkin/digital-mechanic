@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ApiError, exportUrl, getThreads, resumeThread, type ThreadRow } from '../api'
 import { copy } from '../copy'
-import { historyRows } from '../lib/history'
+import { firstRows, FIRST_ROWS, historyRows } from '../lib/history'
 
 /** «Обращения по машине» (#92, B1 — память по машине): earlier conversations about this vehicle, newest first.
  *  «Продолжить» makes one the current conversation on this phone (the next question goes to it);
@@ -25,6 +25,7 @@ export function ThreadHistory({
   const [failed, setFailed] = useState(false)
   const [busy, setBusy] = useState<string | null>(null) // the conversation being opened
   const [problem, setProblem] = useState<string | null>(null)
+  const [all, setAll] = useState(false) // «Показать все»: the newest three until then
 
   useEffect(() => {
     let stale = false
@@ -57,6 +58,7 @@ export function ThreadHistory({
   if (failed) return <p className="text-[13px] text-dim">{copy.history.loadFailed}</p>
   if (!rows || rows.length === 0) return null
   const shown = historyRows(rows, currentId)
+  const listed = all ? shown : firstRows(shown)
 
   return (
     <details className="group rounded-xl border border-line bg-surface" data-history>
@@ -69,7 +71,7 @@ export function ThreadHistory({
         </span>
       </summary>
       <ul className="divide-y divide-line border-t border-line">
-        {shown.map((r) => (
+        {listed.map((r) => (
           <li key={r.id} className="space-y-2 px-4 py-3">
             <p className="text-[13px] text-dim">
               {r.when} · {r.status}
@@ -116,6 +118,16 @@ export function ThreadHistory({
           </li>
         ))}
       </ul>
+      {shown.length > FIRST_ROWS && (
+        <button
+          type="button"
+          aria-expanded={all}
+          onClick={() => setAll(!all)}
+          className="flex min-h-12 w-full items-center border-t border-line px-4 text-[13px] text-accent hover:bg-surface-2"
+        >
+          {all ? copy.history.showFewer : copy.history.showAll(shown.length)}
+        </button>
+      )}
       {problem && (
         <p role="alert" className="border-t border-line px-4 py-3 text-[13px] text-warn">
           {problem}
