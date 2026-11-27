@@ -89,6 +89,9 @@ export const copy = {
     // the confidence against the server's threshold, as numbers: «Уверенность 0,58 — ниже порога 0,60: вывод предварительный»
     belowThreshold: (confidence: string, threshold: string) =>
       `Уверенность ${confidence} — ниже порога ${threshold}: вывод предварительный`,
+    // a later answer about a check whose card is above: one line back to it
+    again: (session: string, date: string, what: string) => `По проверке ${session} от ${date}: ${what}`,
+    againHint: 'Показать карточку проверки выше',
     atThreshold: (confidence: string, threshold: string) => `Уверенность ${confidence} — не ниже порога ${threshold}`,
   },
   guide: {
