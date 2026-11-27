@@ -122,6 +122,7 @@ function AssistantBlock({
       {turn.text && (
         <Answer
           text={turn.text}
+          spans={turn.spans}
           sources={sources}
           verified={new Set(turn.verification?.verified)}
           scanned={new Set(turn.verification?.scanned)}

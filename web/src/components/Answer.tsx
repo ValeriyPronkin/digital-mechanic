@@ -1,4 +1,6 @@
-import type { SourceItem, Verification } from '../api'
+import { useState } from 'react'
+import type { AnswerSpan, SourceItem, Verification } from '../api'
+import { copy } from '../copy'
 import {
   attachClaims,
   attachWithdrawn,
@@ -10,6 +12,7 @@ import {
   type Inline,
   type OwnQuote,
 } from '../lib/answer'
+import { markPieces, spanHint, usableSpans, type Piece } from '../lib/spans'
 import { CheckSummary } from './CheckSummary'
 import { SourceChip } from './SourceChip'
 import { Withdrawn } from './Withdrawn'
@@ -25,15 +28,70 @@ type Props = Marks & {
 // one, hands over the line of its own sentence.
 type LineProps = Marks & {
   inline: Inline[]
+  pieces: Map<Inline, Piece[]> // the text parts with parts and tools marked
   onOpen: (s: SourceItem, withdrawn: boolean, own?: OwnQuote) => void
 }
 
-function Line({ inline, sources, verified, scanned, onOpen }: LineProps) {
+const SPAN_TONE = {
+  part: 'text-part decoration-part/70',
+  tool: 'text-tool decoration-tool/70 decoration-dashed',
+} as const
+
+/** A part or a tool in the answer: its own colour, underlined. A tap opens its hint right under the line of
+ *  text: what it is, the designation and the page as the server sent them, and the page itself when the
+ *  answer cites it. Inline rather than a floating tip, so it never covers the text and works by touch. */
+function Marked({ span, sources, onOpen }: { span: AnswerSpan; sources: Sources; onOpen: (s: SourceItem) => void }) {
+  const [open, setOpen] = useState(false)
+  const { designation, page } = spanHint(span)
+  const source = span.ref ? sources[span.ref] : undefined
+  return (
+    <>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className={`relative inline underline decoration-1 underline-offset-[3px] before:absolute before:-inset-y-2 before:inset-x-0 before:content-[''] ${SPAN_TONE[span.type]}`}
+      >
+        {span.text}
+      </button>
+      {open && (
+        <span
+          role="note"
+          className="mx-0.5 inline-flex flex-wrap items-baseline gap-x-2 rounded-md border border-line bg-surface-2 px-2 py-0.5 align-baseline text-[13px] leading-snug"
+        >
+          <span className={span.type === 'part' ? 'text-part' : 'text-tool'}>{copy.spans.kind[span.type]}</span>
+          {designation && (
+            <span>
+              <span className="text-dim">{copy.spans.designation}</span> {designation}
+            </span>
+          )}
+          {page !== null && <span>{copy.spans.page(page)}</span>}
+          {!designation && page === null && <span className="text-dim">{copy.spans.noDetails}</span>}
+          {source && (
+            <button
+              type="button"
+              onClick={() => onOpen(source)}
+              className="relative text-accent before:absolute before:-inset-y-3 before:inset-x-0 before:content-['']"
+            >
+              {copy.spans.open}
+            </button>
+          )}
+        </span>
+      )}
+    </>
+  )
+}
+
+function Line({ inline, pieces, sources, verified, scanned, onOpen }: LineProps) {
   return (
     <>
       {inline.map((part, i) =>
         part.kind === 'text' ? (
-          <span key={i}>{part.text}</span>
+          <span key={i}>
+            {(pieces.get(part) ?? [{ text: part.text }]).map((p, k) =>
+              p.span ? <Marked key={k} span={p.span} sources={sources} onOpen={(s) => onOpen(s, false)} /> : p.text,
+            )}
+          </span>
         ) : part.kind === 'withdrawn' ? (
           <Withdrawn key={i} part={part} sources={sources} onOpen={(s) => onOpen(s, true)} />
         ) : (
@@ -53,15 +111,44 @@ function Line({ inline, sources, verified, scanned, onOpen }: LineProps) {
 /** The agent's text: section titles, short paragraphs, steps, and a source chip after each claim.
  *  `verification` is the server's check of that text: the claims it withdrew and the counts under the answer.
  *  Model-written text wraps anywhere when it has to: one long token must not push the thread sideways. */
+/** The two colours, once under an answer that has them: the jury and a new mechanic learn them here. */
+function Legend({ spans }: { spans: AnswerSpan[] }) {
+  const kinds = (['part', 'tool'] as const).filter((k) => spans.some((s) => s.type === k))
+  return (
+    <p className="flex flex-wrap gap-x-3 text-[13px] text-dim">
+      <span>{copy.spans.legendTitle}:</span>
+      {kinds.map((k) => (
+        <span key={k} className={`underline decoration-1 underline-offset-[3px] ${SPAN_TONE[k]}`}>
+          {copy.spans.legend[k]}
+        </span>
+      ))}
+    </p>
+  )
+}
+
+/** Every text part of the answer, in the order it is drawn. */
+function textParts(nodes: ReturnType<typeof attachClaims>): Extract<Inline, { kind: 'text' }>[] {
+  const lines = nodes.flatMap((n) => (n.kind === 'paragraph' ? [n.inline] : n.kind === 'section' ? [] : n.items))
+  return lines.flat().filter((p): p is Extract<Inline, { kind: 'text' }> => p.kind === 'text')
+}
+
 export function Answer({
   text,
   verification,
+  spans,
   onOpen,
   ...marks
-}: { text: string; verification?: Verification } & Props) {
+}: { text: string; verification?: Verification; spans?: AnswerSpan[] } & Props) {
   const withClaims = attachWithdrawn(parseAnswer(text), verification?.withdrawn)
   const withRuns = markRepeats(withClaims, (handle) => marks.sources[handle]?.manual_id)
   const nodes = attachClaims(withRuns, verification?.claims)
+  const parts = textParts(nodes)
+  const marked = markPieces(
+    parts.map((p) => p.text),
+    spans,
+  )
+  const pieces = new Map<Inline, Piece[]>(parts.map((p, i) => [p, marked[i]]))
+  const shown = usableSpans(spans).filter((s) => marked.some((line) => line.some((p) => p.span === s)))
   // A chip opens the page on the line of its own sentence, not on the first line found on that page.
   const open = (s: SourceItem, withdrawn: boolean, own?: OwnQuote) =>
     onOpen(s, quoteOf(verification, s.handle, withdrawn, own), quoteFromScan(verification, s.handle, withdrawn, own))
@@ -77,7 +164,7 @@ export function Answer({
         if (node.kind === 'paragraph')
           return (
             <p key={i}>
-              <Line inline={node.inline} {...marks} onOpen={open} />
+              <Line inline={node.inline} pieces={pieces} {...marks} onOpen={open} />
             </p>
           )
         const List = node.kind === 'ordered' ? 'ol' : 'ul'
@@ -88,12 +175,13 @@ export function Answer({
           >
             {node.items.map((item, j) => (
               <li key={j}>
-                <Line inline={item} {...marks} onOpen={open} />
+                <Line inline={item} pieces={pieces} {...marks} onOpen={open} />
               </li>
             ))}
           </List>
         )
       })}
+      {shown.length > 0 && <Legend spans={shown} />}
       <CheckSummary verification={verification} />
     </div>
   )

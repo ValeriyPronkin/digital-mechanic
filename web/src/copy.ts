@@ -299,6 +299,16 @@ export const copy = {
     title: (what: string) => `Противоречие в документации — ${what}`,
     label: 'Противоречие в документации',
   },
+  // parts and tools in the answer, each in its colour (§8): the word opens its hint
+  spans: {
+    kind: { part: 'запчасть', tool: 'инструмент' },
+    legend: { part: 'запчасти', tool: 'инструмент' },
+    legendTitle: 'Цветом в ответе',
+    designation: 'обозначение',
+    page: (n: number) => `стр. ${n}`,
+    open: 'Открыть страницу',
+    noDetails: 'без обозначения и страницы',
+  },
   // «Прослушать» (#14): the short spoken version of the answer.
   speech: {
     play: 'Прослушать',
