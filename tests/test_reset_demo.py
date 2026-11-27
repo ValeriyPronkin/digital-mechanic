@@ -176,3 +176,16 @@ def test_bucket_without_static_key_stops(monkeypatch: pytest.MonkeyPatch, tmp_pa
     monkeypatch.delenv("S3_ACCESS_KEY_ID", raising=False)
     monkeypatch.delenv("S3_SECRET_ACCESS_KEY", raising=False)
     assert reset_demo.main(["--dry-run", "--db", str(tmp_path / "none.db")]) == 2
+
+
+def test_book_rows_only_targets() -> None:
+    """Общая книга заявок стенда (A2): убираются только строки проверок списка."""
+    from reset_demo import Target, book_rows
+
+    rows = [
+        {"id": 1, "ticket_id": "TKT-0001", "vehicle_id": "B418HK98", "session_id": "S-0009"},
+        {"id": 2, "ticket_id": "TKT-0002", "vehicle_id": "B418HK98", "session_id": "S-0008"},
+        {"id": 3, "ticket_id": "TKT-0003", "vehicle_id": "A427MA78", "session_id": "S-0009"},
+    ]
+    got = book_rows(rows, [Target("B418HK98", frozenset({"S-0009"}))])
+    assert [r["ticket_id"] for r in got] == ["TKT-0001"]
