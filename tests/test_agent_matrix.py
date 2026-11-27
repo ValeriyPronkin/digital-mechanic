@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
@@ -106,3 +107,28 @@ def test_silent_cell_is_not_filled_by_code(ml: MLClient, toir: ToirClient) -> No
     steps = [call("get_diagnosis", vehicle_id=vid, session_id=sid), say("Нужна дефектовка.")]
     ag, _ = make_agent(steps, ml, toir, EmptySearch())
     assert ag.ask(ag.start(vid, sid), "Создать заявку на дефектовку").draft is None
+
+
+def test_confirmed_cell_drafts_the_same_works_every_run(ml: MLClient, toir: ToirClient) -> None:
+    """Съёмка 27.11 (B418HK98 / S-0009, F01 — подтверждённая ячейка): один прогон давал 4 работы, следующий — 1.
+    Работы, запчасти и страницы черновика — из матрицы, что бы ни передала модель; модель пишет только заключение."""
+    vid, sid = "B418HK98", "S-0009"
+    model_drafts: list[dict[str, Any]] = [
+        {"conclusion": "Стук клапанов [R1]", "operations": [{"text": f"Работа {n}", "ref": "R1"} for n in range(4)]},
+        {"conclusion": "Стук клапанов", "operations": [{"text": "Снять крышку", "ref": "R1"}], "spare_parts": ["Болт"]},
+        {"conclusion": "Стук клапанов"},
+    ]
+    drafts = []
+    for args in model_drafts:
+        steps = [call("get_diagnosis", vehicle_id=vid, session_id=sid), call("draft_ticket", **args), say("Готово.")]
+        ag, _ = make_agent(steps, ml, toir, EmptySearch())
+        reply = ag.ask(ag.start(vid, sid), "Оформи заявку")
+        assert reply.draft is not None, reply.text
+        body = reply.draft["body"]
+        drafts.append((body["operations"], body["spare_parts"], body["references"]))
+    assert drafts[0] == drafts[1] == drafts[2]
+    cell = cell_for("F01", "ЯМЗ-236М2")
+    assert cell is not None and cell.status == "confirmed"
+    ops, _, refs = drafts[0]
+    assert ops == [o.quote for o in cell.operations]
+    assert {r["pdf_page"] for r in refs} == {o.page for o in cell.operations}  # страницы работ, не всего найденного

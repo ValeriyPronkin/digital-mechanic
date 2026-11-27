@@ -2077,16 +2077,17 @@ class Agent:
         return f"По результату акустической проверки: {title}."
 
     def _draft_ticket_or_matrix(self, conv: Conversation, args: dict[str, Any]) -> dict[str, Any]:
-        """Подтверждённая ячейка «код × двигатель»: работы модели не прошли проверку (ссылка мимо найденного,
-        цифра не из фрагмента) — черновик из матрицы, а не отказ. Аудит стенда 27.11: одна и та же просьба то
-        давала черновик, то отказ. Ячейка «в руководстве нет» — как раньше, черновик код не придумывает."""
-        res = self._draft_ticket(conv, args)
-        if "refused" not in res or not self._confirmed_cell(conv):
-            return res
-        for conclusion in (str(args.get("conclusion") or ""), self._card_conclusion(conv)):
-            retry = self._draft_ticket(conv, {"conclusion": conclusion} if conclusion else {})
-            if "refused" not in retry:
-                return {**retry, "note": "Работы и страницы — из проверенной матрицы руководства этого двигателя."}
+        """Подтверждённая ячейка «код × двигатель»: работы, запчасти и их страницы — всегда из матрицы, модель
+        пишет только заключение (без [R…]: страницы заявки — страницы работ). Одна и та же проверка даёт один и тот
+        же состав на каждом прогоне (съёмка 27.11: то 4 работы, то 1). Заключение модели не прошло проверку цифр —
+        заключение по карточке. Ячейка «в руководстве нет» — как раньше, черновик код не придумывает."""
+        if not self._confirmed_cell(conv):
+            return self._draft_ticket(conv, args)
+        res: dict[str, Any] = {}
+        for conclusion in (_strip_refs(str(args.get("conclusion") or "")), self._card_conclusion(conv)):
+            res = self._draft_ticket(conv, {"conclusion": conclusion} if conclusion else {})
+            if "refused" not in res:
+                return {**res, "note": "Работы и страницы — из проверенной матрицы руководства этого двигателя."}
         return res
 
     @staticmethod
