@@ -49,6 +49,7 @@ from service.nikita import pages as nk_pages
 from service.nikita import read as nk_read
 from service.spend import SpendLedger
 from service.store import Store
+from service.ticket_once import TicketMarks
 from service.verdict_policy import (  # noqa: F401
     CRITICAL_CODES,
     Urgency,
@@ -316,6 +317,9 @@ class TicketDraft:
     urgency_reason: str
     fingerprint: str
     tools: list[str] = field(default_factory=list)  # инструмент и приспособления — по руководству, в ТОиР не уходит
+    # страница (руководство, стр. PDF) каждой работы — по порядку operations; убрал механик работу — уходит и
+    # страница, на которую ссылалась только она. Пусто — черновик из старого состояния: ссылки как есть.
+    op_pages: list[tuple[str, int]] = field(default_factory=list)
 
     def public(self) -> dict[str, Any]:
         return {
@@ -711,6 +715,7 @@ class Agent:
         budget_total_rub: float = 1000.0,
         clock: Any = time.time,
         ledger: SpendLedger | None = None,
+        ticket_marks: TicketMarks | None = None,
         escalation: Any = None,
     ) -> None:
         self.provider = provider
@@ -725,6 +730,7 @@ class Agent:
         self.budget_total_rub = budget_total_rub
         self.clock = clock
         self.ledger = ledger  # общий счётчик расходов всех экземпляров стенда (#11); None — журнал экземпляра
+        self.ticket_marks = ticket_marks  # отметки отправленных заявок в бакете стенда; None — только SQLite экземпляра
         # очередь противоречий главного механика (эскалация вместо совета механику; Валерий, 27.11)
         from service.escalation import ContradictionQueue
 
@@ -1950,6 +1956,7 @@ class Agent:
             return {"refused": "Нет заключения."}
         # I-03: в заявку — только страницы, на которые ссылаются работы и заключение, а не всё найденное.
         operations: list[str] = []
+        op_pages: list[tuple[str, int]] = []
         cited: list[Source] = []
         for op in ops_in:
             text, ref = _operation(op)
@@ -1967,6 +1974,7 @@ class Agent:
                     + ". Уберите их или сошлитесь на фрагмент с ними."
                 }
             operations.append(text)
+            op_pages.append((src.manual, src.pdf_page))
             if src not in cited:
                 cited.append(src)
         if not operations:
@@ -1999,7 +2007,9 @@ class Agent:
         )
         matrix_ops = (confirmed or {}).get("operations", [])
         tools = list(dict.fromkeys(t for o in matrix_ops if o["text"] in operations for t in o.get("tools", [])))
-        conv.draft = TicketDraft(body=body, urgency_reason=why, fingerprint=fingerprint(body), tools=tools)
+        conv.draft = TicketDraft(
+            body=body, urgency_reason=why, fingerprint=fingerprint(body), tools=tools, op_pages=op_pages
+        )
         return {
             "draft": body.model_dump(),
             "tools": tools,
@@ -2050,7 +2060,23 @@ class Agent:
         if already:
             conv.draft = None
             raise TicketRefusedError(f"Эта заявка уже отправлена: {already}.")
-        resp = self.toir.create_ticket(draft.body)
+        if self.ticket_marks is not None:  # стенд: другой экземпляр мог отправить её же (своя SQLite у каждого)
+            claim = self.ticket_marks.claim(draft.fingerprint)
+            if not claim.mine and claim.ticket_id:
+                resp = TicketResponse(ticket_id=claim.ticket_id, status=claim.status or "created")
+                self.store.remember_ticket(resp.ticket_id, draft.body.model_dump(), draft.fingerprint)
+                conv.draft = None
+                return resp  # та же заявка, второй раз в ТОиР не уходит
+            if not claim.mine:
+                raise TicketRefusedError("Эта заявка уже отправляется. Обновите страницу через несколько секунд.")
+        try:
+            resp = self.toir.create_ticket(draft.body)
+        except Exception:
+            if self.ticket_marks is not None:
+                self.ticket_marks.failed(draft.fingerprint)
+            raise
+        if self.ticket_marks is not None:
+            self.ticket_marks.sent(draft.fingerprint, resp.ticket_id, resp.status)
         self.store.remember_ticket(resp.ticket_id, draft.body.model_dump(), draft.fingerprint)
         conv.draft = None
         return resp

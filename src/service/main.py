@@ -44,6 +44,7 @@ from service.pages import PageImages
 from service.rate_limit import RateLimiter, client_key
 from service.spend import BucketObject, RefreshingIamAuth, SharedLedger
 from service.store import Store
+from service.ticket_once import TicketMarks
 from service.verdict_policy import VerdictCard, build_card
 from service.voice import (
     DEFAULT_VOICE,
@@ -182,8 +183,20 @@ def agent() -> Agent:
         budget_day_rub=float(os.environ.get("LLM_BUDGET_DAY_RUB", "100")),
         budget_total_rub=float(os.environ.get("LLM_BUDGET_TOTAL_RUB", "1000")),
         ledger=shared_ledger(),
+        ticket_marks=ticket_marks(),
         escalation=ContradictionQueue.from_env(),  # очередь противоречий главного механика (бакет на стенде)
     )
+
+
+def ticket_marks() -> TicketMarks | None:
+    """Стенд (задан S3_BUCKET): отметки отправленных заявок в бакете — одна заявка на подтверждение для всех
+    экземпляров (ревью 27.11). Локально — проверка по SQLite экземпляра."""
+    if not os.environ.get("S3_BUCKET", "").strip() or os.environ.get("TICKET_MARKS", "bucket") != "bucket":
+        return None
+    http = httpx.Client()
+    endpoint = os.environ.get("S3_ENDPOINT", kb_store.DEFAULT_ENDPOINT)
+    bucket = kb_store.Bucket(os.environ["S3_BUCKET"].strip(), RefreshingIamAuth(http), http, endpoint)
+    return TicketMarks(lambda key: BucketObject(bucket, key))
 
 
 def shared_ledger() -> SharedLedger | None:
