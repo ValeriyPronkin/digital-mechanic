@@ -193,3 +193,28 @@ def test_known_becomes_open_when_it_appears(ml: MLClient, toir: ToirClient) -> N
     ag.ask(ag.start("B418HK98", "S-0007"), QUESTION)
     row = c.get(f"/api/v2/contradictions/{n}").json()
     assert row["status"] == "open" and row["count"] == 1 and row["first_seen"]
+
+
+def test_queue_safe_rule_stands_on_its_own(ml: MLClient, toir: ToirClient) -> None:
+    """Экран очереди (web-2, 27.11): у известного противоречия без вывода заказчика (ЯМЗ-536) — правило из страниц,
+    а не заглушка «строкой выше в ответе»: на экране очереди ответа нет. Записи с заглушкой — исправляются."""
+    from service.escalation import NO_RULE
+
+    ag = _agent(ml, toir, 1)
+    app = main.FastAPI()
+    app.include_router(
+        api_v2.build_router(lambda: ag, lambda: ag.store, main.fleet, lambda r: None, api_v2.ThreadStore())
+    )
+    c = TestClient(app)
+    rows = c.get("/api/v2/contradictions?status=all").json()
+    assert rows and all(r["safe_rule"] != NO_RULE and "строкой выше" not in r["safe_rule"] for r in rows)
+    # запись, внесённая раньше с заглушкой, при следующем запросе получает правило
+    q = ag.escalation
+    queue, etag = q._load()
+    first = next(iter(queue["items"].values()))
+    first["safe_rule"] = NO_RULE
+    import json as _json
+
+    q.backend.replace("v2/contradictions/queue.json", _json.dumps(queue, ensure_ascii=False).encode(), etag)
+    again = {r["id"]: r for r in c.get("/api/v2/contradictions?status=all").json()}
+    assert again[first["id"]]["safe_rule"] != NO_RULE

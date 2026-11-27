@@ -40,6 +40,8 @@ TARGET_WORD = {"manufacturer": "завод-изготовитель", "support":
 # правило до решения выводится из самих страниц (`contradictions.safe_rule`, ответ организаторов 27.11) и стоит в ответе
 # строкой «Безопасное правило:» над строкой эскалации; «до решения не выбирать ничего» механику не говорится
 NO_RULE = "безопасное правило из страниц руководства — строкой выше в ответе"
+# прежняя заглушка (до правила из страниц): у записей очереди, внесённых тогда, заменяется при `seed`
+OLD_NO_RULE = "до решения ни одно из значений не выбирается — работа по нему только после решения главного механика"
 MAX_VEHICLES = 20
 
 
@@ -122,17 +124,26 @@ class ContradictionQueue:
         `registry` — (Known, подтверждённые цитаты, двигатель). Пишет, только если чего-то не хватает; число
         добавленных."""
         queue, _ = self._load()
-        if all(k.id in queue["items"] for k, _q, _e in registry):
+
+        def stale(item: dict[str, Any], k: Any) -> bool:  # внесено раньше с заглушкой вместо правила
+            return item.get("safe_rule") in (NO_RULE, OLD_NO_RULE) and bool(getattr(k, "conclusion", ""))
+
+        if all(k.id in queue["items"] and not stale(queue["items"][k.id], k) for k, _q, _e in registry):
             return 0
         added: list[str] = []
 
         def change(q: dict[str, Any]) -> dict[str, Any] | None:
             added.clear()
+            fixed = 0
             for k, quotes, engine in registry:
-                if k.id not in q["items"]:
+                item = q["items"].get(k.id)
+                if item is None:
                     self._new_item(q, k, quotes, engine, "known")
                     added.append(k.id)
-            return {"added": len(added)} if added else None
+                elif stale(item, k):
+                    item["rule"], item["safe_rule"] = k.conclusion, safe_rule(k.conclusion)
+                    fixed += 1
+            return {"added": len(added), "fixed": fixed} if added or fixed else None
 
         self._update(change)
         return len(added)
