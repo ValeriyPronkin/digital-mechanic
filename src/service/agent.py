@@ -1163,7 +1163,7 @@ class Agent:
                 break
             t0 = time.monotonic()
             try:
-                reply = self.provider.chat(conv.messages, tools(), max_tokens=LEVEL_MAX_TOKENS[level])
+                reply = self.provider.chat(conv.messages, self._tools_for(conv), max_tokens=LEVEL_MAX_TOKENS[level])
             except LLMError:
                 if step == 1 or not self._out_of_time(conv):
                     raise
@@ -1441,6 +1441,12 @@ class Agent:
         followup = {"label": f"Проверка по «{title}»",
                     "question": f"Что проверить по неисправности {card.fault_code} «{title}»?"}  # fmt: skip
         return f"{text.rstrip()}\n\n{line}", followup
+
+    def _tools_for(self, conv: Conversation) -> list[ToolSpec]:
+        """Сбой записи — поиска по руководству у модели нет вовсе (отказ в `_run_tool` — запасной)."""
+        if conv.card is not None and conv.card.status == "check_failed":
+            return [t for t in tools() if t.name not in ("search_manual", "read_pages")]
+        return tools()
 
     def _mismatch_steps(self, conv: Conversation, text: str) -> str:
         """Проверка назвала узел, которого у двигателя нет (код несовместим): в ответе — оба пути, повторить проверку и

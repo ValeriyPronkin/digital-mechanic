@@ -99,3 +99,14 @@ def test_mismatch_answer_names_both_ways(ml: MLClient, toir: ToirClient) -> None
     assert text.endswith(MISMATCH_STEPS)
     ag, _ = make_agent([say("Свечей нет. Повторите проверку; если стук остаётся — дефектовка узла.")], ml, toir)
     assert MISMATCH_STEPS not in ag.ask(ag.start("K354KC98", "S-0087"), "А свечи?").text
+
+
+def test_failed_recording_gets_no_search_tool(ml: MLClient, toir: ToirClient) -> None:
+    from test_agent import first
+
+    failed = first(lambda v, s: s.status == "check_failed")
+    ag, _ = make_agent([], ml, toir)
+    conv = ag.start(*failed)
+    ag._ensure_diag(conv)
+    names = {t.name for t in ag._tools_for(conv)}
+    assert "search_manual" not in names and "read_pages" not in names and "get_diagnosis" in names
