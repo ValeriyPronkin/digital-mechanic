@@ -28,6 +28,10 @@ export function scrollsFurther(scrollLeft: number, scrollWidth: number, clientWi
   return scrollWidth - clientWidth - scrollLeft > 1
 }
 
+/** How far one press of the row's arrow moves it: most of what is shown, so the next question comes whole
+ *  into view and the one cut at the edge stays as the link to what was before. */
+export const scrollStep = (clientWidth: number) => Math.max(120, Math.round(clientWidth * 0.75))
+
 /** The title of the browser tab: the plate first when a vehicle is open, so that two tabs can be told apart. */
 export function tabTitle(product: string, vehicleId: string | null): string {
   return vehicleId ? `${vehicleId} · ${product}` : product

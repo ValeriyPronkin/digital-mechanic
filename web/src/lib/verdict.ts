@@ -15,3 +15,18 @@ export function withVerdict(blocks: Block[], card: VerdictBlock): Block[] {
 /** Whether the conversation already shows the card of this check: then there is nothing to ask for. */
 export const shownVerdict = (turnBlocks: Block[][], sessionId: string | null | undefined): boolean =>
   turnBlocks.some((blocks) => blocks.some((b) => isVerdictOf(b, sessionId)))
+
+/** For each turn, the checks whose card an earlier turn already shows. The card is drawn whole once, where
+ *  it first stands (on «Получить результат», or with the first answer about that check); after that a turn
+ *  carries one line that leads back to it. A card of another check is new, and is drawn whole. */
+export function shownBefore(turnBlocks: readonly Block[][]): Set<string>[] {
+  const seen = new Set<string>()
+  return turnBlocks.map((blocks) => {
+    const before = new Set(seen)
+    for (const b of blocks) if (b.kind === 'verdict') seen.add((b as VerdictBlock).session_id)
+    return before
+  })
+}
+
+/** The id of the first card of a check, for the line that scrolls back to it. */
+export const verdictAnchor = (sessionId: string) => `verdict-${sessionId}`

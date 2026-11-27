@@ -152,3 +152,93 @@ def test_search_refs_without_repeats() -> None:
     found = [{"ref": "R2"}, {"ref": "R2"}, {"ref": "R3"}, {"ref": "R2"}]
     step = tool_step(0, "search_manual", {"query": "зазор"}, {"found": found, "engine": "ЯМЗ-236М2"}, True, 5)
     assert step["search"]["refs"] == ["R2", "R3"] and step["search"]["found"] == 4
+
+
+# ---- паспорт простыми словами (Валерий 27.11: «почему что-то вошло в контекст, а что-то нет — понятно с листа») ----
+
+
+def _trace() -> dict[str, Any]:
+    frag = {"manual": "РК", "pdf_page": 269, "section": "", "tokens": 1600, "new": True}
+    return {
+        "request_id": "r1",
+        "provider": "deepseek",
+        "tokens_in": 5957,
+        "tokens_cached": 5376,
+        "tokens_out": 300,
+        "cost_rub": 0.11,
+        "steps": [
+            {
+                "kind": "llm",
+                "tokens_in": 5957,
+                "ms": 4000,
+                "parts": {"instructions": 3000, "tool_results": 2000, "dialog": 500},
+            },
+            {
+                "kind": "tool",
+                "tool": "search_manual",
+                "by_code": True,
+                "ms": 200,
+                "search": {
+                    "engine": "ЯМЗ-236М2",
+                    "queries": ["зазор клапанов"],
+                    "found": 3,
+                    "refs": ["R1", "R2", "R3"],
+                },
+            },
+        ],
+        "fragments": [
+            {**frag, "ref": "R1", "used": True, "why": "по неисправности из карточки (F01 Клапанный механизм)"},
+            {
+                **frag,
+                "ref": "R2",
+                "pdf_page": 254,
+                "tokens": 148,
+                "used": False,
+                "why": "поиск по словам вопроса: «зазор»",
+            },
+            {**frag, "ref": "R3", "pdf_page": 31, "tokens": 100, "used": False, "why": ""},
+        ],
+        "withdrawn": [{"handles": ["R2"], "state": "unverified", "reason": "missing"}],
+    }
+
+
+def test_fragments_say_why_in_and_why_not_in_answer() -> None:
+    p = passport.build(_trace(), question="Какой зазор клапанов?")
+    frags = {f["ref"]: f for f in p["searches"][0]["fragments"]}
+    assert frags["R1"]["why_in"] == "по неисправности из карточки (F01 Клапанный механизм)"
+    assert frags["R1"]["why_out"] is None  # пошла в ответ
+    assert frags["R2"]["why_out"] == "цифры не подтвердились на этой странице — утверждение снято"
+    assert frags["R3"]["why_in"] == passport.WHY_SEARCH and frags["R3"]["why_out"] == passport.NOT_CITED
+
+
+def test_tokens_split_sums_to_real_input_and_reads_plainly() -> None:
+    p = passport.build(_trace(), question="?")
+    parts = p["total"]["tokens_parts"]
+    assert sum(parts.values()) == 5957 and parts["instructions"] > parts["tool_results"] > parts["dialog"]
+    e = p["explain"]
+    assert e["tokens"].startswith("5 957 токенов на входе ≈ инструкция агента")
+    assert "повторно использовано" in e["cached"] and "почти бесплатно" in e["cached"]
+    assert e["unused"] == "13 % страниц оплачено, но не понадобилось (248 из 1 848 токенов руководства)"
+    assert e["cost"].endswith("с") and "₽" in e["cost"]
+
+
+def test_split_without_parts_is_service_calls() -> None:
+    parts = passport.token_parts([{"kind": "llm", "tokens_in": 400}, {"kind": "tool"}])
+    assert parts == {"instructions": 0, "tool_results": 0, "dialog": 0, "service": 400}
+
+
+def test_redacted_reason_has_no_search_query() -> None:
+    red = passport.redact(passport.build(_trace(), question="Какой зазор клапанов?"))
+    dump = json.dumps(red, ensure_ascii=False)
+    assert "«зазор»" not in dump and "«…»" in dump
+
+
+def test_card_question_pages_say_they_came_from_the_fault(ml: MLClient, toir: ToirClient) -> None:
+    """Кнопка «Получить результат диагностики»: страницы поиска — «по неисправности из карточки (F…)»."""
+    from test_agent import ANOMALY, make_agent, say
+
+    ag, _ = make_agent([say("Что слышно\nСтук [R1].")], ml, toir)
+    conv = ag.start(*ANOMALY)
+    ag.ask(conv, "Получить результат диагностики")
+    whys = [s.why for s in conv.sources.values()]
+    assert whys and any(w.startswith("поиск по неисправности из карточки (F") for w in whys), whys

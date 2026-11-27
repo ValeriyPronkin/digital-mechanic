@@ -221,3 +221,24 @@ def test_disputed_timing_outside_the_topic_gets_the_rule_without_block(ml: MLCli
     reply = ag.ask(ag.start("B418HK98", "S-0007"), "Создай заявку на дефектовку.")
     assert "не позднее 15 минут" not in reply.text and HEADER not in reply.text
     assert "1. Безопасное правило: Регулировать зазоры на холодном двигателе" in reply.text
+
+
+def test_card_explanation_with_disputed_timing_gets_block_and_escalation(ml: MLClient, toir: ToirClient) -> None:
+    """Снимок Валерия 27.11 (B418HK98 / S-0009, F01 × ЯМЗ-236М2, «Получить результат диагностики»): в «Что проверить»
+    было «Безопасное правило: …» простым текстом — без формулировок, страниц и «№ N». Теперь — блок противоречия."""
+    from service import api_v2
+    from test_agent import call
+
+    answer = (
+        "Что слышно\nМеталлический цокот в зоне головок [R1].\n\n"
+        "Что проверить\n1. Регулировать зазоры не позднее 15 минут после остановки [R1].\n"
+        "2. Проверить затяжку болтов осей коромысел [R1]."
+    )
+    steps = [call("search_manual", query="регулировка зазоров"), say(answer)]
+    ag, _ = make_agent(steps, ml, toir, Manual236(), prefetch=False)
+    conv = ag.start("B418HK98", "S-0009")
+    reply = ag.ask(conv, "Получить результат диагностики")
+    assert conv.contradiction is not None and "не позднее 15 минут" not in reply.text
+    block, rest = api_v2.contradiction_block(conv, reply.text)
+    assert block is not None and len(block["items"]) >= 2 and block["escalation"] is not None
+    assert "Безопасное правило" not in rest  # правило — в блоке, а не простым текстом

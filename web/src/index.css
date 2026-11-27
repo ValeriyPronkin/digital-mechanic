@@ -1,6 +1,6 @@
 @import 'tailwindcss';
 
-/* Tokens: docs/design.md. Dark is the only theme in the sprint. */
+/* Tokens: docs/design.md. Dark by default; the light theme below takes the same names (lib/theme.ts). */
 @theme {
   --color-bg: #0b0c0e;
   --color-surface: #141518;
@@ -23,6 +23,32 @@
   --spacing: 4px;
   --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* The light theme (Валерий, 27.11: «в гараже темно — может захотеться светлый фон»): the same tokens, so
+   every screen follows. Each colour of text is at least 4,5:1 (WCAG AA) on the page, a card and an input
+   (--color-bg, --color-surface, --color-surface-2): text 16,1, dim 6,8, mute 5,3, accent 4,6, statuses
+   5,2–5,6, parts 6,1, tools 6,1 at the lowest; white on the accent button 5,4. The edge of what is chosen
+   is at least 3:1 (4,2). Parts and tools on their 15 % tint: 5,2 and 5,3. The manual page stays as it is:
+   a picture on white. */
+:root[data-theme='light'] {
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-surface-2: #eceef2;
+  --color-line: #d4d7dd;
+  --color-edge: #6b7280;
+  --color-text: #111214;
+  --color-dim: #4b5260;
+  --color-accent: #0e7490;
+  --color-series: #0e7490;
+  --color-ok: #12703a;
+  --color-warn: #a3480b;
+  --color-stop: #b91c1c;
+  --color-mute: #5b6170;
+  /* parts and tools in the answer (PR #172), when they are on main */
+  --color-part: #6d28d9;
+  --color-tool: #3f6212;
+  color-scheme: light;
 }
 
 html {

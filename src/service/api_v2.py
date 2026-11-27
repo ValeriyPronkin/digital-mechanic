@@ -490,7 +490,9 @@ def tool_events(reply: AgentReply, conv: Conversation, verdict_sent: bool) -> tu
         name = s.get("tool") or s.get("name", "")
         tid = f"t{n}"
         block = None
-        if name == "get_diagnosis" and not verdict_sent:
+        if name == "get_diagnosis" and verdict_sent:
+            continue  # карточка уже на экране — второй раз шаг «Результат проверки» не показываем
+        if name == "get_diagnosis":
             block = verdict_block(conv)
             verdict_sent = block is not None
         events.append(
@@ -1233,7 +1235,21 @@ def build_router(
     # ---------- противоречия: очередь главного механика (эскалация) ----------
 
     def queue() -> Any:
-        return get_agent().escalation
+        """Очередь противоречий; в ней всегда весь реестр известных (`known`) — главный механик видит всё сразу."""
+        from service import contradictions
+
+        ag = get_agent()
+        q = ag.escalation
+        page_text = getattr(ag.searcher, "page_text", None)
+        registry = [
+            (k, contradictions.verified_quotes(k, page_text) or list(k.quotes), ", ".join(k.engines))
+            for k in contradictions.known()
+        ]
+        try:
+            q.seed(registry)
+        except Exception as exc:  # бакет недоступен — список из того, что уже записано
+            log.warning("реестр противоречий не внесён в очередь: %s", type(exc).__name__)
+        return q
 
     def item_or_404(number: int) -> dict[str, Any]:
         item = queue().get(number)
@@ -1242,8 +1258,11 @@ def build_router(
         return dict(item)
 
     @router.get("/contradictions")
-    def contradictions_queue(status: Literal["open", "sent", "resolved", "all"] = "open") -> list[dict[str, Any]]:
-        """Очередь главного механика: что, двигатель, обе формулировки со страницами, сколько раз всплывало."""
+    def contradictions_queue(
+        status: Literal["known", "open", "sent", "resolved", "all"] = "open",
+    ) -> list[dict[str, Any]]:
+        """Очередь главного механика: что, двигатель, обе формулировки со страницами, сколько раз всплывало
+        (`count` — «в ответах N»). `all` — весь список, включая известные из реестра, о которых ещё не спрашивали."""
         return [dict(i) for i in queue().items(status)]
 
     @router.get("/contradictions/journal")
