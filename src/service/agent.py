@@ -1176,7 +1176,8 @@ class Agent:
         request_id = uuid.uuid4().hex
         steps: list[dict[str, Any]] = []
         chosen = language.normalize(lang)
-        target = chosen or language.detect(question)
+        # «скажи по-узбекски» — язык из просьбы, а не из букв вопроса (сессия 1, 27.11: событие language было «Русский»)
+        target = chosen or language.requested(question) or language.detect(question)
         conv.passport.update({"refs_before": set(conv.sources), "level": level, "answer_lang": target})
         if chosen:
             conv.passport["lang_chosen"] = chosen
@@ -1336,6 +1337,8 @@ class Agent:
             "deadline": bool(conv.passport.get("deadline")),
             **self._passport_trace(conv, cited),
         }
+        if (target or "ru") == "ru" and not chosen:  # ответ по факту на другом языке — так и сообщить интерфейсу
+            target = language.actual(final) or target
         return AgentReply(
             text=final,
             grounded=grounded,

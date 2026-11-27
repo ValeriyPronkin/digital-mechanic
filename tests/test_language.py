@@ -166,3 +166,19 @@ def test_tajik_letters_win_and_tajik_without_keyboard() -> None:
 def test_tajik_answer_is_not_uzbek() -> None:
     assert language.matches("Моменти кашидан 98…107,9 Н·м аст [R1]. Болтҳоро бо ду қабул кашед.", "tg")
     assert not language.matches("Тортиш моменти 98…107,9 Н·м бўлиши керак [R1].", "tg")
+
+
+def test_asked_language_and_actual_language() -> None:
+    """Сессия 1, 27.11: «Скажи по-узбекски» — ответ на узбекском, а событие language было «Русский»."""
+    assert language.requested("Скажи по-узбекски, какой зазор?") == "uz"
+    assert language.requested("Ответь на казахском") == "kk"
+    assert language.requested("Какой зазор клапанов?") is None
+    assert language.actual("Klapan tirqishi 0,25–0,30 mm boʻlishi kerak [R1]. Sovuq dvigatelda sozlanadi.") == "uz"
+    assert language.actual("Зазор 0,25–0,30 мм [R1].") == "ru"
+
+
+def test_say_in_uzbek_sets_reply_language(ml: MLClient, toir: ToirClient) -> None:
+    answer = "Klapan tirqishi 0,25–0,30 mm boʻlishi kerak [R1]. Sovuq dvigatelda sozlanadi."
+    ag, _ = make_agent([say(answer)] * 3, ml, toir)
+    reply = ag.ask(ag.start(*ANOMALY), "Скажи по-узбекски, какой зазор клапанов?")
+    assert reply.lang == "uz"
