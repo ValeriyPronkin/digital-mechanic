@@ -24,7 +24,16 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from service import absent_parts, clean_refusal, contradictions, glossary, language, other_engine, row_check
+from service import (
+    absent_parts,
+    clean_refusal,
+    contradictions,
+    glossary,
+    language,
+    other_engine,
+    page_links,
+    row_check,
+)
 from service.clients import (
     Diagnosis,
     MLClient,
@@ -57,6 +66,13 @@ PREFETCH_K = 4  # страниц, которые код находит до вы
 FRAGMENT_CHARS = 450  # столько знаков фрагмента видит модель: предложения, где есть слова запроса
 WIDE_HITS = 2  # лучшим попаданиям — окно страницы: цифра часто в соседнем фрагменте той же страницы (#28)
 WIDE_CHARS = 1800
+FINAL_NOTE = (
+    "[Код сервиса: шаги поиска кончились. Ответь сейчас по уже найденным фрагментам, без новых вызовов "
+    "инструментов; чего в них нет — так и скажи.]"
+)
+LINKED_PAGES = 4  # соседних страниц-продолжений на один поиск (page_links): таблица/порядок через границу страницы
+LINKED_FROM = 3  # от скольких лучших найденных страниц искать продолжения
+LINKED_FOLLOW = 3  # вперёд по цепочке продолжений от одной найденной страницы
 
 SEARCH_PLAN_PROMPT = """Ты готовишь поиск по руководству по эксплуатации и ремонту двигателя. Вопрос механика может \
 быть разговорным или не на русском. Верни только JSON без пояснений:
@@ -66,7 +82,8 @@ SEARCH_PLAN_PROMPT = """Ты готовишь поиск по руководст
 Слова руководства: снятие, установка, разборка, сборка, регулировка, зазор, порядок работы цилиндров, момент затяжки, \
 щуп, приспособление, шаблон, неисправность, причина, способ устранения, заменить, техническое обслуживание.
 Как пишут в руководствах: форсунка — также «инжектор»; «заменить на новое» — «одноразового использования», \
-«запасные части»; «можно ли ставить повторно» — «количество использования», «повторное использование не допускается»; \
+«запасные части»; «можно ли ставить повторно» — «количество использования», «повторное использование не допускается», \
+«перечень деталей разового монтажа»; \
 «чем мерить» — «приспособление», «щуп», «шаблон», «индикатор»; «порядок цилиндров» — «порядок работы цилиндров».
 Если упомянут стук, шум или вибрация — запросы про стуки и шумы двигателя и запрет эксплуатации до устранения.
 Если спрашивают, можно ли ехать, перегнать машину своим ходом или продолжать эксплуатацию, — запросы про аварийное \
@@ -108,8 +125,10 @@ operations и spare_parts — они подставятся из матрицы)
 
 Прямой вопрос (значение, как проверить или отрегулировать, порядок, чем мерить, что заменить, можно ли ехать) — \
 сначала прямой ответ: значение, как делать, ссылка [R…]; затем до 5 коротких шагов. Не пропускай ничего по сути \
-вопроса из найденного, включая сноски и примечания к таблицам. Если в руководствах этого двигателя для параметра \
-разные значения — назови все, у каждого ссылка [R…] и условие (для какой конструкции, режима, узла). Неисправность \
+вопроса из найденного, включая сноски и примечания к таблицам. Вопрос о причинах по таблице неисправностей — \
+перечисли все причины этого раздела таблицы, включая её продолжение на следующей странице (context \
+«продолжение»). Если в руководствах этого двигателя для параметра разные значения — назови все, у каждого \
+ссылка [R…] и условие (для какой конструкции, режима, узла). Неисправность \
 из карточки в таком ответе не разбирай: связь с ней — одной строкой в конце и только если руководство её прямо \
 называет; нет связи — о карточке не пиши ничего (никаких «не относится»).
 Разделы «Наблюдения → Гипотезы → Проверки → Возможный ремонт → Источник → Ограничения» — только когда механик \
@@ -336,7 +355,7 @@ def next_ref(conv: Conversation) -> str:
     return f"R{max(used, default=0) + 1}"
 
 
-_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n")
+_SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[^a-zа-яё\d])|\n")  # не после «св.», «п.», «т. е.» (обрывки, 27.11)
 
 
 def _norm_num(s: str) -> str:
@@ -593,6 +612,19 @@ def fingerprint(body: TicketRequest) -> str:
 _VALUE_LINE = re.compile(r"\d+[,.]\d+|\d\s*(?:мм|Н\s*[·.]?\s*м|кгс|кПа|МПа|°|мин|л\b)", re.I)
 
 
+def _edge(page: str, limit: int, tail: bool = False) -> str:
+    """Начало (или конец) страницы ~limit знаков целыми строками."""
+    lines = [ln for ln in page.splitlines() if ln.strip()]
+    out: list[str] = []
+    size = 0
+    for ln in reversed(lines) if tail else lines:
+        if size + len(ln) + 1 > limit:
+            break
+        out.append(ln)
+        size += len(ln) + 1
+    return "\n".join(reversed(out) if tail else out)
+
+
 def _page_window(page: str, hit: str, words: list[str], limit: int) -> str:
     """Окно текста страницы ~limit знаков: с начала фрагмента-попадания, а если в странице есть место с большим
     числом слов запроса — вокруг него. Целые строки — таблица и шаги не режутся посередине."""
@@ -757,7 +789,7 @@ class Agent:
                     }
                 )
         else:
-            text = "Не успел собрать ответ. Переформулируйте вопрос короче."
+            text = self._final_without_tools(conv, request_id, steps, LEVEL_MAX_TOKENS[level])
             conv.messages.append({"role": "assistant", "content": text})
 
         if target is None:  # код не узнал язык — берём язык из плана поиска (модель)
@@ -1581,6 +1613,9 @@ class Agent:
         queries = [query, *[str(q).strip() for q in args.get("more_queries") or [] if str(q).strip()]]
         hits = self._search_many([mask_pii(q) for q in queries], conv.vehicle.engine_model, k)
         page_text = getattr(self.searcher, "page_text", None)
+        words = tokenize(" ".join(queries))
+        links = self._links(hits, page_text, words) if page_text is not None else []
+        linked = {(h.manual_id, h.pdf_page) for h, _, _ in links}  # часть таблицы/порядка — показать окном
         out = []
         for n, h in enumerate(hits):
             existing = next(
@@ -1601,7 +1636,7 @@ class Agent:
             # Модели — только предложения фрагмента, относящиеся к запросу; полный текст остаётся в Source
             # для проверки цифр (issue #16: вход не из кэша — заметная часть цены)
             words = tokenize(" ".join(queries))
-            if n < WIDE_HITS and page_text is not None:
+            if (n < WIDE_HITS or (h.manual_id, h.pdf_page) in linked) and page_text is not None:
                 window = _page_window(page_text(h.manual_id, h.pdf_page) or h.text, h.text, words, WIDE_CHARS)
                 if window not in existing.text:
                     existing.text = f"{existing.text}\n{window}"[:6000]  # цифры окна — тоже из руководства
@@ -1612,6 +1647,8 @@ class Agent:
             if ctx := bench_context(h.manual_id, h.pdf_page):
                 item["context"] = f"{ctx}: нормы обкатки и испытаний после ремонта, не эксплуатация машины"
             out.append(item)
+        if links:
+            out += self._linked_items(conv, links, page_text, tokenize(" ".join(queries)))
         lang = str(args.get("answer_language") or "")
         code = language.normalize(lang) or ""
         hint: dict[str, Any] = (
@@ -1625,6 +1662,85 @@ class Agent:
         if not out:
             return {"found": [], "note": "В руководстве этого двигателя ничего не найдено.", **hint}
         return {"engine": conv.vehicle.engine_model, "found": out, **hint}
+
+    def _final_without_tools(
+        self, conv: Conversation, request_id: str, steps: list[dict[str, Any]], max_tokens: int
+    ) -> str:
+        """Шаги кончились, а модель всё ещё ищет (отчёт приёмщика: «Не успел собрать ответ») — ещё один вызов
+        без инструментов: ответ по уже найденному. Проверка цифр та же (guard). Сбой — прежняя фраза."""
+        fallback = "Не успел собрать ответ. Переформулируйте вопрос короче."
+        msgs: list[Message] = [*conv.messages, {"role": "user", "content": FINAL_NOTE}]
+        try:
+            self.check_budget()
+            t0 = time.monotonic()
+            reply = self.provider.chat(msgs, [], max_tokens=max_tokens)
+            ms = int((time.monotonic() - t0) * 1000)
+        except (LLMError, BudgetExceededError):
+            return fallback
+        cost = self._spend(request_id, MAX_STEPS + 1, reply, ms)
+        steps.append({"step": MAX_STEPS + 1, "kind": "llm", "name": reply.model + " (ответ по найденному)",
+                      "tokens_in": reply.tokens_in, "tokens_out": reply.tokens_out,
+                      "tokens_cached": reply.tokens_cached, "cost_rub": round(cost, 4), "ms": ms})  # fmt: skip
+        conv.passport["final_without_tools"] = True
+        return reply.content.strip() if reply.content.strip() and not reply.tool_calls else fallback
+
+    def _links(self, hits: list[Any], page_text: Any, words: list[str]) -> list[tuple[Any, int, str]]:
+        """Соседние страницы-продолжения лучших найденных (`page_links`), до LINKED_PAGES на поиск. Первыми —
+        те, где больше слов запроса (нужная строка таблицы бывает через страницу: Q15 стр. 217, Q16 стр. 581),
+        при равенстве — ближе по цепочке и выше в выдаче (Q03, Q15, Q16, Q23)."""
+        have = {(h.manual_id, h.pdf_page) for h in hits}
+        want = set(words)
+        found: list[tuple[int, int, int, Any, int, str]] = []
+
+        def text_of(manual_id: str, page: int) -> str:
+            return str(page_text(manual_id, page) or "") if page >= 1 else ""
+
+        for rank, h in enumerate(hits[:LINKED_FROM]):
+            here = text_of(h.manual_id, h.pdf_page)
+            if not here:
+                continue
+            for sign in (1, -1):
+                page, text = h.pdf_page, here
+                for level in range(LINKED_FOLLOW):
+                    other = text_of(h.manual_id, page + sign)
+                    if not other or not (page_links.continues(text, other) if sign > 0
+                                         else page_links.continues(other, text)):  # fmt: skip
+                        break
+                    note = (f"продолжение стр. {page}" if sign > 0
+                            else f"начало: продолжение — на стр. {page}")  # fmt: skip
+                    overlap = len(want.intersection(tokenize(other)))
+                    found.append((-overlap, level * 2 + (0 if sign > 0 else 1), rank, h, page + sign, note))
+                    page, text = page + sign, other
+        out: list[tuple[Any, int, str]] = []
+        for _, _, _, h, page, note in sorted(found, key=lambda x: (x[0], x[1], x[2])):
+            if (h.manual_id, page) in have or len(out) >= LINKED_PAGES:
+                continue
+            have.add((h.manual_id, page))
+            out.append((h, page, note))
+        return out
+
+    def _linked_items(
+        self, conv: Conversation, links: list[tuple[Any, int, str]], page_text: Any, words: list[str]
+    ) -> list[dict[str, Any]]:
+        """Соседние страницы — в выдачу и в источники: цифры с них проверяются как с найденных."""
+        out: list[dict[str, Any]] = []
+        for h, page, note in links:
+            full = str(page_text(h.manual_id, page) or "")
+            src = next((s for s in conv.sources.values() if s.manual_id == h.manual_id and s.pdf_page == page), None)
+            if src is None:
+                src = Source(ref=next_ref(conv), manual_id=h.manual_id, manual=h.manual, pdf_page=page,
+                             section=h.section, text=full[:6000])  # fmt: skip
+                conv.sources[src.ref] = src
+            elif full[:1500] not in src.text:
+                src.text = f"{src.text}\n{full}"[:6000]
+            # продолжение таблицы — в начале следующей страницы, её начало — в конце предыдущей (Q15: «вкладыши»
+            # в первых строках стр. 217, окно по словам запроса их не брало)
+            item = {"ref": src.ref, "manual": h.manual, "section": h.section,
+                    "text": _edge(full, WIDE_CHARS, tail=note.startswith("начало")), "context": note}  # fmt: skip
+            if ctx := bench_context(h.manual_id, page):
+                item["context"] += f"; {ctx}: нормы обкатки и испытаний после ремонта, не эксплуатация машины"
+            out.append(item)
+        return out
 
     def _read_pages(self, conv: Conversation, args: dict[str, Any]) -> dict[str, Any]:
         """read_pages Никиты: страницы руководства этого двигателя целиком, метка — наша R… (одна страница — один R).

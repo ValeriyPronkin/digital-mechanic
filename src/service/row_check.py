@@ -26,7 +26,12 @@ _GENERIC = {
 }  # fmt: skip
 
 
+_REF = re.compile(r"\[\s*R\d+\s*\]")
+
+
 def _nums(text: str) -> set[str]:
+    """Числа от двух цифр; ссылки [R12] — не числа (27.11: «[R12]» снимало фразу Q16 как «число чужой строки»)."""
+    text = _REF.sub(" ", text)
     return {n.replace(",", ".") for n in _NUM.findall(text) if len(n.replace(",", "").replace(".", "")) >= 2}
 
 

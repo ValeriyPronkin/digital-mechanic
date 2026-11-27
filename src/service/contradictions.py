@@ -94,7 +94,7 @@ def match_answer(engine: str, answer: str) -> Known | None:
     return None
 
 
-_SENT = re.compile(r"(?<=[.!?])\s+")
+_SENT = re.compile(r"(?<=[.!?])\s+(?=[^a-zа-яё\d])")
 _LIST_PREFIX = re.compile(r"^(\s*(?:\d+[.)]|[-*•])\s+)")
 _NO_CONTRADICTION = re.compile(r"противоречи\w* (?:в документации )?нет", re.I)
 _ADVICE_DUP = re.compile(r"^\s*(?:\W\s*)?уточните у (?:специалиста|производителя)", re.I)

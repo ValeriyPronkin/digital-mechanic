@@ -72,3 +72,9 @@ def test_real_torque_table_rows() -> None:
     page = default_searcher().page_text("yamz-236-rk", 286)
     assert page and not row_ok("Гайки стоек коромысел — 240-260 Н·м.", Q, [page])
     assert row_ok("Гайки стоек коромысел — 120-150 Н·м.", Q, [page])
+
+
+def test_reference_number_is_not_a_value() -> None:
+    """[R12] — ссылка, а не число 12: фраза без чисел не снимается из-за строки «… 2013-02-12» (27.11, Q16)."""
+    page = "Руководство по ремонту 2013-02-12\nУплотняющая шайба инжектора (поз.1) | Установка инжекторов"
+    assert row_ok("Замените уплотняющую шайбу инжектора (поз. 1) [R12].", "Что заменить?", [page])

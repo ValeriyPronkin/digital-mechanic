@@ -205,7 +205,7 @@ _NOT_FOUND = re.compile(
     r"не\s+наш[её]л|нет\s+в\s+руководств|руководств\w*[^.!?\n]{0,160}?\b(?:нет|не\s+приводится|не\s+указан\w*)\b",
     re.IGNORECASE,
 )
-_SENT = re.compile(r"(?<=[.!?])\s+|\n+")
+_SENT = re.compile(r"(?<=[.!?])\s+(?=[^a-zа-яё\d])|\n+")
 
 
 @dataclass(frozen=True)
