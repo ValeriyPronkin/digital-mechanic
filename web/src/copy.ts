@@ -327,6 +327,7 @@ export const copy = {
     engine: 'двигатель',
     formulations: 'Как написано в руководствах',
     safeRule: 'Пока нет решения, механики работают по безопасному правилу',
+    safeRuleBefore: 'До решения механики работали по безопасному правилу',
     resolution: 'Решение',
     resolutionMeta: (source: string, at: string, by: string) => `источник: ${source} · ${at} · записал: ${by}`,
     basis: 'Основание',

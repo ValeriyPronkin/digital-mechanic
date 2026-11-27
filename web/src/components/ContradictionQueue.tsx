@@ -382,7 +382,7 @@ function Item({ item, onChange }: { item: ContradictionItem; onChange: (i: Contr
       )}
 
       <section className="space-y-1">
-        <h2 className="text-[13px] text-dim">{q.safeRule}</h2>
+        <h2 className="text-[13px] text-dim">{res ? q.safeRuleBefore : q.safeRule}</h2>
         <p>{item.safe_rule}</p>
       </section>
 
