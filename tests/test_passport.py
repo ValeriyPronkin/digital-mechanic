@@ -16,6 +16,8 @@ from service.clients import MLClient, ToirClient
 from service.store import Store
 from test_agent import ANOMALY, TwoPageSearch, make_agent, say
 
+pytestmark = pytest.mark.usefixtures("without_matrix")  # сценарий C1 — как в CI, без матрицы (conftest)
+
 
 def _ask(ml: MLClient, toir: ToirClient, answer: str) -> tuple[Any, Any, Any]:
     ag, _ = make_agent([say(answer)], ml, toir, TwoPageSearch())  # диагноз и поиск делает код (#16)
