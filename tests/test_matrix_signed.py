@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from build_fault_matrix import ANCHOR_WORDS
 from matrix_fixture import needs_matrix
 from service.fault_matrix import QUOTE_MAX_WORDS, Ref, normalize, ref_problem
 
@@ -47,9 +48,24 @@ def test_signed_cell_lists_registry_pages_and_operations(code: str, group: str) 
     assert cell["applicable"] == "true" and cell["signed"]
     assert (cell["pages"][0]["doc"], cell["pages"][0]["page"]) == SIGNED[(code, group)]
     assert len(cell["operations"]) >= 4
-    for engine in SRC["groups"][group]:  # документ — этого двигателя, страница есть в PDF
-        for ref in cell["operations"] + cell.get("safety", []):
-            assert ref_problem(Ref.from_json(ref), engine, None) is None, ref
+    for row in cell["operations"] + cell.get("safety", []):
+        # в git — только якорь строки, не её текст (#96): не больше 7 слов на строку
+        assert "quote" not in row and row["words"] >= len(re.findall(r"\w+", row["anchor"]))
+        assert len(re.findall(r"\w+", row["anchor"] + " " + row.get("last", ""))) <= ANCHOR_WORDS
+        for engine in SRC["groups"][group]:  # документ — этого двигателя, страница есть в PDF
+            assert ref_problem(Ref(doc=row["doc"], page=row["page"], quote=row["anchor"]), engine, None) is None
+
+
+def test_anchor_expands_to_the_line_on_the_page() -> None:
+    """Якорь разворачивается в строку страницы дословно; из двух вхождений начала — то, где строка в `words` слов
+    кончается `last` (на стыке фрагментов строка повторяется)."""
+    from build_fault_matrix import expand_anchor
+
+    page = "Подтекание по кольцам гильз\nПодтекание по кольцам гильз | Заменить неисправные кольца. Трещины"
+    row = {"anchor": "Подтекание по", "last": "неисправные кольца", "words": 7}
+    assert expand_anchor(row, page) == "Подтекание по кольцам гильз Заменить неисправные кольца"
+    assert expand_anchor({"anchor": "Трещины", "words": 1}, page) == "Трещины"
+    assert expand_anchor({"anchor": "Заменить прокладку", "words": 2}, page) is None
 
 
 def test_source_quotes_stay_short() -> None:

@@ -181,16 +181,59 @@ def draft_group(
 _NOT_PINNED_PART = re.compile(r"исправн|комплект", re.I)  # «заменить исправным», «заменить комплектом»
 
 
+ANCHOR_WORDS = 7  # слов руководства на строку в источнике (в git): `anchor` и `last` вместе
+
+
+def _low(word: str) -> str:
+    return word.lower().replace("ё", "е")
+
+
+def expand_anchor(row: dict[str, Any], page: str) -> str | None:
+    """Строка руководства по её якорю из источника: `anchor` — первые слова строки, `last` — последние, `words` —
+    сколько в ней слов (`\\w+`). Ищется на странице (текст индекса) кратчайший отрезок ровно в `words` слов, который
+    начинается с `anchor` и кончается `last`; возвращается дословно, как стоит на странице (`flat`). Нет такого —
+    None. В git — только якорь: цитата целиком живёт в собранной матрице, в частном хранилище вместе с индексом."""
+    text = flat(page)
+    tokens = list(_WORD.finditer(text))
+    low = [_low(t.group()) for t in tokens]
+    head = [_low(w) for w in _WORD.findall(row["anchor"])]
+    tail = [_low(w) for w in _WORD.findall(row.get("last", ""))]
+    n = int(row.get("words") or len(head))
+    for i in range(len(low) - n + 1):
+        if low[i : i + len(head)] == head and (not tail or low[i + n - len(tail) : i + n] == tail):
+            return text[tokens[i].start() : tokens[i + n - 1].end()]
+    return None
+
+
+def _pinned_rows(
+    rows: list[dict[str, Any]], page_text: dict[tuple[str, int], str], problems: list[str], kind: str
+) -> list[Ref]:
+    out = []
+    for row in rows:
+        quote = expand_anchor(row, page_text.get((row["doc"], int(row["page"])), ""))
+        if quote is None:
+            problems.append(f"{kind}: {row['doc']}:{row['page']}: строки «{row['anchor']}…» нет на странице")
+        else:
+            out.append(Ref(doc=row["doc"], page=int(row["page"]), quote=quote))
+    return out
+
+
 def pinned_group(
     by_page: dict[tuple[str, int], list[Fragment]],
     spec: dict[str, Any],
     decision: dict[str, Any],
     drafted_safety: list[Ref],
+    problems: list[str],
 ) -> tuple[list[Ref], list[Ref], list[Ref], list[Ref]]:
     """Ячейка из реестра покрытия, подписанного инженером (`pages` в источнике): страницы и работы — оттуда, а не из
-    поиска. Цитата страницы — из индекса, как у найденных страниц; работы — дословные строки таблиц неисправностей
-    и процедур, проверяет `verify_cell`. Запчасти — что «заменить» в этих работах."""
+    поиска. Цитата страницы — из индекса, как у найденных страниц; работы и предупреждения — строки таблиц
+    неисправностей и процедур, развёрнутые из якорей источника по тексту страницы (`expand_anchor`); каждую
+    проверяет `verify_cell`. Запчасти — что «заменить» в этих работах."""
     must = re.compile(spec["must"], re.I)
+    rows = [*(decision.get("operations") or []), *(decision.get("safety") or [])]
+    page_text = {
+        (r["doc"], int(r["page"])): "\n".join(f.text for f in by_page.get((r["doc"], int(r["page"])), [])) for r in rows
+    }
     pages: list[Ref] = []
     for p in decision["pages"]:
         frags = by_page.get((p["doc"], int(p["page"])))
@@ -198,9 +241,9 @@ def pinned_group(
             continue  # страницы нет в индексе — проверка ячейки не найдёт и работ с неё
         hit = next((f for f in frags if must.search(f.text)), frags[0])
         pages.append(Ref(doc=p["doc"], page=int(p["page"]), quote=window(hit.text, must), what=p.get("what", "")))
-    ops = [Ref.from_json(o) for o in decision.get("operations") or []]
+    ops = _pinned_rows(decision.get("operations") or [], page_text, problems, "работа")
     keys = {(p.doc, p.page) for p in pages}
-    safety = [Ref.from_json(x) for x in decision.get("safety") or []]
+    safety = _pinned_rows(decision.get("safety") or [], page_text, problems, "безопасность")
     safety += [x for x in drafted_safety if (x.doc, x.page) in keys and all(x.quote != y.quote for y in safety)]
     parts: list[Ref] = []
     for o in ops:
@@ -236,7 +279,9 @@ def build(index_path: Path) -> tuple[list[Cell], list[str]]:
             if applicable != "false":
                 pages, ops, parts, safety = draft_group(index, by_page, engines[0], spec)
             if applicable == "true" and decision.get("pages"):  # подписано инженером: страницы и работы из реестра
-                pages, ops, parts, safety = pinned_group(by_page, spec, decision, safety)
+                pinned: list[str] = []
+                pages, ops, parts, safety = pinned_group(by_page, spec, decision, safety, pinned)
+                problems += [f"{code} × {engine}: {e}" for engine in engines for e in pinned]
             basis = Ref.from_json(decision["basis"]) if decision.get("basis") else None
             if applicable == "true" and basis is None and pages:
                 basis = Ref(doc=pages[0].doc, page=pages[0].page, quote=pages[0].quote)
