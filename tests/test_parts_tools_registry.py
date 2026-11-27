@@ -125,3 +125,12 @@ def test_model_tool_line_always_removed(ml: MLClient, toir: ToirClient) -> None:
     ag, _ = make_agent([say(answer)] * 2, ml, toir, prefetch=False)
     reply = ag.ask(ag.start("B418HK98", "S-0007"), "Какой зазор клапанов?")
     assert "Понадобится" not in reply.text
+
+
+def test_spans_short_key_with_word() -> None:
+    """web-2, 27.11: «ключ S=6» — одна разметка с размером, «S=24» — отдельный ключ; стр. 150 — если она в ответе."""
+    text = "Понадобится: ключ S=6 для болтов скобы и S=24 для гайки штуцера."
+    found = [(s["text"], s["designation"]) for s in parts_tools.spans("ЯМЗ-536", text, {})]
+    assert found == [("ключ S=6", "S=6"), ("S=24", "S=24")]
+    on_page = parts_tools.spans("ЯМЗ-536", "Понадобится: ключ S=6.", {("yamz-536-rk", 150): "S1"})
+    assert on_page[0]["page"] == 150 and on_page[0]["ref"] == "S1"

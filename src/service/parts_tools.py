@@ -196,3 +196,75 @@ def find(
 def _norm_code(code: str) -> str:
     """«S =5», «S=5», «Sвн=5» — один ключ (#162, класс (б))."""
     return re.sub(r"\s+", "", code.lower()).replace("sвн", "s")
+
+
+# ---------- разметка ответа для /api/v2: запчасти и инструмент отдельным цветом (Валерий и Никита, 27.11) ----------
+
+_VERB = re.compile(r"(?:ить|ать|ять|еть|уть|ться|тся|ется|ится)$", re.I)
+_LANDMARK = re.compile(r"^(?:коленчат|распределительн)\w*\s+вал", re.I)
+_NOT_NAME = re.compile(r"^(?:карточк|допуска|проверк|работ|ремонт|двигател)", re.I)
+
+
+def _name_pattern(name: str) -> re.Pattern[str] | None:
+    """Название в любом падеже: основа каждого слова («уплотнительн\\w* кольц\\w* инжектор\\w*»)."""
+    words = [w for w in re.findall(r"[а-яёa-z]+", name.lower()) if len(w) >= 3]
+    if not words or (len(words) == 1 and len(words[0]) < 3):
+        return None
+    stems = [re.escape(w[: max(3, len(w) - 2)] if len(w) > 4 else w) + r"\w*" for w in words]
+    return re.compile(r"(?<![\wё])" + r"\s+".join(stems) + r"(?![\wё])", re.I)
+
+
+def spans(engine: str, text: str, cited: dict[tuple[str, int], str] | None = None) -> list[dict[str, object]]:
+    """Где в тексте ответа запчасти и инструмент из реестра двигателя: [{type, text, start, end, name, designation,
+    page, ref}]. Обозначение или размер ищется дословно, название — по основам слов. Без пересечений: длинное
+    совпадение важнее короткого. `cited` — {(doc, страница): метка S…} страниц ответа: ссылка ставится, если
+    страница записи в ответе; иначе ref=None (страница записи — в page). Размечает сервер по реестру, не модель."""
+    cited = cited or {}
+    where: dict[str, set[tuple[str, int]]] = {}
+    for r in records(engine):
+        if r.code:
+            where.setdefault(r.code.lower(), set()).add((r.doc, r.page))
+    found: list[tuple[int, int, int, bool, Record]] = []
+    for r in records(engine):
+        words = r.name.lower().split()
+        if any(_VERB.search(w) or _NOT_NAME.match(w) for w in words):
+            continue  # «заменить», «допускается» — не деталь (обрывки разбора)
+        pats: list[tuple[re.Pattern[str], bool]] = []
+        key = re.fullmatch(r"S(вн)?\s*=\s*(\d+)", r.code or "", re.I)
+        if key:  # размер ключа «S=6» — при любой длине, вместе со словом «ключ» перед ним («ключ S=6», web-2 27.11)
+            inner = r"\s*вн" if key.group(1) else ""
+            pats.append((re.compile(rf"(?:ключ\w*\s+(?:на\s+)?)?\(?\bS{inner}\s*=\s*{key.group(2)}(?!\d)", re.I), True))
+        elif r.code and re.search(r"\d", r.code) and len(r.code) >= 4:
+            pats.append((re.compile(r"(?<![\w.\-])" + re.escape(r.code) + r"(?![\w\-])", re.I), True))
+        # запчасть по одному названию — только из двух слов и больше («уплотнительные кольца инжектора»): одно слово
+        # («кольцо», «вал») встречается в ответе на каждом шагу и красило бы всё подряд
+        # «коленчатый вал», «распределительный вал» — в ответе как ориентир («повернуть коленчатый вал»), не запчасть
+        if r.kind == "tool" or (len(words) > 1 and not _LANDMARK.match(r.name)):
+            if p := _name_pattern(r.name):
+                pats.append((p, False))
+        for p, by_code in pats:
+            for m in p.finditer(text):
+                found.append((m.start(), m.end(), int((r.doc, r.page) in cited), by_code, r))
+    # длиннее — раньше; при равной длине — запись со страницы ответа, затем совпавшая обозначением
+    found.sort(key=lambda x: (-(x[1] - x[0]), -x[2], -int(x[3]), x[0]))
+    taken: list[tuple[int, int]] = []
+    out: list[dict[str, object]] = []
+    for start, end, on_page, by_code, r in found:
+        if any(start < e and s < end for s, e in taken):
+            continue
+        taken.append((start, end))
+        # страница записи — только если она в ответе или обозначение встречается в руководствах на одной странице
+        # («S=13» — на десятках страниц, «24-Ф-74784.001» — на одной); иначе страница и обозначение могут быть чужими
+        exact = bool(on_page or (by_code and len(where.get(r.code.lower(), ())) == 1))
+        out.append({
+            "type": r.kind,
+            "text": text[start:end],
+            "start": start,
+            "end": end,
+            "name": r.name,
+            "designation": (r.code or None) if (exact or by_code) else None,
+            "page": r.page if exact else None,
+            "manual_id": r.doc if exact else None,
+            "ref": cited.get((r.doc, r.page)),
+        })  # fmt: skip
+    return sorted(out, key=lambda s: int(s["start"]))  # type: ignore[call-overload]
