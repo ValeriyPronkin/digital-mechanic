@@ -130,8 +130,8 @@ def test_api_summary_vehicle_and_page() -> None:
     assert v["tickets"] == [] or "ticket_id" in v["tickets"][0]
     assert client.get("/api/fleet/NOPE").status_code == 404
     page = client.get("/fleet")
-    assert page.status_code == 200 and 'href="/"' in page.text and "/api/fleet" in page.text
-    assert 'href="/fleet"' in client.get("/").text  # ссылка с главной
+    assert page.status_code == 200 and 'href="/v1"' in page.text and "/api/fleet" in page.text
+    assert 'href="/fleet"' in client.get("/v1").text  # ссылка с прежней главной
 
 
 def test_agent_tool_returns_same_summary(ml, toir) -> None:  # type: ignore[no-untyped-def]

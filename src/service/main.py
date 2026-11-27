@@ -1,4 +1,4 @@
-"""HTTP-сервис: страница механика (/), /health и API парка и диагностики."""
+"""HTTP-сервис: интерфейс механика (/ → /v2, прежняя страница — /v1), /health и API парка и диагностики."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from service import (
@@ -392,8 +392,18 @@ def manuals_index_status() -> dict[str, Any]:
     }
 
 
-@app.get("/", response_class=HTMLResponse)
-def index() -> str:
+@app.get("/", include_in_schema=False, response_model=None)
+def index(request: Request) -> Response:
+    """Адрес стенда открывает интерфейс v2. Без сборки (`make run` без `make web`) — прежняя страница, как /v1."""
+    if _v2_file("") is not None:
+        query = f"?{request.url.query}" if request.url.query else ""
+        return RedirectResponse(f"/v2/{query}", status_code=307)
+    return HTMLResponse(INDEX_HTML.read_text(encoding="utf-8"))
+
+
+@app.get("/v1", response_class=HTMLResponse)
+def index_v1() -> str:
+    """Прежняя страница механика (список машин → карточка → чат); ссылка «Парк →» ведёт на /fleet."""
     return INDEX_HTML.read_text(encoding="utf-8")
 
 
