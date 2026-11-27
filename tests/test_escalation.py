@@ -60,7 +60,7 @@ def test_letter_send_resolve_and_decision_next_to_both_formulations(ml: MLClient
                          "manufacturer", "письмо ЯМЗ № 12/345")  # fmt: skip
     assert done["status"] == "resolved"  # type: ignore[index]
     text = ag.ask(ag.start("B418HK98", "S-0007"), QUESTION).text
-    assert "Решение по противоречию (источник: завод-изготовитель, " in text and "письмо ЯМЗ № 12/345" in text
+    assert "Решение по противоречию (№ 1; источник: завод-изготовитель, " in text and "письмо ЯМЗ № 12/345" in text
     assert RE31 in text and RK269 in text and RK276 in text and "Передано главному механику" not in text  # рядом
     journal = queue.journal()
     assert [j["event"] for j in journal] == ["sent", "resolved"] and verify(journal)[0]
@@ -74,7 +74,7 @@ def test_cached_answer_shows_todays_decision(ml: MLClient, toir: ToirClient) -> 
     queue.resolve(1, "Только на холодном двигателе", "поддержка", "support")
     again = ag.ask(ag.start("B418HK98", "S-0007"), QUESTION)  # второго ответа модели нет — только кэш
     assert "Передано главному механику" in first
-    assert "Решение по противоречию (источник: поддержка, " in again.text and RK276 in again.text
+    assert "Решение по противоречию (№ 1; источник: поддержка, " in again.text and RK276 in again.text
 
 
 def test_model_noticed_contradiction_is_queued_and_its_advice_dropped(ml: MLClient, toir: ToirClient) -> None:
@@ -136,3 +136,13 @@ def test_queue_api(ml: MLClient, toir: ToirClient) -> None:
     assert [j["event"] for j in c.get("/api/v2/contradictions/journal").json()] == ["sent", "resolved"]
     assert c.get("/api/v2/contradictions/99").status_code == 404
     assert len(c.get("/api/v2/contradictions?status=all").json()) == 1
+
+
+def test_block_number_open_and_resolved() -> None:
+    """Номер в блоке v2 — и до решения, и после: карточка механика ссылается на тот же № на экране очереди."""
+    from service.api_v2 import escalation_view
+
+    open_line = "Передано главному механику на решение (№ 3). Пока — безопасное правило: по выводу выше."
+    done_line = "Решение по противоречию (№ 3; источник: завод-изготовитель, 27.11.2026): на холодном двигателе."
+    assert escalation_view(open_line) == {"line": open_line, "number": 3, "resolved": False}
+    assert escalation_view(done_line) == {"line": done_line, "number": 3, "resolved": True}
