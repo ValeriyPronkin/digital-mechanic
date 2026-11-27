@@ -14,7 +14,6 @@ import {
 import { copy } from '../copy'
 import {
   editedText,
-  firstStatus,
   knownEvents,
   moscowTime,
   queueCounts,
@@ -30,7 +29,10 @@ const q = copy.queue
 const FIELD = 'w-full rounded-lg border border-line bg-surface-2 px-3 py-2.5 placeholder:text-mute'
 const BUTTON = 'min-h-12 rounded-lg border border-line px-4 hover:bg-surface disabled:opacity-60'
 const PRIMARY = 'min-h-12 rounded-lg bg-accent px-4 font-semibold text-bg disabled:opacity-60'
-const toneOf = { open: 'text-warn', sent: 'text-dim', resolved: 'text-ok' } as const
+const toneOf: Record<string, string> = { known: 'text-dim', open: 'text-warn', sent: 'text-dim', resolved: 'text-ok' }
+/** A status the screen does not know yet: its own word from the server, no colour. */
+const stateWord = (s: string) => (q.state as Record<string, string>)[s] ?? s
+const seenLine = (count: number) => (count > 0 ? q.seen(count, plural(count, q.times)) : q.notSeen)
 
 function Chevron({ back = false }: { back?: boolean }) {
   return (
@@ -91,7 +93,7 @@ export function QueueRow({ counts }: { counts: Record<ContradictionStatus, numbe
     >
       <span className="min-w-0">
         <span className={`block ${counts.open > 0 ? 'text-warn' : ''}`}>{q.open}</span>
-        <span className="block text-dim">{q.openHint(counts.open, counts.sent, counts.resolved)}</span>
+        <span className="block text-dim">{q.openHint(counts.known, counts.open, counts.sent, counts.resolved)}</span>
       </span>
       <Chevron />
     </a>
@@ -109,10 +111,10 @@ function Row({ item }: { item: ContradictionItem }) {
           <span className="font-semibold">{q.number(item.number)}</span> {item.title}
         </span>
         <span className="mt-0.5 block text-[13px] text-dim">
-          {item.engine} · {q.seen(item.count, plural(item.count, q.times))}
+          {item.engine} · {seenLine(item.count)}
           {item.last_seen && ` · ${moscowTime(item.last_seen)}`}
         </span>
-        <span className={`mt-0.5 block text-[13px] ${toneOf[item.status]}`}>{q.state[item.status]}</span>
+        <span className={`mt-0.5 block text-[13px] ${toneOf[item.status] ?? ''}`}>{stateWord(item.status)}</span>
       </span>
       <Chevron />
     </a>
@@ -121,7 +123,9 @@ function Row({ item }: { item: ContradictionItem }) {
 
 function List({ items }: { items: ContradictionItem[] }) {
   const counts = queueCounts(items)
-  const [show, setShow] = useState<ContradictionStatus>(() => firstStatus(counts))
+  // nothing pressed: the whole list (Валерий, 27.11: every known contradiction, not only those met in answers);
+  // a counter filters it, as the status counters of the fleet do
+  const [show, setShow] = useState<ContradictionStatus | null>(null)
   const rows = shownItems(items, show)
   return (
     <>
@@ -129,23 +133,36 @@ function List({ items }: { items: ContradictionItem[] }) {
         <p className="p-4 text-dim">{q.empty}</p>
       ) : (
         <>
-          <div className="grid grid-cols-3 gap-2 px-4 pt-3 pb-2" role="radiogroup" aria-label={q.show}>
+          <div className="grid grid-cols-4 gap-2 px-4 pt-3 pb-2" role="group" aria-label={q.show}>
             {STATUSES.map((s) => (
               <button
                 key={s}
                 type="button"
-                role="radio"
-                aria-checked={show === s}
-                onClick={() => setShow(s)}
-                className="flex min-h-12 flex-col items-start rounded-lg border border-line px-3 py-1.5 text-left aria-checked:border-accent aria-checked:bg-surface-2"
+                aria-pressed={show === s}
+                onClick={() => setShow(show === s ? null : s)}
+                className="flex min-h-12 min-w-0 flex-col items-start rounded-lg border border-line px-2 py-1.5 text-left aria-pressed:border-accent aria-pressed:bg-surface-2"
               >
                 <span className="text-[17px] leading-tight font-semibold">{counts[s]}</span>
-                <span className={`text-[13px] leading-tight ${toneOf[s]}`}>{q.filter[s]}</span>
+                <span className={`max-w-full truncate text-[12px] leading-tight ${toneOf[s]}`}>{q.filter[s]}</span>
               </button>
             ))}
           </div>
+          {show && (
+            <p className="flex min-h-8 items-center justify-between gap-3 px-4 text-[13px] text-mute">
+              <span>
+                {q.shown}: {q.filter[show]}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShow(null)}
+                className="relative shrink-0 text-accent before:absolute before:-inset-x-3 before:-inset-y-3 before:content-['']"
+              >
+                {q.reset}
+              </button>
+            </p>
+          )}
           {rows.length === 0 ? (
-            <p className="border-t border-line p-4 text-dim">{q.emptyFilter[show]}</p>
+            <p className="border-t border-line p-4 text-dim">{show ? q.emptyFilter[show] : q.empty}</p>
           ) : (
             <ul className="divide-y divide-line border-y border-line">
               {rows.map((i) => (
@@ -341,10 +358,10 @@ function Item({ item, onChange }: { item: ContradictionItem; onChange: (i: Contr
   return (
     <div className="space-y-5 px-4 pt-3 pb-8">
       <div className="space-y-1">
-        <p className={`text-[13px] ${toneOf[item.status]}`}>{q.state[item.status]}</p>
+        <p className={`text-[13px] ${toneOf[item.status] ?? ''}`}>{stateWord(item.status)}</p>
         <p className="text-[17px] font-semibold">{item.title}</p>
         <p className="text-[13px] text-dim">
-          {q.engine} {item.engine} · {q.seen(item.count, plural(item.count, q.times))}
+          {q.engine} {item.engine} · {seenLine(item.count)}
           {item.last_seen && ` · ${q.lastSeen} ${moscowTime(item.last_seen)}`}
         </p>
         {item.vehicles.length > 0 && (
