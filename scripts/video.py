@@ -242,7 +242,7 @@ def shoot(d: Director) -> None:
     d.mark(page.get_by_text("B418HK98").first)
     d.pause(3)
 
-    # С1: отклонение → объяснение → страница с рамкой → вопрос → прослушать → инструмент → заявка
+    # С1: отклонение → объяснение → страница с рамкой → вопрос → инструмент → заявка → своим ходом (прослушать)
     d.scene("card")
     d.vehicle("B418HK98", "S-0009")
     d.mark(
@@ -267,9 +267,6 @@ def shoot(d: Director) -> None:
     d.ask("Какой зазор клапанов?")
     d.mark(page.locator("button:has(svg title)").last)
     d.pause(3)
-
-    d.scene("listen")
-    d.listen()
 
     d.scene("tools")
     if d.quick("Какой нужен инструмент"):
@@ -300,6 +297,9 @@ def shoot(d: Director) -> None:
     d.scene("drive")
     if d.quick("Можно ли ехать своим ходом"):
         d.pause(3)
+        # «Прослушать» — на коротком ответе (вердикт и одно действие, ≈6–8 с), а не на длинном о зазоре
+        d.scene("listen")
+        d.listen()
 
     d.scene("uzbek")
     d.ask("Klapan tirqishini qanday tekshirish kerak?")
