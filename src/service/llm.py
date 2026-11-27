@@ -12,6 +12,7 @@ import logging
 import os
 import time
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -24,6 +25,10 @@ log = logging.getLogger(__name__)
 
 Message = dict[str, Any]
 TIMEOUT = httpx.Timeout(60.0, connect=5.0)
+# Срок текущего вопроса (time.monotonic), его ставит агент: вызов модели не дольше оставшегося времени, а после
+# срока не начинается — платформа стенда не рвёт запрос посреди ответа (ревью 27.11). None — только TIMEOUT.
+DEADLINE: ContextVar[float | None] = ContextVar("llm_deadline", default=None)
+MIN_LEFT_S = 2.0
 
 
 class LLMError(ServiceError):
@@ -81,6 +86,12 @@ def _args(raw: Any) -> dict[str, Any]:
 
 def _post(http: httpx.Client, url: str, **kw: Any) -> dict[str, Any]:
     for attempt in (1, 2):
+        deadline = DEADLINE.get()
+        if deadline is not None:
+            left = deadline - time.monotonic()
+            if left < MIN_LEFT_S:
+                raise LLMError("Время на ответ вышло. Спросите ещё раз, короче.")
+            kw["timeout"] = httpx.Timeout(min(60.0, left), connect=min(5.0, left))
         try:
             resp = http.post(url, **kw)
         except httpx.HTTPError as exc:
