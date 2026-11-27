@@ -211,13 +211,24 @@ _SENT = re.compile(SENTENCE_END + r"|\n+")  # не перед строчной �
 
 @dataclass(frozen=True)
 class Speech:
-    text: str  # что произносится: короткая версия + источник
-    body: str  # короткая версия без источника — её цифры сверены с фрагментом
+    text: str  # что произносится: практический фрагмент ответа, без документов и страниц (они — на экране)
+    body: str  # то же без пометок; цифры сверены с фрагментом своей ссылки
     refs: tuple[str, ...]
+
+
+# Ссылки на документы в тексте ответа: «(РК ЯМЗ-236М2, стр. 269)», «РЭ, стр. 31», «стр. 31» — на слух механику не
+# нужны (Валерий 28.11: озвучка — рекомендации, страницы — на экране)
+_DOC_REF = re.compile(
+    r"\s*\((?:[^()]*?(?:стр\.|страниц|\bРЭ\b|\bРК\b)[^()]*)\)"
+    r"|\s*,?\s*(?:по\s+)?\b(?:РЭ|РК)\b(?:\s+[А-ЯA-Z0-9][\w.-]*)?(?:\s*,\s*стр\.\s*\d+(?:[–-]\d+)?)?"
+    r"|\s*,?\s*стр\.\s*\d+(?:[–-]\d+)?"
+)
+SPEECH_SAY_CHARS = 220  # два предложения рекомендации — 8–12 с на слух
 
 
 def _clean(sentence: str) -> str:
     s = _MD.sub("", sentence)
+    s = _DOC_REF.sub("", s)
     s = re.sub(r"^\s*(?:\d+[.)]|[-•–])\s+", "", s)  # маркер пункта списка — не цифра ответа
     return " ".join(s.split())
 
@@ -238,10 +249,8 @@ def speech_for(answer: str, sources: dict[str, Source], lang: str = "ru") -> Spe
     if lang != "ru" and lang in language.LANGS and language.voice_for(lang) is None:
         notice = language.NO_VOICE.format(name=language.LANGS[lang].name.split(" (")[0])
         return Speech(notice, notice, ())
-    tail_tpl = language.SOURCE_TAIL.get(lang, language.SOURCE_TAIL["ru"])
     not_in_manual = language.NOT_IN_MANUAL.get(lang, NOT_IN_MANUAL)
-    with_numbers: list[Speech] = []
-    plain_refs: list[Speech] = []
+    checked: list[tuple[str, tuple[str, ...], bool]] = []  # проверенные предложения со ссылкой — в порядке ответа
     fallback: str | None = None
     for raw in _SENT.split(answer):
         refs = tuple(r for r in _REF.findall(raw) if r in sources)
@@ -252,13 +261,22 @@ def speech_for(answer: str, sources: dict[str, Source], lang: str = "ru") -> Spe
         if refs:
             allowed: set[str] = set().union(*(numbers(sources[r].text) for r in refs))
             if nums <= allowed:
-                src = sources[refs[0]]
-                tail = tail_tpl.format(manual=short_manual(src.manual), page=src.pdf_page)
-                (with_numbers if nums else plain_refs).append(Speech(f"{text.rstrip('.')}. {tail}", text, refs))
+                checked.append((text.rstrip(".") + ".", refs, bool(nums)))
         elif fallback is None and not nums:
             fallback = text
-    if with_numbers or plain_refs:
-        return (with_numbers or plain_refs)[0]
+    if checked:
+        # Начало — первое предложение с цифрой (значение с единицами), иначе первое проверенное; затем следующее
+        # проверенное по порядку ответа — практический шаг, если оба влезают в SPEECH_SAY_CHARS. Без «Источник: …,
+        # страница N»: страницы механик видит на экране, на слух они мешают (Валерий 28.11).
+        first = next((i for i, c in enumerate(checked) if c[2]), 0)
+        said, refs_said = [checked[first][0]], list(checked[first][1])
+        for text, refs, _ in checked[first + 1 :]:
+            if len(" ".join([*said, text])) <= SPEECH_SAY_CHARS:
+                said.append(text)
+                refs_said += [r for r in refs if r not in refs_said]
+            break
+        body = " ".join(said)
+        return Speech(body, body, tuple(refs_said))
     if _NOT_FOUND.search(answer) or not fallback:
         return Speech(not_in_manual, not_in_manual, ())
     return Speech(fallback, fallback, ())
