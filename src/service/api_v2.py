@@ -285,7 +285,8 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
     while end < len(lines) and lines[end].startswith("- "):
         item_lines.append(lines[end])
         end += 1
-    if end >= len(lines) or contradictions.ADVICE not in lines[end] or len(item_lines) != len(quotes):
+    last = lines[end] if end < len(lines) else ""
+    if not last.startswith(("Вывод:", contradictions.RULE)) or len(item_lines) != len(quotes):
         return None, text
     pages = {(q.doc, q.page) for q in quotes}
     refs = {(s.manual_id, s.pdf_page): s.ref for s in conv.sources.values() if (s.manual_id, s.pdf_page) in pages}
@@ -303,11 +304,8 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
                 "note": tail.strip().strip("()").strip() or None,
             }
         )
-    conclusion = (
-        f"{k.conclusion} Основание — {k.basis}."
-        if k.conclusion
-        else "Какое значение верно для вашего двигателя, руководства не уточняют."
-    )
+    # правило заказчика или безопасное правило из страниц — как в тексте (`contradictions.block`)
+    conclusion = last.removeprefix("Вывод:").strip() if k.conclusion else last
     rest_lines = lines[:start] + lines[end + 1 :]
     rest = "\n\n".join(p for p in (part.strip() for part in "\n".join(rest_lines).split("\n\n")) if p)
     block = {
@@ -315,7 +313,7 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
         "title": k.title,
         "items": items,
         "conclusion": conclusion,
-        "advice": contradictions.ADVICE,
+        "advice": "",  # отсылки «уточните у …» нет: правило — в conclusion (ответ организаторов 27.11)
     }
     return block, rest
 

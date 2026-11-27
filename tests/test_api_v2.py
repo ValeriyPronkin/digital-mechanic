@@ -187,7 +187,7 @@ def test_contradiction_as_block_and_not_repeated_in_text(ml: MLClient, toir: Toi
     assert block is not None and block["kind"] == "contradiction" and len(block["items"]) >= 2
     assert all(i["quote"] and i["handle"].startswith("S") for i in block["items"])
     assert block["items"][0]["note"] == "испытания на стенде" and block["items"][1]["note"] is None
-    assert block["advice"] == contradictions.ADVICE and block["conclusion"]
+    assert block["advice"] == "" and block["conclusion"] and "уточните" not in block["conclusion"]
     assert rest == "Прямой ответ.\n\nДальше по шагам." and contradictions.HEADER not in rest
     conv.contradiction = None
     assert api_v2.contradiction_block(conv, text) == (None, text)
