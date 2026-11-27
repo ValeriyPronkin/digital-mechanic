@@ -71,7 +71,8 @@ def test_c1_through_v2(v2: tuple[TestClient, Any, Store]) -> None:
     use = next(e for e in ev if e["type"] == "usage")
     assert use["input_tokens"] + use["cache_read_tokens"] == 1000  # кэш провайдера не считается дважды
     pp = next(e for e in ev if e["type"] == "passport")  # паспорт запроса (#31) — для «?» в v2
-    assert pp["question"]["level"] == "steps" and pp["total"]["model_rub"] >= 0
+    assert pp["question"]["level"] == "mechanic" and pp["question"]["level_reason"].startswith("по вопросу")
+    assert pp["total"]["model_rub"] >= 0
     sp = next(e for e in ev if e["type"] == "speech")  # короткая озвучка (#14) — по подписи сервера
     assert "0,1 МПа" in sp["text"] and sp["url"] == "/api/voice/speak" and len(sp["sig"]) == 64
 

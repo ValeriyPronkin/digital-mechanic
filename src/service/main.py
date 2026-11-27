@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -30,7 +31,7 @@ from service import (
     stand_log,
 )
 from service import parts_supplier as parts_supplier_mod
-from service.agent import Agent, Level
+from service.agent import Agent, LevelChoice
 from service.clients import MLClient, ServiceError, ToirClient
 from service.escalation import ContradictionQueue
 from service.fault_matrix import card_explanation
@@ -229,6 +230,7 @@ def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "version": __version__,
+        "build": build_info(),  # коммит и время сборки: приёмщик сверяет версию стенда с main
         "llm_key_present": any(os.environ.get(k) for k in ("DEEPSEEK_API_KEY", "GIGACHAT_CREDENTIALS", "LLM_API_KEY")),
         "llm_provider": os.environ.get("LLM_PROVIDER", "deepseek"),
         "manuals_index": manuals_index_status(),
@@ -239,6 +241,41 @@ def health() -> dict[str, Any]:
             "uptime_s": round(time.monotonic() - IMPORT_STARTED, 1),
             **{k: v for k, v in STARTUP.items() if k != "ready_at"},
         },
+    }
+
+
+def _git_head(git: Path) -> str:
+    """HEAD рабочей копии без запуска git: `.git/HEAD` → ветка → `refs/heads/…` или `packed-refs`."""
+    try:
+        head = (git / "HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref: "):
+            ref = head[5:]
+            loose = git / ref
+            if loose.is_file():
+                head = loose.read_text(encoding="utf-8").strip()
+            else:
+                packed = (git / "packed-refs").read_text(encoding="utf-8")
+                head = next((ln.split()[0] for ln in packed.splitlines() if ln.endswith(" " + ref)), "")
+    except OSError:
+        return ""
+    return head if re.fullmatch(r"[0-9a-f]{40}", head) else ""
+
+
+@lru_cache(maxsize=1)
+def build_info() -> dict[str, Any]:
+    """Коммит и время сборки. Образ: `GIT_SHA` / `BUILD_TIME` из `--build-arg` (stand.yml, preview.yml).
+    Локально без них — коммит рабочей копии из `.git` (времени сборки нет). Иначе — unknown."""
+    sha = os.environ.get("GIT_SHA", "").strip()
+    built = os.environ.get("BUILD_TIME", "").strip()
+    source = "image"
+    if not sha or sha == "unknown":
+        sha = _git_head(Path(__file__).resolve().parents[2] / ".git")
+        source = "git" if sha else "unknown"
+    return {
+        "git_sha": sha or "unknown",
+        "git_sha_short": sha[:7] if sha else "unknown",
+        "built_at": built if built and built != "unknown" else None,
+        "source": source,  # image — из сборки образа; git — локальная рабочая копия; unknown — не известно
     }
 
 
@@ -354,7 +391,7 @@ class ChatIn(BaseModel):
     vehicle_id: str = Field(min_length=1)
     session_id: str = Field(min_length=1)
     message: str = Field(min_length=1, max_length=2000)
-    level: Level = "steps"  # уровень механика (#17): «Опытный» / «Пошагово»
+    level: LevelChoice = "auto"  # уровень механика: auto — по вопросу; novice | mechanic | master; expert | steps
     stt_id: int | None = None  # вопрос голосом: запись журнала распознавания (#31 — паспорт запроса)
     lang: str | None = Field(default=None, max_length=10)  # язык ответа: ru, uz, uz-cyrl, tg, kk, ky, en; нет — вопроса
     state: str | None = Field(default=None, max_length=400_000)  # подписанное состояние разговора
@@ -384,7 +421,8 @@ def chat(req: ChatIn, request: Request) -> dict[str, Any]:
         by_voice=stt is not None,
         stt=stt,
         speech_text=spoken.text,
-        level=req.level,
+        level=reply.level_used,
+        level_reason=reply.level_reason,
     )
     slog = journal()
     passport.write(pp, time.time(), put=slog.put if slog is not None else None)  # журнал стенда (#27)

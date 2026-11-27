@@ -75,6 +75,10 @@ SEARCH_PLAN_PROMPT = """Ты готовишь поиск по руководст
 Код неисправности проверки в запросы не добавляй, если вопрос не о ней."""
 _TICKET_ASK = re.compile(r"заявк|оформ|отправ", re.I)
 
+TICKET_NOT_ASKED = (
+    "Механик не просил заявку. Сначала ответь на его вопрос (если спрашивает, можно ли ехать, — первой строкой "
+    "«можно» или «нельзя» со ссылкой [R…]); заявку можно предложить одной строкой в конце."
+)
 SILENT_NOTE = "В руководстве этого двигателя нет порядка работ по этому узлу — нужна дефектовка."
 
 log = logging.getLogger(__name__)
@@ -122,21 +126,58 @@ operations и spare_parts — они подставятся из матрицы)
 2–3 предложения.
 Длина — до 150 слов. В «Источнике» — только ссылки [R…]. После черновика заявки — одно-два предложения."""
 
-# Уровень механика (#17): формат и длина ответа. Правила кода (цифры из фрагментов, двигатель из карточки) — те же.
-Level = Literal["expert", "steps"]
-LEVELS: tuple[Level, ...] = ("expert", "steps")
+# Уровень механика (#17; встреча с заказчиком 27.11): формат и длина ответа. Правила кода — те же на всех уровнях.
+# Уровень определяется по вопросу, на каждый вопрос заново (`resolve_level`); механик может переключить. За механиком
+# не запоминается: телефоном пользуются по сменам и подменяют друг друга (решение Валерия).
+Level = Literal["novice", "mechanic", "master"]
+LEVELS: tuple[Level, ...] = ("novice", "mechanic", "master")
+LevelChoice = Literal["auto", "novice", "mechanic", "master", "expert", "steps"]
+LEGACY_LEVEL: dict[str, Level] = {"steps": "novice", "expert": "master"}  # «Пошагово» / «Опытный» (#17)
+LEVEL_WORD: dict[Level, str] = {"novice": "Новичок", "mechanic": "Механик", "master": "Мастер"}
 LEVEL_PROMPT: dict[Level, str] = {
-    "expert": "Уровень механика: ОПЫТНЫЙ — это указание важнее общих правил длины и шагов. Дай только прямой ответ "
+    "master": "Уровень механика: МАСТЕР — это указание важнее общих правил длины и шагов. Дай только прямой ответ "
     "(первую часть обычного ответа): 1–3 предложения — значение с единицами, нужный инструмент, ссылка [R…]. "
     "Без нумерованных шагов, списков и пояснения терминов, до 60 слов. "
     "Статус check_failed или normal — одно предложение.",
-    "steps": "Уровень механика: ПОШАГОВО (механик начинающий или неуверенный). Этот ответ — нумерованными шагами "
+    "mechanic": "Уровень механика: МЕХАНИК (знает двигатель, нужен порядок работ). Ответ: прямой ответ со значением "
+    "и единицами, затем порядок — короткими нумерованными шагами «1. …» без пояснения общих терминов, в каждом шаге "
+    "ссылка [R…]; инструмент — одной строкой «Понадобится: …», если он есть во фрагменте. До 140 слов.",
+    "novice": "Уровень механика: НОВИЧОК (механик начинающий или неуверенный). Этот ответ — нумерованными шагами "
     "«1. …», «2. …», в каждом шаге одно действие и ссылка [R…]. Перед шагами строка «Понадобится: …» (инструмент "
     "из фрагмента). Обязательно отдельной строкой «Безопасность: …» — условия и меры из фрагмента (например, "
-    "двигатель заглушён или холодный); если во фрагментах их нет — «Безопасность: в руководстве не указано». Термины "
-    "поясняй простыми словами в скобках. До 220 слов.",
+    "двигатель заглушён или холодный); если во фрагментах их нет — «Безопасность: в руководстве не указано». "
+    "Последним шагом — как проверить результат (по фрагменту). Термины поясняй простыми словами в скобках. "
+    "До 220 слов.",
 }
-LEVEL_MAX_TOKENS: dict[Level, int] = {"expert": 300, "steps": 900}
+LEVEL_MAX_TOKENS: dict[Level, int] = {"novice": 900, "mechanic": 600, "master": 300}
+
+# «как сделать / что это / чем» — нужен порядок и пояснения; короткий запрос нормы — только цифра и страница
+_NOVICE_Q = re.compile(
+    r"\b(как|каким образом|что (это|такое|значит|означает)|чем|зачем|почему|для чего|что делать|с чего начать|"
+    r"объясни|покажи|расскажи|можно ли)\b",
+    re.I,
+)
+_NORM_Q = re.compile(
+    r"\b(норм\w*|зазор\w*|давлени\w*|момент\w*|затяжк\w*|объ[её]м\w*|температур\w*|сколько|какой|какое|какая|"
+    r"допуск\w*|предел\w*|величин\w*|значени\w*|ресурс\w*|интервал\w*|размер\w*|вязкост\w*)\b",
+    re.I,
+)
+
+
+def resolve_level(question: str, choice: str | None = "auto") -> tuple[Level, str]:
+    """Уровень ответа на этот вопрос и почему: выбор механика (в т. ч. прежние «Опытный»/«Пошагово») или по вопросу."""
+    c = (choice or "auto").strip().lower()
+    if c in LEVELS:
+        return c, "выбран механиком"
+    if c in LEGACY_LEVEL:
+        return LEGACY_LEVEL[c], "выбран механиком"
+    q = " ".join(question.split())
+    words = re.findall(r"\w+", q)
+    if _NOVICE_Q.search(q):
+        return "novice", "по вопросу: «как сделать / что это / чем» — шаги, инструмент, безопасность, проверка"
+    if len(words) <= 7 and _NORM_Q.search(q):
+        return "master", "по вопросу: короткий запрос нормы — цифра и страница"
+    return "mechanic", "по вопросу: обычный вопрос — ответ и порядок работ"
 
 
 TOOLS: list[ToolSpec] = [
@@ -304,6 +345,8 @@ class AgentReply:
     trace: dict[str, Any]
     followup: dict[str, str] | None = None  # кнопка «к проверке по неисправности из карточки» (#28)
     lang: str = "ru"  # язык ответа (service.language): по нему — голос озвучки
+    level_used: str = "novice"  # уровень этого ответа (novice | mechanic | master)
+    level_reason: str = ""  # почему: «выбран механиком» или по вопросу
     # ответ не на русском — он же по-русски («Показать по-русски»: проверяемость для жюри); цифры проверены guard
     back_translation: str | None = None
 
@@ -423,8 +466,15 @@ def _quote_label(q: Any) -> str:
 GUIDE_ATTACHED = int(os.environ.get("GUIDE_ATTACHED", "3"))
 READ_PAGE_CHARS = 6000  # текст страницы в источнике R… для проверки цифр
 _DRIVE_ASK = re.compile(
-    r"можно ли (?:ехать|ездить|эксплуат)|своим ходом|доехать|перегнать|ехать дальше|можно ездить", re.I
-)
+    r"можно\b[^.?!]{0,25}?\b(?:ехать|ездить|эксплуатир\w*|двигаться|катать\w*)|своим ходом|доехать|доеду|перегнать|"
+    r"ехать дальше|ездить (?:пока|ещё|еще|дальше)|продолжать эксплуат|не опасно ехать|опасно ли ехать",
+    re.I,
+)  # Q37 «Можно пока ездить?» не попадал в прежний шаблон (приёмщик 27.11)
+# Механик просит заявку (или соглашается на предложенную): иначе draft_ticket не строит черновик (Q37: на вопрос
+# «можно ли ехать» модель сразу собрала черновик вместо ответа «нельзя» со страницей руководства)
+_TICKET_REQUEST = re.compile(r"заявк|оформ|отправ|черновик|дефектовк|созда[йт]|подготов", re.I)
+_YES = re.compile(r"^\W*(?:да|давай|ок|окей|хорошо|согласен|оформляй|делай|готовь|конечно)\b", re.I)
+_VERDICT = re.compile(r"нельзя|не эксплуатир|можно|не рекоменд|запрещ|не допуска|допускается|не ехать|не ездить", re.I)
 OPINION_MARK = "(мнение помощника, не из руководства)"
 # Утверждение о причине или диагнозе (#28, проверка с телефона): без ссылки [R…] — рассуждение модели
 _DIAG = re.compile(
@@ -688,7 +738,23 @@ class Agent:
         self,
         conv: Conversation,
         question: str,
-        level: Level = "steps",
+        level: str | None = "auto",
+        lang: str | None = None,
+        back_translate: bool = True,
+    ) -> AgentReply:
+        """`level` — выбор механика (novice | mechanic | master, прежние expert | steps) или auto — по вопросу,
+        на каждый вопрос заново; за механиком не запоминается."""
+        used, why = resolve_level(question, level)
+        reply = self._ask(conv, question, used, lang, back_translate)
+        reply.level_used, reply.level_reason = used, why
+        conv.passport["level_reason"] = why
+        return reply
+
+    def _ask(
+        self,
+        conv: Conversation,
+        question: str,
+        level: Level = "novice",
         lang: str | None = None,
         back_translate: bool = True,
     ) -> AgentReply:
@@ -783,6 +849,7 @@ class Agent:
         if refusal_cleaned:
             notes.append(clean_refusal.NOTE)
         final, _ = clean_refusal.drop_specialist(final)  # механик сам специалист (правило заказчика 27.11)
+        final, cited = self._drive_verdict(conv, question, final, cited)
         final, cited = self._complete_refusal(conv, question, final, cited)
         if conv.card is not None and conv.card.trend and _CARD_ASK.search(question) and conv.card.trend not in final:
             final = f"{final.rstrip()}\n\n📈 {conv.card.trend}"  # тенденция по истории ТС — кодом (#40 п. 4)
@@ -983,7 +1050,7 @@ class Agent:
 
     # ---- кэш ответов (issue #16) ----
     def _answer_cache_key(
-        self, conv: Conversation, question: str, level: Level = "steps", lang: str = ""
+        self, conv: Conversation, question: str, level: Level = "novice", lang: str = ""
     ) -> str | None:
         """Ключ: вопрос (без ПДн, регистра и знаков) + двигатель + результат проверки + версии индекса,
         матрицы и промпта. Только первый вопрос разговора и не про заявку: дальше ответ зависит от истории."""
@@ -999,7 +1066,7 @@ class Agent:
         diag = conv.diag
         parts = [
             norm,
-            level,  # «Опытный» и «Пошагово» — разные ответы на один вопрос
+            level,  # уровни — разные ответы на один вопрос
             lang,  # язык ответа: выбор механика меняет ответ на тот же вопрос
             conv.vehicle.engine_model,
             card.status,
@@ -1263,6 +1330,8 @@ class Agent:
                 res = self._read_pages(conv, args)
                 return res, bool(res.get("pages"))
             if name == "draft_ticket":
+                if not self._ticket_requested(conv):
+                    return {"refused": TICKET_NOT_ASKED}, False
                 res = self._draft_ticket(conv, args)
                 return res, "refused" not in res
             if name == "fleet_summary":
@@ -1744,6 +1813,89 @@ class Agent:
         plan["queries"] = [mask_pii(q) for q in plan["queries"]]
         conv.passport["plan"] = {"lang": plan["lang"], "question_ru": plan["question_ru"], "queries": plan["queries"]}
         return plan
+
+    @staticmethod
+    def _ticket_requested(conv: Conversation) -> bool:
+        """Черновик — только по просьбе механика (правило 5 промпта, теперь кодом): в вопросе есть просьба о заявке,
+        или механик коротко согласился («да», «давай»), когда помощник предложил её прошлым ответом."""
+        question = _last_question(conv)
+        if _TICKET_REQUEST.search(question):
+            return True
+        if conv.draft is not None and not _DRIVE_ASK.search(question):
+            return True  # черновик уже показан — механик правит его состав («Поменяй работы»)
+        if not _YES.search(question) or len(question) > 60:
+            return False
+        last_user = max((i for i, m in enumerate(conv.messages) if m.get("role") == "user"), default=-1)
+        before = [m for m in conv.messages[:last_user] if m.get("role") == "assistant" and m.get("content")]
+        return bool(before) and bool(re.search(r"заявк|черновик", str(before[-1].get("content")), re.I))
+
+    def _drive_verdict(
+        self, conv: Conversation, question: str, text: str, cited: list[Source]
+    ) -> tuple[str, list[Source]]:
+        """«Можно ли ехать» — первым ответ «да/нет» со страницей руководства (приёмщик 27.11, Q37). Нет вердикта —
+        строка кода по результату проверки (правило срочности, D-6); нет ссылки на руководство в первом абзаце —
+        страница ограничений эксплуатации этого двигателя (реестр Никиты), та, где больше слов вопроса."""
+        if not _DRIVE_ASK.search(question) or (conv.passport.get("answer_lang") or "ru") != "ru":
+            return text, cited  # ответ не по-русски — строку кода по-русски не вставляем (указание модели — то же)
+        paras = text.split("\n\n")
+        k = next((i for i, p in enumerate(paras) if p.strip()), 0)
+        first = paras[k] if paras else ""
+        has_verdict, has_ref = bool(_VERDICT.search(first)), bool(_REF.search(first))
+        if has_verdict and has_ref:
+            return text, cited
+        limit_src = self._limit_source(conv, question)
+        tail = ""
+        if limit_src is not None:
+            tail = f" Ограничения эксплуатации в руководстве — стр. {limit_src.pdf_page} [{limit_src.ref}]."
+        if limit_src is not None and limit_src not in cited:
+            cited = [*cited, limit_src]
+        if has_verdict:
+            if not tail:
+                return text, cited
+            paras[k] = first.rstrip() + tail
+            conv.passport["drive_page_by_code"] = True
+            return "\n\n".join(paras), cited
+        card = conv.card
+        if card is None or card.status == "check_failed":
+            line = "**Решить по проверке нельзя:** запись не годится — повторите проверку; до неё следите за приборами."
+        elif card.status == "normal":
+            line = "**По проверке — можно:** двигатель в норме."
+        elif card.urgency == "high":
+            line = "**Ездить нельзя:** срочность по проверке высокая — до дефектовки машину не эксплуатировать."
+        else:
+            line = (
+                "**Однозначного «можно» нет:** по проверке нужна дефектовка в ближайшее время — ехать только до "
+                "места ремонта, следя за приборами."
+            )
+        conv.passport["drive_verdict_by_code"] = True
+        return f"{line}{tail}\n\n{text}".strip(), cited
+
+    def _limit_source(self, conv: Conversation, question: str) -> Source | None:
+        """Страница ограничений эксплуатации руководства этого двигателя — источником разговора."""
+        page_text = getattr(self.searcher, "page_text", None)
+        if page_text is None:
+            return None
+        engine = canonical_engine(conv.vehicle.engine_model) or conv.vehicle.engine_model
+        want = set(tokenize(question))
+        best: tuple[int, int, Any, str] | None = None
+        for n, limit in enumerate(nk_coverage.limits_for(engine)):
+            full = str(page_text(limit.manual, limit.page) or "")
+            if not full:
+                continue
+            score = len(want.intersection(tokenize(full)))
+            if best is None or score > best[0]:
+                best = (score, n, limit, full)
+        if best is None:
+            return None
+        _, _, limit, full = best
+        src = next((s for s in conv.sources.values() if s.manual_id == limit.manual and s.pdf_page == limit.page), None)
+        if src is None:
+            doc = DOCS_BY_ID.get(limit.manual)
+            name = doc.designation if doc else limit.manual
+            src = Source(ref=next_ref(conv), manual_id=limit.manual, manual=name, pdf_page=limit.page,
+                         section="", text=full[:6000])  # fmt: skip
+            conv.sources[src.ref] = src
+        return src
 
     def _draft_ticket(self, conv: Conversation, args: dict[str, Any]) -> dict[str, Any]:
         conv.draft = None

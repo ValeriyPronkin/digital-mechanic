@@ -129,7 +129,8 @@ def test_api_passport_for_voice_question_and_card(
         json={"vehicle_id": vid, "session_id": sid, "message": rec["text"], "stt_id": rec["stt_id"], "level": "expert"},
     ).json()
     pp = r["passport"]
-    assert pp["question"]["level"] == "expert"  # уровень механика из #30
+    assert pp["question"]["level"] == "master"  # прежний «Опытный» (expert) — это «Мастер»
+    assert pp["question"]["level_reason"] == "выбран механиком"
     assert pp["question"]["by_voice"] and pp["question"]["stt_seconds"] == pytest.approx(3.0)
     from service.voice import for_tts
 
