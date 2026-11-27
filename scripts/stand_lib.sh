@@ -1,5 +1,7 @@
 # Общие шаги деплоя стенда в Yandex Cloud Serverless Containers (подключается из .github/workflows/stand.yml).
-# Требует: yc в PATH с настроенным профилем, jq, curl; переменные YC_SA_ID, STAND_MIN_INSTANCES.
+# Требует: yc в PATH с настроенным профилем, jq, curl; переменные YC_SA_ID, STAND_MIN_INSTANCES;
+# STAND_CONCURRENCY — запросов на один экземпляр (по умолчанию 4): интерфейс v2 шлёт запросы параллельно
+# (чат, страница, парк, озвучка), при 1 каждый параллельный запрос будит ещё один экземпляр с холодным стартом.
 
 # deploy_container ИМЯ ОБРАЗ ПАМЯТЬ ТАЙМАУТ [доп. аргументы yc ...] → печатает URL контейнера (со слешем в конце)
 deploy_container() {
@@ -16,6 +18,7 @@ deploy_container() {
     --cores 1 \
     --execution-timeout "$timeout" \
     --min-instances "$STAND_MIN_INSTANCES" \
+    --concurrency "${STAND_CONCURRENCY:-4}" \
     "$@" >/dev/null
   yc serverless container allow-unauthenticated-invoke --name "$name" >/dev/null
   url=$(yc serverless container get --name "$name" --format json | jq -r '.url')
