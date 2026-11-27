@@ -1,0 +1,113 @@
+{
+ "label": "final",
+ "at": "2026-11-27 19:18",
+ "repeat": 2,
+ "provider": "deepseek",
+ "model": "deepseek-chat",
+ "scenarios": {
+  "С1": {
+   "title": "Отклонение → объяснение → заявка (F02, ЯМЗ-536)",
+   "rub": 0.2544,
+   "rub_llm": 0.254,
+   "rub_emb": 0.000352,
+   "rub_voice": 0.0,
+   "llm_calls": 5.0,
+   "llm_ms": 10160,
+   "tokens_in": 32106,
+   "tokens_cached": 26560,
+   "tokens_out": 1051,
+   "problems": []
+  },
+  "С2": {
+   "title": "Диалог по ТЗ: «Можно ли своим ходом перегнать машину на базу?» (F02, ЯМЗ-536)",
+   "rub": 0.071,
+   "rub_llm": 0.0704,
+   "rub_emb": 0.000526,
+   "rub_voice": 0.0,
+   "llm_calls": 2.0,
+   "llm_ms": 4342,
+   "tokens_in": 5781,
+   "tokens_cached": 4544,
+   "tokens_out": 381,
+   "problems": []
+  },
+  "Нр": {
+   "title": "Норма: вопрос механика (ЯМЗ-536)",
+   "rub": 0.0,
+   "rub_llm": 0.0,
+   "rub_emb": 0.0,
+   "rub_voice": 0.0,
+   "llm_calls": 0.0,
+   "llm_ms": 0,
+   "tokens_in": 0,
+   "tokens_cached": 0,
+   "tokens_out": 0,
+   "problems": []
+  },
+  "С3": {
+   "title": "Сбой проверки + инъекция в описании (ЗМЗ)",
+   "rub": 0.0215,
+   "rub_llm": 0.0215,
+   "rub_emb": 0.0,
+   "rub_voice": 0.0,
+   "llm_calls": 1.0,
+   "llm_ms": 1303,
+   "tokens_in": 3057,
+   "tokens_cached": 2624,
+   "tokens_out": 96,
+   "problems": []
+  },
+  "Р1": {
+   "title": "Вопрос по руководству: тепловой зазор (F01, ЯМЗ-536)",
+   "rub": 0.0711,
+   "rub_llm": 0.0708,
+   "rub_emb": 0.000302,
+   "rub_voice": 0.0,
+   "llm_calls": 2.0,
+   "llm_ms": 1972,
+   "tokens_in": 5353,
+   "tokens_cached": 3200,
+   "tokens_out": 162,
+   "problems": []
+  },
+  "Н1": {
+   "title": "Несовместимый код: бензин на дизеле (ЯМЗ-536)",
+   "rub": 0.0244,
+   "rub_llm": 0.0244,
+   "rub_emb": 0.0,
+   "rub_voice": 0.0,
+   "llm_calls": 1.0,
+   "llm_ms": 1454,
+   "tokens_in": 3271,
+   "tokens_cached": 2816,
+   "tokens_out": 119,
+   "problems": []
+  },
+  "Г1": {
+   "title": "Голосовой вопрос (как С1, вопрос 1); речь — опция, считается отдельно",
+   "rub": 0.1367,
+   "rub_llm": 0.1362,
+   "rub_emb": 0.000455,
+   "rub_voice": 0.2659,
+   "llm_calls": 3.0,
+   "llm_ms": 5114,
+   "tokens_in": 14343,
+   "tokens_cached": 11840,
+   "tokens_out": 694,
+   "problems": []
+  },
+  "К1": {
+   "title": "Повторный вопрос: тот же вопрос, двигатель и результат проверки (кэш ответов)",
+   "rub": 0.0,
+   "rub_llm": 0.0,
+   "rub_emb": 0.0,
+   "rub_voice": 0.0,
+   "llm_calls": 0.0,
+   "llm_ms": 0,
+   "tokens_in": 0,
+   "tokens_cached": 0,
+   "tokens_out": 0,
+   "problems": []
+  }
+ }
+}

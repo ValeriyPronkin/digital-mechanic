@@ -129,6 +129,14 @@ def find_mark(lines: list[dict[str, Any]], quote: str) -> Box | None:
             return (b[0], b[1], b[2], b[3])
         if len(found) > 1:
             return None  # несколько одинаковых строк — не угадываем
+    if len(q) < _MIN_PART and qnums:
+        # Короткая цитата с числом («15 мин» — чип ответа о сроке на стр. 269, demo-check 27.11): рамка, если на
+        # странице она ровно в одной строке и число там то же. Без числа короткое не обводим — слишком похоже.
+        found = [ln for k, ln in keyed if q in k and qnums <= numbers(ln["t"])]
+        if len(found) == 1:
+            b = found[0]["b"]
+            return (b[0], b[1], b[2], b[3])
+        return None
     return _run_mark([(k, ln) for k, ln in keyed if k], q) if len(q) >= 2 * _MIN_PART else None
 
 

@@ -134,7 +134,8 @@ export interface ContradictionBlock {
   conclusion: string
   advice: string // since #93 the hand-over to the chief mechanic; before it, advice to ask the maker
   // since #93: the hand-over, its number on the chief mechanic's screen, and whether it is decided
-  escalation?: { line: string; number: number; resolved: boolean } | null
+  // number: null in a decided line of a server before the number was put into it
+  escalation?: { line: string; number: number | null; resolved: boolean } | null
 }
 
 export type Block =
@@ -355,6 +356,18 @@ export type TranscriptEntry =
     }
   | { role: 'ticket'; ticket: TicketView }
 
+/** A row of the vehicle's conversation history (#92). Times are ISO UTC. */
+export interface ThreadRow {
+  thread_id: string
+  started_at: string | null
+  updated_at: string | null
+  session_id: string | null
+  topic: string | null // the first question, without personal data, up to 80 characters
+  status: 'open' | 'ticket_pending' | 'ticket_sent' | string
+  ticket_id: string | null
+  records: number // answers and tickets written for the warranty claim
+}
+
 export interface ThreadView {
   thread_id: string
   session_id: string | null
@@ -438,6 +451,15 @@ export const getVerdict = (vehicleId: string, sessionId: string) =>
   )
 export const getThread = (vehicleId: string) =>
   json<ThreadView | null>(`/api/v2/threads/current?vehicle_id=${encodeURIComponent(vehicleId)}`)
+/** The vehicle's earlier conversations, newest first (#92): the mechanic comes back in an hour or in half a year. */
+export const getThreads = (vehicleId: string) =>
+  json<ThreadRow[]>(`/api/v2/vehicles/${encodeURIComponent(vehicleId)}/threads`)
+/** Continue an earlier conversation on this phone: it becomes the current one, the next question goes to it. */
+export const resumeThread = (threadId: string, vehicleId: string) =>
+  json<ThreadView>(`/api/v2/threads/${encodeURIComponent(threadId)}/resume`, post({ vehicle_id: vehicleId }))
+/** The record for a warranty claim: every answer with its pages, the model and the hash chain; `html` prints. */
+export const exportUrl = (vehicleId: string, threadId: string, format: 'html' | 'json') =>
+  `/api/v2/vehicles/${encodeURIComponent(vehicleId)}/threads/${encodeURIComponent(threadId)}/export?format=${format}`
 /** A manual page; with `quote` (the line found on it) the server also says where that line is printed. */
 export const getPage = (vehicleId: string, manualId: string, page: number, quote?: string) =>
   json<PageView>(
