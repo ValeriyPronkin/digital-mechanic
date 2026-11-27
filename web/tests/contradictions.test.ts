@@ -4,12 +4,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   editedText,
-  firstStatus,
   knownEvents,
   moscowTime,
   queueCounts,
   queueHref,
   queueRoute,
+  queueTotal,
   shownItems,
 } from '../src/lib/contradictions.ts'
 
@@ -35,24 +35,28 @@ test('the links are the routes read back', () => {
 const ITEMS = [
   { number: 2, status: 'open' as const },
   { number: 1, status: 'resolved' as const },
+  { number: 5, status: 'known' as const },
   { number: 3, status: 'open' as const },
   { number: 4, status: 'sent' as const },
 ]
 
-test('the counters count by status; a filter keeps the order the server sent', () => {
-  assert.deepEqual(queueCounts(ITEMS), { open: 2, sent: 1, resolved: 1 })
-  assert.deepEqual(queueCounts([]), { open: 0, sent: 0, resolved: 0 })
+test('the counters count by status, known included; a pressed counter keeps the order the server sent', () => {
+  assert.deepEqual(queueCounts(ITEMS), { known: 1, open: 2, sent: 1, resolved: 1 })
+  assert.deepEqual(queueCounts([]), { known: 0, open: 0, sent: 0, resolved: 0 })
+  assert.equal(queueTotal(queueCounts(ITEMS)), 5)
+  assert.equal(queueTotal(queueCounts([{ status: 'known' }])), 1) // the fleet shows the row for known alone
   assert.deepEqual(
     shownItems(ITEMS, 'open').map((i) => i.number),
     [2, 3],
   )
 })
 
-test('the queue opens on the first status with something in it', () => {
-  assert.equal(firstStatus({ open: 1, sent: 2, resolved: 0 }), 'open')
-  assert.equal(firstStatus({ open: 0, sent: 2, resolved: 1 }), 'sent')
-  assert.equal(firstStatus({ open: 0, sent: 0, resolved: 1 }), 'resolved')
-  assert.equal(firstStatus({ open: 0, sent: 0, resolved: 0 }), 'open')
+test('nothing pressed: the whole list — open, then known, then sent, then resolved; an unknown status last', () => {
+  const items = [...ITEMS, { number: 9, status: 'reopened' as unknown as 'open' }]
+  assert.deepEqual(
+    shownItems(items, null).map((i) => i.number),
+    [2, 3, 5, 4, 1, 9],
+  )
 })
 
 test('the letter goes to the server only when the chief mechanic changed it', () => {

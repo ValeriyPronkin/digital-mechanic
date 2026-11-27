@@ -363,24 +363,35 @@ export const copy = {
   queue: {
     title: 'Противоречия в руководствах',
     open: 'Противоречия в руководствах',
-    openHint: (open: number, sent: number, resolved: number) =>
-      `открыто: ${open} · отправлено: ${sent} · решено: ${resolved}`,
+    openHint: (known: number, open: number, sent: number, resolved: number) =>
+      [known > 0 && `найдено: ${known}`, `открыто: ${open}`, `отправлено: ${sent}`, `решено: ${resolved}`]
+        .filter(Boolean)
+        .join(' · '),
     loading: 'Загружаем противоречия…',
     loadFailed: 'Не получилось загрузить противоречия',
     empty: 'Противоречий пока нет. Они появляются здесь, когда руководства расходятся в ответе механику',
     show: 'Какие противоречия показать',
-    filter: { open: 'открыты', sent: 'отправлены', resolved: 'решены' },
+    filter: { known: 'найдены', open: 'открыты', sent: 'посланы', resolved: 'решены' }, // four in a 390 px row
+    shown: 'Показаны',
+    reset: 'Показать все',
     emptyFilter: {
+      known: 'Все найденные уже встречались в ответах',
       open: 'Открытых противоречий нет',
       sent: 'Отправленных и ещё не решённых нет',
       resolved: 'Решённых пока нет',
     },
-    state: { open: 'открыто', sent: 'отправлено, ждёт ответа', resolved: 'решено' },
+    state: {
+      known: 'найдено, механики ещё не спрашивали',
+      open: 'открыто',
+      sent: 'отправлено, ждёт ответа',
+      resolved: 'решено',
+    },
     number: (n: number) => `№ ${n}`,
     itemTitle: (n: number) => `Противоречие № ${n}`,
     back: 'К очереди',
     notFound: (n: number) => `Противоречия № ${n} нет в очереди`,
     seen: (count: number, times: string) => `в ответах: ${count} ${times}`,
+    notSeen: 'в ответах ещё не было',
     times: ['раз', 'раза', 'раз'] as const,
     vehicles: 'машины',
     lastSeen: 'последний раз',

@@ -8,7 +8,7 @@ import {
 } from '../api'
 import { copy } from '../copy'
 import { rowBadges } from '../lib/checks'
-import { queueCounts } from '../lib/contradictions'
+import { queueCounts, queueTotal } from '../lib/contradictions'
 import { outcomesPlace, reasonLine, reasonParts } from '../lib/fleet'
 import { dateRu, plateKey } from '../lib/format'
 import { CHECKED, nextChoice, PRESSED_STATUS } from '../lib/ui'
@@ -234,7 +234,7 @@ export function FleetList({
     }
   }, [role, fleet])
   const hasTickets = role === 'chief' && fleet !== null && fleet.outcomes.tickets > 0
-  const hasQueue = role === 'chief' && queue !== null && queue.open + queue.sent + queue.resolved > 0
+  const hasQueue = role === 'chief' && queue !== null && queueTotal(queue) > 0
   const outcomes = (hasTickets || hasQueue) && (
     <li className="space-y-2 py-2">
       {hasTickets && <OutcomesRow outcomes={fleet.outcomes} />}
