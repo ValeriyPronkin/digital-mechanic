@@ -86,7 +86,47 @@
      "signed": "registry/coverage.yaml, подпись V Pronkin 27.11"
     },
     "ЯМЗ-536": {
-     "applicable": "true"
+     "applicable": "true",
+     "pages": [
+      {
+       "doc": "yamz-536-re",
+       "page": 215,
+       "what": "неисправности"
+      },
+      {
+       "doc": "yamz-536-re",
+       "page": 173,
+       "what": "регулировка"
+      },
+      {
+       "doc": "yamz-536-re",
+       "page": 175,
+       "what": "регулировка"
+      }
+     ],
+     "operations": [
+      {
+       "doc": "yamz-536-re",
+       "page": 215,
+       "anchor": "Проверить момент затяжки гайки",
+       "last": "в клапанном механизме",
+       "words": 12
+      },
+      {
+       "doc": "yamz-536-re",
+       "page": 215,
+       "anchor": "Установить на место отсутствующие",
+       "last": "из строя детали",
+       "words": 10
+      },
+      {
+       "doc": "yamz-536-re",
+       "page": 215,
+       "anchor": "Заменить толкатель, при необходимости, распределительный вал",
+       "words": 6
+      }
+     ],
+     "signed": "registry/coverage.yaml, подпись V Pronkin 27.11"
     },
     "ЗМЗ-5234.10": {
      "applicable": "true"
@@ -405,7 +445,24 @@
      "signed": "registry/coverage.yaml, подпись V Pronkin 27.11"
     },
     "ЗМЗ-5234.10": {
-     "applicable": "true"
+     "applicable": "true",
+     "pages": [
+      {
+       "doc": "zmz-5234-rk",
+       "page": 54,
+       "what": "неисправности"
+      }
+     ],
+     "operations": [
+      {
+       "doc": "zmz-5234-rk",
+       "page": 54,
+       "anchor": "Пробуксовка ремня вентилятора Отрегулировать натяжение ремня",
+       "words": 6
+      }
+     ],
+     "note": "Общий осмотр: в руководстве одна строка таблицы неисправностей; величины прогиба ремня и порядка регулировки натяжения нет.",
+     "signed": "registry/coverage.yaml, подпись V Pronkin 27.11"
     },
     "ЗМЗ-409": {
      "applicable": "true"
@@ -427,7 +484,29 @@
      "applicable": "true"
     },
     "ЗМЗ-5234.10": {
-     "applicable": "true"
+     "applicable": "true",
+     "pages": [
+      {
+       "doc": "zmz-5234-rk",
+       "page": 57,
+       "what": "неисправности"
+      },
+      {
+       "doc": "zmz-5234-rk",
+       "page": 56,
+       "what": "неисправности"
+      }
+     ],
+     "operations": [
+      {
+       "doc": "zmz-5234-rk",
+       "page": 57,
+       "anchor": "Неисправен подшипник генератора Заменить подшипник",
+       "words": 5
+      }
+     ],
+     "note": "Общий осмотр: раздела о генераторе в руководстве нет, одна строка таблицы неисправностей.",
+     "signed": "registry/coverage.yaml, подпись V Pronkin 27.11"
     },
     "ЗМЗ-409": {
      "applicable": "true"
@@ -600,7 +679,48 @@
      "signed": "registry/coverage.yaml, подпись V Pronkin 27.11"
     },
     "ЯМЗ-536": {
-     "applicable": "true"
+     "applicable": "true",
+     "pages": [
+      {
+       "doc": "yamz-536-re",
+       "page": 191,
+       "what": "неисправности"
+      },
+      {
+       "doc": "yamz-536-re",
+       "page": 198,
+       "what": "неисправности"
+      }
+     ],
+     "operations": [
+      {
+       "doc": "yamz-536-re",
+       "page": 191,
+       "anchor": "Подключить диагностический прибор и",
+       "last": "ошибок в ЭСУ",
+       "words": 9
+      },
+      {
+       "doc": "yamz-536-re",
+       "page": 191,
+       "anchor": "Убедиться, что система питания заполнена топливом",
+       "words": 6
+      },
+      {
+       "doc": "yamz-536-re",
+       "page": 191,
+       "anchor": "Правильно установить боковой штуцер",
+       "last": "или заменить рампу",
+       "words": 8
+      },
+      {
+       "doc": "yamz-536-re",
+       "page": 198,
+       "anchor": "После устранения неисправности удалить ошибки",
+       "words": 5
+      }
+     ],
+     "signed": "registry/coverage.yaml, подпись V Pronkin 27.11"
     },
     "ЗМЗ-5234.10": {
      "applicable": "false",
@@ -822,7 +942,64 @@
      "signed": "registry/coverage.yaml, подпись V Pronkin 27.11"
     },
     "ЗМЗ-409": {
-     "applicable": "true"
+     "applicable": "true",
+     "pages": [
+      {
+       "doc": "zmz-409-rk",
+       "page": 102,
+       "what": "неисправности"
+      },
+      {
+       "doc": "zmz-409-rk",
+       "page": 103,
+       "what": "неисправности"
+      },
+      {
+       "doc": "zmz-409-rk",
+       "page": 77,
+       "what": "устройство"
+      },
+      {
+       "doc": "zmz-409-rk",
+       "page": 104,
+       "what": "неисправности"
+      }
+     ],
+     "operations": [
+      {
+       "doc": "zmz-409-rk",
+       "page": 102,
+       "anchor": "зазор между электродами свечи",
+       "last": "зазор и отрегулировать",
+       "words": 11
+      },
+      {
+       "doc": "zmz-409-rk",
+       "page": 102,
+       "anchor": "нет сигнала от датчика",
+       "last": "и исправность датчика",
+       "words": 11
+      },
+      {
+       "doc": "zmz-409-rk",
+       "page": 103,
+       "anchor": "не работает свеча зажигания; заменить неисправную свечу",
+       "words": 7
+      },
+      {
+       "doc": "zmz-409-rk",
+       "page": 103,
+       "anchor": "неисправность катушки зажигания; заменить неисправную катушку",
+       "words": 6
+      },
+      {
+       "doc": "zmz-409-rk",
+       "page": 103,
+       "anchor": "нагар на тепловом конусе свечи; заменить свечу",
+       "words": 7
+      }
+     ],
+     "signed": "registry/coverage.yaml, подпись V Pronkin 27.11"
     }
    }
   },

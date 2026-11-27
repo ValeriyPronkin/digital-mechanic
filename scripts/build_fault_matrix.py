@@ -178,7 +178,7 @@ def draft_group(
     return pages, ops, parts[:MAX_PARTS], safety[:MAX_SAFETY]
 
 
-_NOT_PINNED_PART = re.compile(r"исправн|комплект", re.I)  # «заменить исправным», «заменить комплектом»
+_NOT_PINNED_PART = re.compile(r"исправн|комплект|вышедш", re.I)  # «исправным», «комплектом», «вышедшие из строя»
 
 
 ANCHOR_WORDS = 7  # слов руководства на строку в источнике (в git): `anchor` и `last` вместе

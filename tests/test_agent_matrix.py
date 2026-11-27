@@ -10,6 +10,7 @@ import pytest
 from matrix_fixture import NO_MATRIX
 from service.clients import MLClient, ToirClient
 from service.fault_matrix import cell_for, matrix_loaded
+from service.fleet import fleet
 from service.llm import Message
 from service.manuals.catalog import documents_for_engine
 from test_agent import EmptySearch, call, first, make_agent, say
@@ -30,7 +31,10 @@ def _status(v: object, s: object, status: str) -> bool:
 
 
 CONFIRMED = first(lambda v, s: _status(v, s, "confirmed"))
-SILENT = first(lambda v, s: _status(v, s, "silent"))
+# Ячеек «молчит» у проверок парка может не остаться (реестр покрытия, 27.11): тогда тест «молчащей» пропускается
+SILENT = next(
+    ((v.vehicle_id, s.session_id) for v in fleet().vehicles for s in v.sessions if _status(v, s, "silent")), None
+)
 
 
 def _tool_result(messages: list[Message], name_hint: str) -> dict[str, object]:
@@ -66,7 +70,9 @@ def test_ticket_takes_operations_and_pages_from_confirmed_cell(ml: MLClient, toi
     assert isinstance(matrix, dict) and matrix["status"] == "confirmed"
 
 
+@pytest.mark.skipif(SILENT is None, reason="у проверок парка нет «молчащей» ячейки")
 def test_silent_cell_tells_to_send_for_defect_inspection(ml: MLClient, toir: ToirClient) -> None:
+    assert SILENT is not None
     vid, sid = SILENT
     steps = [
         call("get_diagnosis", vehicle_id=vid, session_id=sid),
@@ -101,8 +107,10 @@ def test_confirmed_cell_ticket_survives_bad_model_operations(ml: MLClient, toir:
     assert cell is not None and reply.draft["body"]["operations"] == [o.quote for o in cell.operations]
 
 
+@pytest.mark.skipif(SILENT is None, reason="у проверок парка нет «молчащей» ячейки")
 def test_silent_cell_is_not_filled_by_code(ml: MLClient, toir: ToirClient) -> None:
     """Ячейка «в руководстве нет порядка работ» — код черновик не придумывает."""
+    assert SILENT is not None
     vid, sid = SILENT
     steps = [call("get_diagnosis", vehicle_id=vid, session_id=sid), say("Нужна дефектовка.")]
     ag, _ = make_agent(steps, ml, toir, EmptySearch())

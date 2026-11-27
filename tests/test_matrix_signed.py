@@ -32,6 +32,12 @@ SIGNED = {
     ("F04", "ЯМЗ-536"): ("yamz-536-re", 104),
     ("F12", "ЗМЗ-5234.10"): ("zmz-5234-rk", 52),
     ("F13", "ЗМЗ-409"): ("zmz-409-rk", 102),
+    # прогон парка 27.11 (S-0100 F04 — без заявки): ещё 6 ячеек, которые реестр разрешает
+    ("F01", "ЯМЗ-536"): ("yamz-536-re", 215),
+    ("F08", "ЯМЗ-536"): ("yamz-536-re", 191),
+    ("F04", "ЗМЗ-5234.10"): ("zmz-5234-rk", 54),  # общий осмотр: одна строка таблицы неисправностей
+    ("F05", "ЗМЗ-5234.10"): ("zmz-5234-rk", 57),  # общий осмотр: одна строка таблицы неисправностей
+    ("F12", "ЗМЗ-409"): ("zmz-409-rk", 102),
 }
 
 
@@ -48,7 +54,7 @@ def test_signed_cell_lists_registry_pages_and_operations(code: str, group: str) 
     cell = SRC["codes"][code]["cells"][group]
     assert cell["applicable"] == "true" and cell["signed"]
     assert (cell["pages"][0]["doc"], cell["pages"][0]["page"]) == SIGNED[(code, group)]
-    assert len(cell["operations"]) >= 2
+    assert cell["operations"]  # у общего осмотра — одна строка таблицы неисправностей (организаторы, 26.11)
     for row in cell["operations"] + cell.get("safety", []):
         # в git — только якорь строки, не её текст (#96): не больше 7 слов на строку
         assert "quote" not in row and row["words"] >= len(re.findall(r"\w+", row["anchor"]))
@@ -99,7 +105,7 @@ def test_valve_knock_ticket_works() -> None:
 # разорванного перемешанными столбцами таблицы: «зазо зма ры», «механи … зма».
 _SHORT_WORDS = set(
     "и в с со по на не до от из к ко у о об при или его их ее её за мм мин но чем без для под над то же ли а как так "
-    "бы оси раз оба".split()
+    "бы оси раз оба что нет вал".split()
 )
 
 
@@ -229,3 +235,23 @@ def test_stored_quotes_do_not_start_or_end_inside_a_word() -> None:
         if not _at_word_bounds(r.quote, pages.get((r.doc, r.page), ""))
     ]
     assert not bad, bad[:10]
+
+
+def test_cell_without_works_offers_inspection_not_ticket(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ячейка без работ: вместо «Черновик заявки — кнопкой «Создать заявку».» — шаг осмотра (заявке нужны работы)."""
+    from types import SimpleNamespace
+
+    from service import agent
+    from service.fault_matrix import Cell
+
+    card = SimpleNamespace(status="anomaly", compatible=True, fault_code="F07", fault_title="Коробка передач")
+    conv = SimpleNamespace(card=card, vehicle=SimpleNamespace(engine_model="ЗМЗ-40904.10"))
+    text = "Что проверить\n1. Уровень масла [R1].\n\nЧерновик заявки — кнопкой «Создать заявку»."
+    silent = Cell(code="F07", engine="ЗМЗ-40904.10", applicable="true", basis=None, status="silent")
+    monkeypatch.setattr(agent, "cell_for", lambda code, engine: silent)
+    out = agent.Agent._no_works_step(None, conv, text)  # type: ignore[arg-type]
+    assert "Создать заявку" not in out and out.endswith(agent.NO_WORKS_STEP.format(unit="коробка передач"))
+    confirmed = Cell(code="F07", engine="ЗМЗ-40904.10", applicable="true", basis=None, status="confirmed",
+                     operations=[Ref(doc="zmz-409-rk", page=1, quote="Заменить деталь")])  # fmt: skip
+    monkeypatch.setattr(agent, "cell_for", lambda code, engine: confirmed)
+    assert agent.Agent._no_works_step(None, conv, text) == text  # работы есть — строка о черновике остаётся

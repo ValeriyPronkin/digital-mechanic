@@ -108,6 +108,9 @@ CHECK_FAILED_NO_SEARCH = (
     "Скажите механику повторить запись: прогреть двигатель, микрофон у двигателя, без постороннего шума."
 )
 SILENT_NOTE = "В руководстве этого двигателя нет порядка работ по этому узлу — нужна дефектовка."
+# Ячейка без работ: строку о черновике заявки заменяет шаг осмотра (заявке нужны работы со страницами руководства)
+NO_WORKS_STEP = "Следующий шаг — дефектовка узла «{unit}» на месте: работ для заявки по нему руководство не даёт."
+_TICKET_LINE = re.compile(r"Черновик заявки\s*[—–-]\s*кнопкой\s*«Создать заявку»\.?")
 # Ответ на кнопку «Получить результат диагностики» при норме и сбое записи — под карточкой, без модели (приёмка 27.11)
 VERDICT_ONLY_NORMAL = "Отклонений не найдено. Проверка оценивает только звук двигателя; заявка не нужна."
 VERDICT_ONLY_NORMAL_EARLY = (
@@ -1259,6 +1262,7 @@ class Agent:
         final = mark_risk(section_heads(final))  # заголовки — строкой; последствие без страницы — с пометкой
         final, bans = unsourced_bans(final, conv.card.urgency if conv.card else None)  # запрет — только со страницей
         final = self._mismatch_steps(conv, final)  # узла у двигателя нет — оба пути: повторить проверку и дефектовка
+        final = self._no_works_step(conv, final)  # работ в ячейке нет — не «кнопкой «Создать заявку»», а шаг осмотра
         if bans:
             notes.append("Запрет эксплуатации без страницы руководства заменён рекомендацией по срочности.")
         final, cited = self._complete_refusal(conv, question, final, cited)
@@ -1469,6 +1473,19 @@ class Agent:
         if conv.card is not None and conv.card.status == "check_failed":
             return [t for t in tools() if t.name not in ("search_manual", "read_pages")]
         return tools()
+
+    def _no_works_step(self, conv: Conversation, text: str) -> str:
+        """Ячейка матрицы без работ из руководства (молчит или не ясно): черновика заявки по руководству не будет,
+        поэтому вместо строки «Черновик заявки — кнопкой «Создать заявку».» — что делать дальше: дефектовка узла."""
+        card = conv.card
+        if card is None or card.status != "anomaly" or not card.compatible or not card.fault_code:
+            return text
+        cell = cell_for(card.fault_code, conv.vehicle.engine_model)
+        if cell is None or cell.status == "not_applicable" or cell.operations:
+            return text
+        step = NO_WORKS_STEP.format(unit=(card.fault_title or "").lower() or "узла")
+        out, n = _TICKET_LINE.subn(step, text)
+        return out if n else text
 
     def _mismatch_steps(self, conv: Conversation, text: str) -> str:
         """Проверка назвала узел, которого у двигателя нет (код несовместим): в ответе — оба пути, повторить проверку и
