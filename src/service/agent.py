@@ -26,7 +26,16 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from service import absent_parts, clean_refusal, contradictions, glossary, language, other_engine, row_check
+from service import (
+    absent_parts,
+    clean_refusal,
+    contradictions,
+    glossary,
+    language,
+    other_engine,
+    parts_tools,
+    row_check,
+)
 from service.clients import (
     Diagnosis,
     MLClient,
@@ -82,6 +91,7 @@ FINAL_NOTE = (
     "[Код сервиса: шаги поиска кончились. Ответь сейчас по уже найденным фрагментам, без новых вызовов "
     "инструментов; чего в них нет — так и скажи.]"
 )
+_MODEL_NEED = re.compile(r"^\s*\**Понадобится\**\s*:[^\n]*\n?", re.I | re.M)  # строка модели — заменит реестр
 NO_TIME = "Не успел собрать ответ. Переформулируйте вопрос короче."
 
 SEARCH_PLAN_PROMPT = """Ты готовишь поиск по руководству по эксплуатации и ремонту двигателя. Вопрос механика может \
@@ -183,6 +193,8 @@ operations и spare_parts — они подставятся из матрицы)
 последствиях в руководстве нет», а своё — только в разделе «Предположения, не из руководства» (без чисел и порядка \
 работ). Статус normal или check_failed и вопрос «что с двигателем» — без разделов, 2–3 предложения.
 Длина — до 150 слов. В «Источниках» — только ссылки [R…]. После черновика заявки — одно-два предложения.
+Список инструмента и запчастей («Понадобится: …», «Запчасти: …») не пиши: его добавляет код из реестра \
+руководства, когда механик о нём спрашивает. Инструмент в шаге — только если он назван в этом фрагменте.
 К механику — на «вы», спокойно и безлично: не «ничего не ремонтируй», а «ремонт по этой проверке не нужен». \
 Пиши без «я», «не нашёл», «подготовлю», «отвечаю»; заявку предлагай строкой \
 «Черновик заявки — кнопкой «Создать заявку».». Коды неисправностей (F01…), статусы проверки (anomaly, normal, \
@@ -200,15 +212,15 @@ LEGACY_LEVEL: dict[str, Level] = {"steps": "novice", "expert": "master"}  # «П
 LEVEL_WORD: dict[Level, str] = {"novice": "Новичок", "mechanic": "Механик", "master": "Мастер"}
 LEVEL_PROMPT: dict[Level, str] = {
     "master": "Уровень механика: МАСТЕР — это указание важнее общих правил длины и шагов. Дай только прямой ответ "
-    "(первую часть обычного ответа): 1–3 предложения — значение с единицами, нужный инструмент, ссылка [R…]. "
+    "(первую часть обычного ответа): 1–3 предложения — значение с единицами, ссылка [R…]. "
     "Без нумерованных шагов, списков и пояснения терминов, до 60 слов. "
     "Статус check_failed или normal — одно предложение.",
     "mechanic": "Уровень механика: МЕХАНИК (знает двигатель, нужен порядок работ). Ответ: прямой ответ со значением "
     "и единицами, затем порядок — короткими нумерованными шагами «1. …» без пояснения общих терминов, в каждом шаге "
-    "ссылка [R…]; инструмент — одной строкой «Понадобится: …», если он есть во фрагменте. До 140 слов.",
+    "ссылка [R…]. До 140 слов.",
     "novice": "Уровень механика: НОВИЧОК (механик начинающий или неуверенный). Этот ответ — нумерованными шагами "
-    "«1. …», «2. …», в каждом шаге одно действие и ссылка [R…]. Перед шагами строка «Понадобится: …» (инструмент "
-    "из фрагмента). Если во фрагментах есть условия и меры безопасности (например, двигатель заглушён или "
+    "«1. …», «2. …», в каждом шаге одно действие и ссылка [R…]. Если во фрагментах есть условия и меры "
+    "безопасности (например, двигатель заглушён или "
     "холодный) — отдельной строкой «Безопасность: …» со ссылкой [R…]; если их нет — строку не пиши. "
     "Последним шагом — как проверить результат (по фрагменту). Термины поясняй простыми словами в скобках. "
     "До 220 слов.",
@@ -290,6 +302,20 @@ TOOLS: list[ToolSpec] = [
                 "spare_parts": {"type": "array", "items": {"type": "string"}},
             },
             "required": ["conclusion"],
+        },
+    ),
+    ToolSpec(
+        "find_parts_tools",
+        "Запчасти (с обозначениями, как в руководстве) и инструмент (с размером: «щуп 0,25 мм», «ключ S=13», "
+        "приспособление с обозначением) из реестра руководств двигателя этой машины — по узлу или операции. "
+        "Возвращает записи со ссылками R…. Для вопросов «какой инструмент», «какие запчасти», «что заменить на новое».",
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Узел или операция словами механика"},
+                "kind": {"type": "string", "enum": ["part", "tool", "both"]},
+            },
+            "required": ["query"],
         },
     ),
     ToolSpec(
@@ -1174,7 +1200,8 @@ class Agent:
         request_id = uuid.uuid4().hex
         steps: list[dict[str, Any]] = []
         chosen = language.normalize(lang)
-        target = chosen or language.detect(question)
+        # «скажи по-узбекски» — язык из просьбы, а не из букв вопроса (сессия 1, 27.11: событие language было «Русский»)
+        target = chosen or language.requested(question) or language.detect(question)
         conv.passport.update({"refs_before": set(conv.sources), "level": level, "answer_lang": target})
         if chosen:
             conv.passport["lang_chosen"] = chosen
@@ -1296,6 +1323,7 @@ class Agent:
         final, bans = unsourced_bans(
             final, conv.card.urgency if conv.card else None, replace=not conv.passport.get("drive_rule")
         )  # запрет — только со страницей
+        final, cited = self._registry_lines(conv, question, final, cited)  # инструмент и запчасти — из реестра
         final, cited = self._absent_head(conv, final, cited)  # «У <двигателя> нет <узла>» — первой строкой
         final = self._mismatch_steps(conv, final)  # узла у двигателя нет — оба пути: повторить проверку и дефектовка
         if bans:
@@ -1337,6 +1365,8 @@ class Agent:
             "deadline": bool(conv.passport.get("deadline")),
             **self._passport_trace(conv, cited),
         }
+        if (target or "ru") == "ru" and not chosen:  # ответ по факту на другом языке — так и сообщить интерфейсу
+            target = language.actual(final) or target
         return AgentReply(
             text=final,
             grounded=grounded,
@@ -1945,6 +1975,9 @@ class Agent:
                     return {"refused": TICKET_NOT_ASKED}, False
                 res = self._draft_ticket_or_matrix(conv, args)
                 return res, "refused" not in res
+            if name == "find_parts_tools":
+                res = self._find_parts_tools(conv, args)
+                return res, bool(res.get("found"))
             if name == "fleet_summary":
                 result = self._fleet_summary()
                 conv.fact_numbers |= numbers(json.dumps(result, ensure_ascii=False))
@@ -2315,6 +2348,66 @@ class Agent:
         k, quotes = conv.contradiction
         line = self._escalate(conv, k, quotes)
         return contradictions.ESCALATION.sub(lambda _m: line, text, count=1)
+
+    def _find_parts_tools(self, conv: Conversation, args: dict[str, Any]) -> dict[str, Any]:
+        """Реестр запчастей и инструмента (`parts_tools`): записи двигателя этой машины со ссылками R…."""
+        kind = str(args.get("kind") or "both")
+        kinds = None if kind not in ("part", "tool") else {kind}
+        recs = parts_tools.find(conv.vehicle.engine_model, mask_pii(str(args.get("query") or "")), kinds)
+        found = []
+        for r in recs:
+            src = self._source_for(conv, r.doc, r.page, r.node, r.quote)
+            found.append({"kind": r.kind, "name": r.label(), "ref": src.ref, "page": r.page,
+                          "operation": r.operation[:160], "one_time": r.source == "одноразовая"})  # fmt: skip
+        if not found:
+            return {"found": [], "note": "В реестре руководств этого двигателя записей по запросу нет."}
+        return {"engine": conv.vehicle.engine_model, "found": found}
+
+    def _registry_lines(
+        self, conv: Conversation, question: str, text: str, cited: list[Source]
+    ) -> tuple[str, list[Source]]:
+        """«Какой инструмент / какие запчасти»: строки «Понадобится» и «Запчасти» пишет код из реестра — записи со
+        страниц ответа и по словам вопроса, у каждой ссылка [R…]. Строка «Понадобится» модели заменяется. Нет
+        записей — ответ как есть. Только в русском ответе (названия в реестре — по-русски, как в руководстве)."""
+        # «Понадобится: …» модели не отличить от строки реестра, а страницы в ней модель путала (#162, класс (д)):
+        # такую строку пишет только код, из реестра
+        text = _MODEL_NEED.sub("", text)
+        kinds = parts_tools.asks(question)
+        if not kinds or (conv.passport.get("answer_lang") or "ru") != "ru":
+            return text, cited
+        card = conv.card
+        query = question
+        if card is not None and card.status == "anomaly" and card.compatible and card.fault_title:
+            if not parts_tools.node_words(question):  # кнопка «Какой нужен инструмент» — к неисправности карточки
+                query = f"{question} {card.fault_title}"
+        pages = {(s.manual_id, s.pdf_page) for s in cited}
+        recs = parts_tools.find(conv.vehicle.engine_model, query, kinds, pages=pages, limit=6)
+        if not recs:
+            return text, cited
+        lines: list[str] = []
+        # одна деталь — одна строка: «прокладка головки цилиндров» из перечня (с обозначением) и она же из фразы
+        # «заменять новой» — строка с обозначением и пометкой «одноразовые» (P07, 27.11)
+        coded = {(r.kind, r.name.lower()) for r in recs if r.code}
+        once_names = {(r.kind, r.name.lower()) for r in recs if r.source == "одноразовая"}
+        recs = [r for r in recs if r.code or (r.kind, r.name.lower()) not in coded]
+        for kind, head in (("tool", "Понадобится (по руководству)"), ("part", "Запчасти (по руководству)")):
+            items = []
+            for r in recs:
+                if r.kind != kind:
+                    continue
+                src = self._source_for(conv, r.doc, r.page, r.node, r.quote)
+                if src not in cited:
+                    cited = [*cited, src]
+                once = " — одноразовые, только новые" if (r.kind, r.name.lower()) in once_names else ""
+                items.append(f"{r.label()}{once} [{src.ref}]")
+            if items:
+                lines.append(f"**{head}:** " + "; ".join(items) + ".")
+        if not lines:
+            return text, cited
+        conv.passport["registry_lines"] = [r.label() for r in recs]
+        paras = [p for p in text.split("\n\n") if p.strip()]
+        at = 1 if paras else 0
+        return "\n\n".join([*paras[:at], "\n".join(lines), *paras[at:]]).strip(), cited
 
     def _source_for(
         self, conv: Conversation, manual_id: str, pdf_page: int, section: str, text: str, why: str = ""
@@ -2803,6 +2896,14 @@ class Agent:
         )
         matrix_ops = (confirmed or {}).get("operations", [])
         tools = list(dict.fromkeys(t for o in matrix_ops if o["text"] in operations for t in o.get("tools", [])))
+        # детали и инструмент к работам — из реестра руководств: записи со страниц работ этой заявки
+        work_pages = {(c.manual_id, c.pdf_page) for c in cited}
+        reg = [r for r in parts_tools.records(conv.vehicle.engine_model) if (r.doc, r.page) in work_pages]
+        tools = list(dict.fromkeys([*tools, *(r.label() for r in reg if r.kind == "tool")]))[:8]
+        if not body.spare_parts:
+            reg_parts = [f"{r.label()}, стр. {r.page}" for r in reg if r.kind == "part"][:6]
+            if reg_parts:
+                body = body.model_copy(update={"spare_parts": reg_parts})
         conv.draft = TicketDraft(
             body=body, urgency_reason=why, fingerprint=fingerprint(body), tools=tools, op_pages=op_pages
         )

@@ -131,6 +131,29 @@ def detect(text: str) -> str | None:
     return "ru" if cyr else None
 
 
+_ASKED = (
+    (re.compile(r"по-узбекски|на узбекском|узбекским\s+языком|o['ʻ‘’]?zbekcha", re.I), "uz"),
+    (re.compile(r"по-таджикски|на таджикском|тоҷикӣ", re.I), "tg"),
+    (re.compile(r"по-казахски|на казахском|қазақша", re.I), "kk"),
+    (re.compile(r"по-киргизски|по-кыргызски|на киргизском|на кыргызском|кыргызча", re.I), "ky"),
+    (re.compile(r"по-английски|на английском|in english", re.I), "en"),
+    (re.compile(r"на хинди|in hindi", re.I), "hi"),
+    (re.compile(r"по-русски|на русском", re.I), "ru"),
+)
+
+
+def requested(text: str) -> str | None:
+    """Механик прямо просит язык: «скажи по-узбекски», «ответь на казахском». Иначе None."""
+    return next((code for pat, code in _ASKED if pat.search(text)), None)
+
+
+def actual(answer: str) -> str | None:
+    """Язык готового ответа по буквам и словам (цитаты руководства по-русски не в счёт). Не уверен — None."""
+    body = re.sub(r"«[^»]*»|\[[RS]\d+\]", " ", answer)
+    code = detect(body)
+    return code if code and matches(answer, code) else None
+
+
 def instruction(code: str) -> str:
     """Указание модели рядом с вопросом. Для русского — пусто: так ответы на русском не меняются."""
     if code == "ru" or code not in LANGS:
