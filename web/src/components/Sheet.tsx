@@ -1,6 +1,31 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { copy } from '../copy'
-import { focusable } from '../lib/ui'
+import { boxAt, focusable, holds } from '../lib/ui'
+
+/** From 900 px a sheet is a panel beside the thread, which stays readable and undimmed (index.css). */
+const beside = () => window.matchMedia('(min-width: 900px)').matches
+/** The scrolled thread of the vehicle screen, if the point is on what it shows. */
+function threadAt(x: number, y: number): HTMLElement | null {
+  const thread = document.querySelector<HTMLElement>('[data-thread]')
+  return thread && holds(thread.getBoundingClientRect(), x, y) ? thread : null
+}
+/** A source chip of the thread under a point of the screen. A modal sheet makes the page behind it inert,
+ *  and hit testing skips what is inert (`elementsFromPoint` returns the dialog alone), so the chips are
+ *  found by their boxes: the drawn chip with the 7,5 px of its tap area above and below. A chip that is
+ *  scrolled out of the thread's view is not under the point. */
+function chipAt(x: number, y: number): HTMLElement | null {
+  const chips = [...(threadAt(x, y)?.querySelectorAll<HTMLElement>('[data-chip]') ?? [])]
+  const at = boxAt(
+    chips.map((chip) => chip.getBoundingClientRect()),
+    x,
+    y,
+    7.5,
+  )
+  return at < 0 ? null : chips[at]
+}
+// A chip that was pressed through the side of an open sheet: it opens the next sheet, and that sheet, not
+// the one it replaces, gives focus back to it.
+let handover: HTMLElement | null = null
 
 // The control that was pressed last, anywhere on the page. A sheet opens some time after the press
 // that asked for it, and not every browser gives focus to a button that is clicked (Safari does not),
@@ -61,9 +86,14 @@ export function Sheet({
     if (open && !dialog.open) {
       if (opener.current === undefined) {
         const focused = document.activeElement
-        opener.current = focused instanceof HTMLElement && focused !== document.body ? focused : pressed
+        opener.current = handover ?? (focused instanceof HTMLElement && focused !== document.body ? focused : pressed)
+        handover = null
       }
       dialog.showModal()
+      // Beside the panel the thread is narrower and its text has wrapped anew: the sentence whose chip was
+      // pressed is brought back into view.
+      if (beside())
+        (opener.current?.closest<HTMLElement>('p, li') ?? opener.current)?.scrollIntoView({ block: 'nearest' })
       if (scroller.current) scroller.current.scrollTop = offset.current
       // Back from under a page: focus returns to the control that opened it. A first opening focuses the
       // sheet itself, so no control shows a focus ring until the keyboard is used.
@@ -78,8 +108,14 @@ export function Sheet({
 
   useEffect(
     () => () => {
+      if (handover) return // a chip pressed through the side of this sheet opens the next one, which owns the focus
+      // A page opened from inside the ticket sheet, closed on a browser that does not focus a clicked button:
+      // this cleanup focuses the page's opener, which is the stale opener of the ticket sheet, and the
+      // ticket sheet's own effect then focuses its chip. The right one wins only because the effects of a
+      // commit run after its cleanups.
       const to = focusable([opener.current, after.current?.()])
       to?.focus({ preventScroll: true })
+      if (beside()) to?.scrollIntoView({ block: 'nearest' }) // the thread is wide again and has wrapped anew
     },
     [],
   )
@@ -91,9 +127,31 @@ export function Sheet({
       className="sheet"
       onClose={onClose}
       onClick={(e) => {
-        if (e.target === ref.current)
-          onClose() // a tap on the backdrop
-        else used.current = (e.target as HTMLElement).closest<HTMLElement>('button, a, input, summary')
+        if (e.target !== ref.current) {
+          used.current = (e.target as HTMLElement).closest<HTMLElement>('button, a, input, summary')
+          return
+        }
+        // A press beside the sheet. On another source chip of the thread it opens that page: the thread is
+        // in full view there, and a press that only closed the open page would read as a press that did
+        // nothing. Anywhere else it closes the sheet, as a tap on the dimmed page does on a phone.
+        const chip = beside() ? chipAt(e.clientX, e.clientY) : null
+        if (!chip) return onClose()
+        handover = chip
+        // A programmatic click, on purpose, on an element the modal dialog has made inert: no press of
+        // the user's can reach it (which is why the chip had to be found by its box), and `click()`
+        // still runs its handler. Not to be replaced by anything that needs the chip to be live.
+        chip.click()
+        window.setTimeout(() => {
+          if (handover !== chip) return // the next sheet took it
+          handover = null
+          if (ref.current?.isConnected) opener.current = chip // the same sheet, moved to the chip's line
+        }, 300)
+      }}
+      // The wheel over the thread beside the sheet scrolls the thread: the sheet is modal, so the browser
+      // hands the wheel to the sheet, which passes it on.
+      onWheel={(e) => {
+        if (e.target !== ref.current || !beside()) return
+        threadAt(e.clientX, e.clientY)?.scrollBy({ top: e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY })
       }}
     >
       <header className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">

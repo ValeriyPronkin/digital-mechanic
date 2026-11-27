@@ -50,6 +50,7 @@ export function SourceChip({
   return (
     <button
       type="button"
+      data-chip
       onClick={() => onOpen(source)}
       title={scanned ? copy.thread.scannedHint : verified ? copy.thread.verifiedLegend : undefined}
       className="group/chip relative mx-[4px] my-[0.5px] inline-flex max-w-[calc(100%-8px)] rounded-[8px] align-middle text-[13px] leading-none text-accent before:absolute before:inset-x-0 before:-inset-y-[7.5px] before:content-['']"

@@ -87,7 +87,7 @@ export function TicketCard({ ticket, onChange }: { ticket: TicketView; onChange:
                 disabled={saving}
                 aria-pressed={ticket.outcome === o}
                 onClick={() => save(o)}
-                className={`min-h-12 grow rounded-lg border border-line px-3 text-[13px] text-dim disabled:opacity-50 ${PRESSED}`}
+                className={`min-h-12 grow rounded-lg border border-line px-3 text-[13px] text-dim enabled:hover:text-text disabled:opacity-50 ${PRESSED}`}
               >
                 {copy.ticket.outcome[o]}
               </button>

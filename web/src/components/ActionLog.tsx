@@ -31,7 +31,7 @@ export function ActionLog({
   const issued = onOpen ? Object.values(sources) : [] // with nothing to open a page with, pages are named in words
   return (
     <details className="group text-[13px] text-dim">
-      <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+      <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 hover:text-text [&::-webkit-details-marker]:hidden">
         <svg
           width="12"
           height="12"

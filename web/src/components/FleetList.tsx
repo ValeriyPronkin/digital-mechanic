@@ -160,7 +160,7 @@ function RoleSwitch({ role, onRole }: { role: Role; onRole: (role: Role) => void
           aria-checked={role === r}
           tabIndex={role === r ? 0 : -1}
           onClick={() => onRole(r)}
-          className={`relative h-8 rounded-md border border-transparent px-2.5 whitespace-nowrap text-dim before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] ${CHECKED}`}
+          className={`relative h-8 rounded-md border border-transparent px-2.5 whitespace-nowrap text-dim hover:text-text before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] ${CHECKED}`}
         >
           {copy.role[r]}
         </button>
@@ -239,7 +239,7 @@ export function FleetList({
                 // The content starts at the top, so the three numbers stand on one line and the three labels
                 // start on one line whichever of them wraps; a button would centre it, and the two short
                 // cards used to hang lower than the long one.
-                className={`flex flex-col items-start rounded-lg border border-line px-3 py-2 text-left ${PRESSED_STATUS}`}
+                className={`flex flex-col items-start rounded-lg border border-line px-3 py-2 text-left hover:bg-surface ${PRESSED_STATUS}`}
               >
                 <span className="text-[22px] leading-[1.15] font-semibold">{fleet.counts[s]}</span>
                 {/* two lines are kept for the label («требует внимания» wraps in a narrow card), so the cards
