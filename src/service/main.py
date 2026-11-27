@@ -45,6 +45,8 @@ from service.pages import PageImages
 from service.rate_limit import RateLimiter, client_key
 from service.spend import BucketObject, RefreshingIamAuth, SharedLedger
 from service.store import Store
+from service.ticket_book import KEY as TICKET_BOOK_KEY
+from service.ticket_book import SharedTickets
 from service.ticket_once import TicketMarks
 from service.verdict_policy import VerdictCard, build_card
 from service.voice import (
@@ -169,7 +171,18 @@ def ml_client() -> MLClient:
 
 @lru_cache(maxsize=1)
 def store() -> Store:
-    return Store()
+    return Store(shared=shared_tickets())
+
+
+def shared_tickets() -> SharedTickets | None:
+    """Стенд (задан S3_BUCKET): отправленные заявки и их исходы — в бакете, общие для всех экземпляров (аудит 27.11,
+    A2). Локально — SQLite экземпляра."""
+    if not os.environ.get("S3_BUCKET", "").strip() or os.environ.get("TICKET_BOOK", "bucket") != "bucket":
+        return None
+    http = httpx.Client()
+    endpoint = os.environ.get("S3_ENDPOINT", kb_store.DEFAULT_ENDPOINT)
+    bucket = kb_store.Bucket(os.environ["S3_BUCKET"].strip(), RefreshingIamAuth(http), http, endpoint)
+    return SharedTickets(BucketObject(bucket, TICKET_BOOK_KEY))
 
 
 class IndexRetry:
