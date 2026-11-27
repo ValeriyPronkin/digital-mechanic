@@ -120,7 +120,7 @@ def test_one_time_table_and_reuse_question() -> None:
 
 
 def test_model_tool_line_always_removed(ml: MLClient, toir: ToirClient) -> None:
-    """(д): «Понадобится: …» модели не отличить от строки реестра — снимается и там, где про инструмент не спрашивали."""
+    """(д): «Понадобится: …» модели не отличить от строки реестра — снимается всегда."""
     answer = "Зазор 0,25-0,30 мм [R1].\n\nПонадобится: щуп и ключ.\n\n1. Проверить зазор [R1]."
     ag, _ = make_agent([say(answer)] * 2, ml, toir, prefetch=False)
     reply = ag.ask(ag.start("B418HK98", "S-0007"), "Какой зазор клапанов?")
