@@ -139,7 +139,9 @@ def find(
 
 # ---------- разметка ответа для /api/v2: запчасти и инструмент отдельным цветом (Валерий и Никита, 27.11) ----------
 
-_VERB = re.compile(r"(?:ить|ать|ять|еть|уть)$", re.I)
+_VERB = re.compile(r"(?:ить|ать|ять|еть|уть|ться|тся|ется|ится)$", re.I)
+_LANDMARK = re.compile(r"^(?:коленчат|распределительн)\w*\s+вал", re.I)
+_NOT_NAME = re.compile(r"^(?:карточк|допуска|проверк|работ|ремонт|двигател)", re.I)
 
 
 def _name_pattern(name: str) -> re.Pattern[str] | None:
@@ -163,12 +165,16 @@ def spans(engine: str, text: str, cited: dict[tuple[str, int], str] | None = Non
             where.setdefault(r.code.lower(), set()).add((r.doc, r.page))
     found: list[tuple[int, int, int, bool, Record]] = []
     for r in records(engine):
-        if _VERB.search(r.name):
-            continue  # «заменить» — не деталь (обрывок разбора)
+        words = r.name.lower().split()
+        if any(_VERB.search(w) or _NOT_NAME.match(w) for w in words):
+            continue  # «заменить», «допускается» — не деталь (обрывки разбора)
         pats: list[tuple[re.Pattern[str], bool]] = []
         if r.code and re.search(r"\d", r.code) and len(r.code) >= 4:
             pats.append((re.compile(r"(?<![\w.\-])" + re.escape(r.code) + r"(?![\w\-])", re.I), True))
-        if r.kind == "tool" or len(r.name.split()) > 1 or len(r.name) >= 6:
+        # запчасть по одному названию — только из двух слов и больше («уплотнительные кольца инжектора»): одно слово
+        # («кольцо», «вал») встречается в ответе на каждом шагу и красило бы всё подряд
+        # «коленчатый вал», «распределительный вал» — в ответе как ориентир («повернуть коленчатый вал»), не запчасть
+        if r.kind == "tool" or (len(words) > 1 and not _LANDMARK.match(r.name)):
             if p := _name_pattern(r.name):
                 pats.append((p, False))
         for p, by_code in pats:
