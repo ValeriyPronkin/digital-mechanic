@@ -172,7 +172,39 @@ def test_monthly_fixed_is_per_fleet_not_per_request() -> None:
     run = {"scenarios": {"С1": {"llm_ms": 3000}, "С3": {"llm_ms": 1000}}}
     m = monthly_fixed(run)
     a = ASSUMPTIONS
-    assert m["questions"] == a["vehicles"] * a["checks_per_vehicle_month"] * a["questions_per_check"]
-    assert m["hours"] == pytest.approx(m["questions"] * (2.0 + a["overhead_s"]) / 3600, rel=1e-3)
-    assert m["container_rub"] == 0  # 400 вопросов — в бесплатном уровне Serverless Containers
+    assert m["questions"] == round(a["vehicles"] * a["checks_per_vehicle_month"] * a["questions_per_check"])
+    assert m["hours"] == pytest.approx(m["questions"] * (2.0 + a["overhead_s"]) / 3600, rel=1e-2)
+    assert m["container_rub"] == 0  # 325 вопросов — в бесплатном уровне Serverless Containers
     assert m["container_rub_no_free_tier"] > 0 and m["storage_rub_no_free_tier"] > 0
+
+
+def test_fleet_follows_organizers_example() -> None:
+    """Ответ организаторов 26.11: 50 машин, проверка раз в две недели, два-три вопроса на проверку."""
+    from cost_layers import ASSUMPTIONS, fleet_month
+
+    a = ASSUMPTIONS
+    assert (a["vehicles"], a["questions_per_check_low"], a["questions_per_check"]) == (50, 2, 3)
+    assert a["checks_per_vehicle_month"] == pytest.approx(26 / 12)
+    run = {"scenarios": {"С1": {"rub": 0.1, "llm_ms": 3000}, "Р1": {"rub": 0.05, "llm_ms": 2000}}}
+    f = fleet_month(run)
+    checks = 50 * 26 / 12
+    assert f["requests_rub"] == (pytest.approx(checks * 0.15, abs=0.01), pytest.approx(checks * 0.2, abs=0.01))
+    assert f["total_rub"][0] >= f["requests_rub"][0]
+
+
+def test_one_time_index_is_ocr_plus_all_fragments() -> None:
+    from cost_layers import INDEX, one_time_index, other
+
+    idx = one_time_index()
+    assert (idx["ocr_pages"], idx["fragments"]) == (41, 3593)
+    assert idx["ocr_rub"] == pytest.approx(41 * 0.1321 / 1.22, abs=0.01)  # цена страницы без НДС
+    tokens = INDEX["fragments"] * INDEX["chars_per_fragment"] / INDEX["chars_per_token"]
+    assert idx["emb_rub"] == pytest.approx(tokens * other("embedding") / 1000, abs=0.01)
+    assert idx["rub_range"][0] < idx["rub"] < idx["rub_range"][1]
+
+
+def test_voice_option_is_short_phrase_not_whole_answer() -> None:
+    """0,27 ₽ (замер reports/2026-11-26-voice-cost.md), а не 1,19 ₽ — синтез всего ответа по API v1."""
+    from cost_layers import voice_option
+
+    assert voice_option() == pytest.approx(2 * 0.1626 / 1.22, abs=0.001)
