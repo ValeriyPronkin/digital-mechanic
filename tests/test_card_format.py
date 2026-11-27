@@ -68,3 +68,34 @@ def test_agent_answer_keeps_sections_and_marks_risk(ml: MLClient, toir: ToirClie
     for name in ("Что слышно", "Что это может быть", "Чем это грозит", "Что проверить"):
         assert f"\n{name}\n" in f"\n{text}\n", name
     assert f"прогар клапана {ENGINEER_MARK}." in text
+
+
+def test_failed_recording_does_not_open_the_manuals(ml: MLClient, toir: ToirClient) -> None:
+    """Sweep 27.11: на «Создать заявку» после сбоя записи модель искала по руководству (3 из 5 нитей). Поиск по такой
+    проверке отклоняется с объяснением; руководство не открывается, страниц в ответе нет."""
+    from service.agent import CHECK_FAILED_NO_SEARCH
+    from test_agent import call, first
+
+    failed = first(lambda v, s: s.status == "check_failed")
+    steps = [call("search_manual", query="заявка на дефектовку"), say("Запись не годится, повторите проверку.")]
+    ag, llm = make_agent(steps, ml, toir)
+    conv = ag.start(*failed)
+    ag._ensure_diag(conv)
+    reply = ag.ask(conv, "Создать заявку")
+    tool = next(m for m in llm.seen[-1] if m["role"] == "tool" and m.get("name") == "search_manual")
+    assert CHECK_FAILED_NO_SEARCH in str(tool["content"]) and reply.sources == [] and reply.draft is None
+
+
+def test_mismatch_answer_names_both_ways(ml: MLClient, toir: ToirClient) -> None:
+    """golden mismatch-insist-536: на «свечи всё равно надо посмотреть» у дизеля — посторонний порядок работ без
+    «повторить проверку» и «дефектовка». Код дописывает оба пути; если они уже есть — не дублирует."""
+    from service.agent import MISMATCH_STEPS
+
+    ag, _ = make_agent([say("Свечей на этом двигателе нет.\n\n1. Снимите крышку головки [R1].")], ml, toir)
+    conv = ag.start("K354KC98", "S-0087")
+    _, card = ag._ensure_diag(conv)
+    assert card.status == "anomaly" and not card.compatible
+    text = ag.ask(conv, "Свечи всё равно надо посмотреть. Какой зазор?").text
+    assert text.endswith(MISMATCH_STEPS)
+    ag, _ = make_agent([say("Свечей нет. Повторите проверку; если стук остаётся — дефектовка узла.")], ml, toir)
+    assert MISMATCH_STEPS not in ag.ask(ag.start("K354KC98", "S-0087"), "А свечи?").text

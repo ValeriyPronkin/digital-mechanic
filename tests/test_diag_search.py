@@ -60,11 +60,14 @@ def test_own_question_still_searched_by_its_words(ml: MLClient, toir: ToirClient
     assert rec.queries == ["Какой момент затяжки гаек головки цилиндров?"]
 
 
-def test_normal_check_keeps_old_search(ml: MLClient, toir: ToirClient) -> None:
+def test_normal_check_button_has_no_search_own_question_has(ml: MLClient, toir: ToirClient) -> None:
     rec = Recorder()
-    ag, _ = make_agent([say("ответ")], ml, toir, rec)
-    ag.ask(ag.start("A427MA78", "S-0030"), BUTTON)  # норма: неисправности нет, запроса по ней нет
-    assert rec.queries == [BUTTON]
+    ag, llm = make_agent([say("ответ")], ml, toir, rec)
+    conv = ag.start("A427MA78", "S-0030")
+    ag.ask(conv, BUTTON)  # норма: ответ — строка кода под карточкой, без поиска и модели (приёмка 27.11)
+    assert rec.queries == [] and llm.seen == []
+    ag.ask(conv, "Какой момент затяжки гаек головки цилиндров?")
+    assert rec.queries == ["Какой момент затяжки гаек головки цилиндров?"]
 
 
 def test_fault_titles_get_manual_terms() -> None:
