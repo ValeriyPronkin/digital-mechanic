@@ -273,3 +273,27 @@ Cloud Logging Yandex отключает с 01.12.2026, поэтому у сте�
 
 - `STUB: parts-catalog` — поставщики запчастей не подключены (по умолчанию и на стенде): наличие, цена и срок не показываются, в черновике и в `parts_offers` — «каталог поставщика не подключён». Подключение — файлами поставщиков `PARTS_SUPPLIERS` (раздел «Подключить поставщика»; пример — `data/demo/suppliers/`, вымышленные), путь внедрения — учётная система заказчика (1С).
 - `STUB: search-until-#3` — если индекс руководств не собран (`make index`) или стенд не скачал его из бакета (`/health` → `manuals_index.present: false`), поиск по руководству пуст: агент отвечает «в руководстве не нашёл», заявка невозможна (нет ссылок).
+
+## Из чего собрано
+
+Модели и API: DeepSeek (`deepseek-chat`) — модель агента; GigaChat (`GigaChat-2-Max`) — второй провайдер, на стенде
+не включён; Yandex AI Studio — эмбеддинги для поиска по смыслу и OCR страниц без текста при сборке индекса;
+Yandex SpeechKit — распознавание вопроса голосом и короткий ответ вслух. Хостинг и хранилище: Yandex Cloud Serverless
+Containers, Container Registry, Object Storage.
+
+Библиотеки сервера: FastAPI, Uvicorn, Pydantic, HTTPX, NumPy, pdfplumber, pypdfium2, Pillow, pymorphy3, PyYAML.
+Интерфейс v2: React, Vite, Tailwind CSS, TypeScript. Проверки: pytest, ruff, mypy, oxlint, Prettier, gitleaks.
+
+Заглушки Mock ML и Mock ТОиР, данные парка и шесть руководств — материалы ООО «НейроДВС». Полный список с
+лицензиями и местом в коде — [`THIRD_PARTY.md`](THIRD_PARTY.md).
+
+## Использованные наработки
+
+Каркас репозитория — CI, git-хуки, `Makefile`, Docker, деплой стенда и превью, сверки заглушек и сторонних
+компонентов, сервис-заготовка с `/health` — взят из шаблона `ai-forge`, который Валерий Пронкин сделал до хакатона
+(закрытый репозиторий [`ValeriyPronkin/ai-forge`](https://github.com/ValeriyPronkin/ai-forge), каталог `template/`).
+Это первый коммит, `27c9ef5`; что в нём было по файлам — в [`THIRD_PARTY.md`](THIRD_PARTY.md#ранее-созданные-наработки).
+Кода продукта в шаблоне нет.
+
+Интерфейс v2 и второй поиск по документам — из прототипа Никиты Пронкина `pronkinnikita/digital-mechanic`,
+написанного в этот же спринт. Код написан с помощью Claude Code.
