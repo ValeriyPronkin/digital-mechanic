@@ -32,10 +32,47 @@ type LineProps = Marks & {
   onOpen: (s: SourceItem, withdrawn: boolean, own?: OwnQuote) => void
 }
 
+/** How a part or a tool stands out: `underline` — its colour, underlined (parts solid, tools dashed);
+ *  `pill` — its colour on a tinted background, like the page chips, with a small icon before the word.
+ *  One constant, so the choice (issue #173) is one line. */
+export const SPAN_LOOK: 'underline' | 'pill' = 'pill'
+
 const SPAN_TONE = {
-  part: 'text-part decoration-part/70',
-  tool: 'text-tool decoration-tool/70 decoration-dashed',
-} as const
+  underline: {
+    part: 'text-part underline decoration-1 underline-offset-[3px] decoration-part/70',
+    tool: 'text-tool underline decoration-1 underline-offset-[3px] decoration-tool/70 decoration-dashed',
+  },
+  pill: {
+    part: 'text-part bg-part/15 rounded-md px-1 box-decoration-clone',
+    tool: 'text-tool bg-tool/15 rounded-md px-1 box-decoration-clone',
+  },
+}[SPAN_LOOK]
+
+/** A wrench for a tool, a hex nut for a part: 0.85em, so it follows the size of the text. */
+function SpanIcon({ type }: { type: AnswerSpan['type'] }) {
+  if (SPAN_LOOK !== 'pill') return null
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="mr-[0.2em] inline-block size-[0.85em] align-[-0.08em]"
+      aria-hidden
+    >
+      {type === 'tool' ? (
+        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+      ) : (
+        <>
+          <path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5z" />
+          <circle cx="12" cy="12" r="3.5" />
+        </>
+      )}
+    </svg>
+  )
+}
 
 /** A part or a tool in the answer: its own colour, underlined. A tap opens its hint right under the line of
  *  text: what it is, the designation and the page as the server sent them, and the page itself when the
@@ -50,8 +87,9 @@ function Marked({ span, sources, onOpen }: { span: AnswerSpan; sources: Sources;
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className={`relative inline underline decoration-1 underline-offset-[3px] before:absolute before:-inset-y-2 before:inset-x-0 before:content-[''] ${SPAN_TONE[span.type]}`}
+        className={`relative inline before:absolute before:-inset-y-2 before:inset-x-0 before:content-[''] ${SPAN_TONE[span.type]}`}
       >
+        <SpanIcon type={span.type} />
         {span.text}
       </button>
       {open && (
@@ -118,7 +156,8 @@ function Legend({ spans }: { spans: AnswerSpan[] }) {
     <p className="flex flex-wrap gap-x-3 text-[13px] text-dim">
       <span>{copy.spans.legendTitle}:</span>
       {kinds.map((k) => (
-        <span key={k} className={`underline decoration-1 underline-offset-[3px] ${SPAN_TONE[k]}`}>
+        <span key={k} className={SPAN_TONE[k]}>
+          <SpanIcon type={k} />
           {copy.spans.legend[k]}
         </span>
       ))}
