@@ -351,6 +351,9 @@ class Source:
     pdf_page: int
     section: str
     text: str
+    # почему страница попала в контекст модели — для паспорта ответа: «по неисправности из карточки», «поиск по
+    # словам: …», «противоречие в руководствах», «ограничения эксплуатации», «модель открыла страницу». Первая причина.
+    why: str = ""
 
     def public(self) -> dict[str, Any]:
         return {
@@ -1195,7 +1198,9 @@ class Agent:
                 break
             t0 = time.monotonic()
             try:
-                reply = self.provider.chat(conv.messages, self._tools_for(conv), max_tokens=LEVEL_MAX_TOKENS[level])
+                tools_now = self._tools_for(conv)
+                parts = input_parts(conv.messages, tools_now)  # из чего вход: для паспорта, до вызова
+                reply = self.provider.chat(conv.messages, tools_now, max_tokens=LEVEL_MAX_TOKENS[level])
             except LLMError:
                 if step == 1 or not self._out_of_time(conv):
                     raise
@@ -1215,6 +1220,7 @@ class Agent:
                     "tokens_cached": reply.tokens_cached,
                     "cost_rub": round(cost, 4),
                     "ms": ms,
+                    "parts": parts,
                 }
             )
             if not reply.tool_calls:
@@ -1506,7 +1512,7 @@ class Agent:
         if not quotes:
             return text, cited
         q = quotes[0]
-        src = self._source_for(conv, q.doc, q.page, a.part, q.quote)
+        src = self._source_for(conv, q.doc, q.page, a.part, q.quote, f"узла нет у этого двигателя: {a.part}")
         if src not in cited:
             cited = [*cited, src]
         conv.passport["absent_head"] = a.id
@@ -1600,6 +1606,7 @@ class Agent:
                     pdf_page=s["pdf_page"],
                     section=s["section"],
                     text=s["text"],
+                    why="из сохранённого ответа на тот же вопрос (кэш)",
                 )
                 conv.sources[src.ref] = src
             renumber[s["ref"]] = src.ref
@@ -1653,7 +1660,8 @@ class Agent:
         cost = self._spend(request_id, MAX_STEPS + 1, reply, ms)
         steps.append({"step": MAX_STEPS + 1, "kind": "llm", "name": reply.model + " (ответ по найденному)",
                       "tokens_in": reply.tokens_in, "tokens_out": reply.tokens_out,
-                      "tokens_cached": reply.tokens_cached, "cost_rub": round(cost, 4), "ms": ms})  # fmt: skip
+                      "tokens_cached": reply.tokens_cached, "cost_rub": round(cost, 4), "ms": ms,
+                      "parts": input_parts(msgs, [])})  # fmt: skip
         conv.passport["final_without_tools"] = True
         return reply.content.strip() if reply.content.strip() and not reply.tool_calls else NO_TIME
 
@@ -1700,6 +1708,7 @@ class Agent:
                 "tokens": approx_tokens(s.text),
                 "used": s.ref in used,
                 "new": s.ref not in before,
+                "why": s.why,
             }
             for s in sent
         ]
@@ -1710,7 +1719,12 @@ class Agent:
             "card_status": card.status if card else None,
             "code_compatible": card.compatible if card else None,
         }
-        return {"fragments": fragments, "rules": rules, "plan": conv.passport.get("plan")}
+        # снятые утверждения по страницам: почему ссылка на страницу не дошла до ответа (паспорт, «не пошло в ответ»)
+        withdrawn = [
+            {"handles": w.get("handles") or [], "state": w.get("state"), "reason": w.get("reason")}
+            for w in conv.withdrawn
+        ]
+        return {"fragments": fragments, "rules": rules, "plan": conv.passport.get("plan"), "withdrawn": withdrawn}
 
     def guard(self, conv: Conversation, text: str) -> tuple[str, bool, list[str], list[Source]]:
         notes: list[str] = []
@@ -1966,6 +1980,10 @@ class Agent:
             if lang not in ("ru", "rus"):
                 query["answer_language"] = lang
             calls.append(ToolCall(f"pre-search-{len(conv.messages)}", "search_manual", query))
+            # почему страницы поиска в контексте (паспорт): по неисправности из карточки или по словам вопроса
+            conv.passport["search_why"] = (
+                f"по неисправности из карточки ({card.fault_code} {card.fault_title})" if fault else "по словам вопроса"
+            )
         if not calls:
             return
         for call in calls:  # по ходу на вызов: GigaChat принимает одну функцию за ход
@@ -1983,6 +2001,7 @@ class Agent:
                     "content": json.dumps(result, ensure_ascii=False),
                 }
             )
+        conv.passport.pop("search_why", None)  # дальше ищет модель — её поиск подписан её запросом
 
     def _ensure_diag(self, conv: Conversation) -> tuple[Diagnosis, VerdictCard]:
         if conv.diag is None or conv.card is None:
@@ -2036,7 +2055,7 @@ class Agent:
 
         def ref(manual: str, page: int, why: str, attach: bool) -> dict[str, Any]:
             text = (page_text(manual, page) if page_text else None) or why
-            src = self._source_for(conv, manual, page, why, text)
+            src = self._source_for(conv, manual, page, why, text, f"ограничения эксплуатации (реестр покрытия): {why}")
             return {"ref": src.ref, "why": why, **({"text": text} if attach else {})}
 
         on_card = bool(_CARD_ASK.search(question))
@@ -2095,7 +2114,7 @@ class Agent:
             return None
         cited: list[Source] = []
         for q in quotes:
-            src = self._source_for(conv, q.doc, q.page, a.part, q.quote)
+            src = self._source_for(conv, q.doc, q.page, a.part, q.quote, f"узла нет у этого двигателя: {a.part}")
             if src not in cited:
                 cited.append(src)
         refs = {(s.manual_id, s.pdf_page): s.ref for s in cited}
@@ -2180,7 +2199,7 @@ class Agent:
         if len(quotes) < 2:  # без двух подтверждённых цитат противоречие не заявляем
             return
         for q in quotes:  # страницы цитат — источники R…, на них можно ссылаться
-            self._source_for(conv, q.doc, q.page, k.title, q.quote)
+            self._source_for(conv, q.doc, q.page, k.title, q.quote, f"противоречие в руководствах: {k.title}")
         conv.contradiction = (k, quotes)
 
     def _contradiction_text(
@@ -2204,7 +2223,9 @@ class Agent:
                 quotes = contradictions.verified_quotes(k, getattr(self.searcher, "page_text", None))
                 if len(quotes) >= 2:
                     for q in quotes:
-                        self._source_for(conv, q.doc, q.page, k.title, q.quote)
+                        self._source_for(
+                            conv, q.doc, q.page, k.title, q.quote, f"противоречие в руководствах: {k.title}"
+                        )
                     conv.contradiction = (k, quotes)
         if conv.contradiction is None:
             checked, notes = contradictions.check_model_blocks(
@@ -2270,12 +2291,16 @@ class Agent:
         line = self._escalate(conv, k, quotes)
         return contradictions.ESCALATION.sub(lambda _m: line, text, count=1)
 
-    def _source_for(self, conv: Conversation, manual_id: str, pdf_page: int, section: str, text: str) -> Source:
-        """Источник R… для страницы руководства; одна страница — один R, текст дополняется."""
+    def _source_for(
+        self, conv: Conversation, manual_id: str, pdf_page: int, section: str, text: str, why: str = ""
+    ) -> Source:
+        """Источник R… для страницы руководства; одна страница — один R, текст дополняется. `why` — почему страница
+        в контексте (паспорт): у уже известной страницы остаётся первая причина."""
         existing = next((s for s in conv.sources.values() if s.manual_id == manual_id and s.pdf_page == pdf_page), None)
         if existing is not None:
             if text and text not in existing.text:
                 existing.text = f"{existing.text}\n{text}"[:3000]
+            existing.why = existing.why or why
             return existing
         doc = DOCS_BY_ID[manual_id]
         src = Source(
@@ -2285,6 +2310,7 @@ class Agent:
             pdf_page=pdf_page,
             section=section,
             text=text[:3000],
+            why=why,
         )
         conv.sources[src.ref] = src
         return src
@@ -2310,7 +2336,9 @@ class Agent:
             key = (p.doc, p.page)
             if key not in refs:
                 what = next((x.what for x in cell.pages if (x.doc, x.page) == key), "")
-                refs[key] = self._source_for(conv, p.doc, p.page, what, "\n".join(by_page[key])).ref
+                fault = " ".join(x for x in (card.fault_code, card.fault_title) if x)
+                why = f"по неисправности из карточки ({fault}): проверенная ячейка матрицы"
+                refs[key] = self._source_for(conv, p.doc, p.page, what, "\n".join(by_page[key]), why).ref
         return {
             "status": "confirmed",
             # цитаты страниц модели не нужны — работы и ссылки есть ниже; текст страниц остаётся в Source (#16)
@@ -2363,6 +2391,7 @@ class Agent:
                 (s for s in conv.sources.values() if s.manual_id == h.manual_id and s.pdf_page == h.pdf_page), None
             )
             if existing is None:
+                by = conv.passport.get("search_why")
                 existing = Source(
                     ref=next_ref(conv),
                     manual_id=h.manual_id,
@@ -2370,6 +2399,7 @@ class Agent:
                     pdf_page=h.pdf_page,
                     section=h.section,
                     text=h.text[:1500],
+                    why=f"поиск {by}: «{query[:60]}»" if by else f"модель искала: «{query[:60]}»",
                 )
                 conv.sources[existing.ref] = existing
             elif h.text[:1500] not in existing.text:
@@ -2409,7 +2439,7 @@ class Agent:
         engine = canonical_engine(conv.vehicle.engine_model) or conv.vehicle.engine_model
 
         def handle_for(manual_id: str, page: int) -> str:
-            return self._source_for(conv, manual_id, page, "", "").ref
+            return self._source_for(conv, manual_id, page, "", "", "модель открыла страницу целиком").ref
 
         res = nk_read.read_pages(engine, handle_for, str(args.get("manual", "")), args.get("pages"))
         for p in res["pages"]:
@@ -2829,6 +2859,22 @@ def _operation(op: Any) -> tuple[str, str | None]:
     if ref is None and marks:
         ref = marks[0]
     return _strip_refs(text), ref
+
+
+def input_parts(messages: list[Message], tools: Any) -> dict[str, int]:
+    """Из чего вход вызова модели (оценка ≈ 4 символа на токен, для паспорта): инструкция агента (system и описания
+    инструментов — одинаковы от вызова к вызову, их провайдер берёт из кэша), результаты инструментов (страницы
+    руководства, карточка проверки) и разговор (вопросы, ответы, вызовы инструментов моделью)."""
+    out = {"instructions": 0, "tool_results": 0, "dialog": 0}
+    for m in messages:
+        role = m.get("role")
+        size = approx_tokens(str(m.get("content") or "")) + (
+            approx_tokens(json.dumps(m["tool_calls"], ensure_ascii=False, default=str)) if m.get("tool_calls") else 0
+        )
+        out["instructions" if role == "system" else "tool_results" if role == "tool" else "dialog"] += size
+    if tools:
+        out["instructions"] += approx_tokens(json.dumps(tools, ensure_ascii=False, default=lambda o: o.__dict__))
+    return out
 
 
 def approx_tokens(text: str) -> int:

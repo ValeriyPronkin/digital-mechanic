@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 from collections.abc import Callable
 from datetime import datetime
@@ -61,6 +62,95 @@ def _rules(rules: dict[str, Any], notes: list[str]) -> list[str]:
     return out + [f"Плашка механику: {n}" for n in notes if n not in out]
 
 
+WHY_SEARCH = "найдено поиском по руководству"
+NOT_CITED = "модель не сослалась на эту страницу"
+WITHDRAWN_WHY = {
+    "unverified": "цифры не подтвердились на этой странице — утверждение снято",
+    "uncited": "у числа не было ссылки на страницу — утверждение снято",
+    "other_row": "число со страницы относится к другой строке таблицы — утверждение снято",
+}
+PART_WORDS = {
+    "instructions": "инструкция агента",
+    "tool_results": "страницы руководства и карточка проверки",
+    "dialog": "вопрос и разговор",
+    "service": "служебные вызовы (план поиска, перевод)",
+}
+
+
+def _num(n: float) -> str:
+    """5957 → «5 957»: разряды неразрывным пробелом, как в интерфейсе."""
+    return f"{round(n):,}".replace(",", "\u00a0")
+
+
+def _why_out(ref: str, withdrawn: list[dict[str, Any]]) -> str:
+    """Почему страница, ушедшая в модель, не пошла в ответ: то, что знает проверка цифр (guard)."""
+    for w in withdrawn:
+        if ref in (w.get("handles") or []):
+            key = "other_row" if w.get("reason") == "other_row" else str(w.get("state") or "unverified")
+            return WITHDRAWN_WHY.get(key, WITHDRAWN_WHY["unverified"])
+    return NOT_CITED
+
+
+def token_parts(steps: list[dict[str, Any]]) -> dict[str, int]:
+    """Вход модели по частям, в токенах провайдера: у каждого вызова оценка частей (≈ 4 символа на токен)
+    приводится к его настоящему `tokens_in`; вызовы без разбивки (план поиска, перевод) — «служебные»."""
+    out = {"instructions": 0, "tool_results": 0, "dialog": 0, "service": 0}
+    for st in steps:
+        if st.get("kind") != "llm":
+            continue
+        real = int(st.get("tokens_in") or 0)
+        parts = st.get("parts") or {}
+        approx = sum(parts.values())
+        if not parts or not approx:
+            out["service"] += real
+            continue
+        shares = {k: real * v / approx for k, v in parts.items()}
+        rounded = {k: int(v) for k, v in shares.items()}
+        rounded["dialog"] = rounded.get("dialog", 0) + real - sum(rounded.values())  # сумма — ровно tokens_in
+        for k, v in rounded.items():
+            out[k] = out.get(k, 0) + v
+    return out
+
+
+def explain(
+    total: dict[str, Any], parts: dict[str, int], cached_cheaper: float, from_cache: bool = False
+) -> dict[str, str]:
+    """Паспорт простыми словами (Валерий, 27.11: «всё понятно с листа»): из чего вход, что из кэша, что лишнее,
+    сколько стоило."""
+    tin = int(total.get("tokens_in") or 0)
+    pieces = [f"{PART_WORDS[k]} {_num(v)}" for k, v in parts.items() if v]
+    lines = {
+        "cost": f"{total['total_rub']:.2f} ₽ · {total['ms'] / 1000:.1f} с".replace(".", ","),
+        "tokens": f"{_num(tin)} токенов на входе" + (f" ≈ {' + '.join(pieces)}" if pieces else ""),
+    }
+    if from_cache and not tin:
+        lines["tokens"] = "ответ из сохранённого: тот же вопрос по той же проверке — модель не вызывалась, 0 токенов"
+    cached = int(total.get("tokens_cached") or 0)
+    if cached:
+        cheaper = f", дешевле в {round(cached_cheaper)} раз" if cached_cheaper > 1 else ""
+        lines["cached"] = f"из них {_num(cached)} повторно использовано (кэш провайдера) — почти бесплатно{cheaper}"
+    sent, unused = int(total.get("fragments_tokens") or 0), int(total.get("unused_tokens") or 0)
+    if sent and not (from_cache and not tin):  # из кэша страницы не оплачивались
+        lines["unused"] = (
+            f"{round(100 * unused / sent)} % страниц оплачено, но не понадобилось "
+            f"({_num(unused)} из {_num(sent)} токенов руководства)"
+        )
+    return lines
+
+
+def _cached_cheaper(provider: str | None) -> float:
+    """Во сколько раз токен из кэша дешевле обычного входа — по прайсу провайдера (DeepSeek: 0,3 / 0,006 = 50)."""
+    if not provider:
+        return 0.0
+    try:
+        from service.store import prices
+
+        p = prices(provider)
+        return p.tokens_in / p.tokens_cached if p.tokens_cached else 0.0
+    except Exception:  # прайс — для подписи, его сбой паспорт не ломает
+        return 0.0
+
+
 def build(
     trace: dict[str, Any],
     *,
@@ -74,7 +164,16 @@ def build(
 ) -> dict[str, Any]:
     """Паспорт по разделам issue #31. `stt` — запись журнала голоса о распознавании этого вопроса."""
     steps = trace.get("steps") or []
-    fragments = {f["ref"]: f for f in trace.get("fragments") or []}
+    withdrawn = trace.get("withdrawn") or []
+    # у каждой страницы — почему она в контексте и, если не пошла в ответ, почему
+    fragments = {
+        f["ref"]: {
+            **f,
+            "why_in": f.get("why") or WHY_SEARCH,
+            "why_out": None if f.get("used") else _why_out(f["ref"], withdrawn),
+        }
+        for f in trace.get("fragments") or []
+    }
     plan = trace.get("plan") or {}
 
     tools = [
@@ -133,6 +232,21 @@ def build(
     tts_chars = len(for_tts(speech_text)) if by_voice else 0  # символы, уходящие в синтез
     tts_rub = tts_cost_rub(tts_chars, choose_tts_api(tts_chars)) if tts_chars else 0.0  # без кэша — оценка сверху
     model_rub = float(trace.get("cost_rub") or 0.0)
+    parts = token_parts(steps)
+    total = {
+        "model_rub": round(model_rub, 4),
+        "search_rub": round(search_rub, 5),
+        "voice_rub": round(stt_rub + tts_rub, 4),
+        "total_rub": round(model_rub + search_rub + stt_rub + tts_rub, 4),
+        "tokens_in": trace.get("tokens_in", 0),
+        "tokens_cached": trace.get("tokens_cached", 0),
+        "tokens_out": trace.get("tokens_out", 0),
+        "ms": sum(int(s.get("ms") or 0) for s in steps),
+        "fragments_tokens": sent_tokens,
+        "unused_tokens": unused_tokens,
+        "unused_share": round(unused_tokens / sent_tokens, 2) if sent_tokens else 0.0,
+        "tokens_parts": parts,
+    }
     return {
         "request_id": trace.get("request_id"),
         "question": {
@@ -154,19 +268,12 @@ def build(
             "tts_rub_estimate": round(tts_rub, 4),
         },
         "rules": _rules(trace.get("rules") or {}, notes or []),
-        "total": {
-            "model_rub": round(model_rub, 4),
-            "search_rub": round(search_rub, 5),
-            "voice_rub": round(stt_rub + tts_rub, 4),
-            "total_rub": round(model_rub + search_rub + stt_rub + tts_rub, 4),
-            "tokens_in": trace.get("tokens_in", 0),
-            "tokens_cached": trace.get("tokens_cached", 0),
-            "tokens_out": trace.get("tokens_out", 0),
-            "ms": sum(int(s.get("ms") or 0) for s in steps),
-            "fragments_tokens": sent_tokens,
-            "unused_tokens": unused_tokens,
-            "unused_share": round(unused_tokens / sent_tokens, 2) if sent_tokens else 0.0,
-        },
+        "total": total,
+        # простыми словами, в порядке листа: откуда ответ (страницы с причинами — `searches[].fragments`),
+        # сколько стоило, детали
+        "explain": explain(
+            total, parts, _cached_cheaper(trace.get("provider")), bool((trace.get("rules") or {}).get("answer_cache"))
+        ),
     }
 
 
@@ -235,6 +342,10 @@ def redact(passport: dict[str, Any]) -> dict[str, Any]:
         t.pop("refused", None)
     for s in p["searches"]:
         s["queries"] = len(s["queries"])
+        for f in s.get("fragments") or []:  # в причине — запрос поиска («…»): его в журнал не пишем
+            for k in ("why", "why_in"):
+                if f.get(k):
+                    f[k] = re.sub(r"«[^»]*»", "«…»", f[k])
     p["rules"] = [r for r in p["rules"] if not r.startswith("Плашка механику:")]
     return p
 
