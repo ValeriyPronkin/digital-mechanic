@@ -59,6 +59,7 @@ export function Sheet({
   children,
   footer,
   focusAfter,
+  tall = false,
 }: {
   open: boolean
   onClose: () => void
@@ -67,6 +68,9 @@ export function Sheet({
   children: ReactNode
   footer?: ReactNode
   focusAfter?: () => HTMLElement | null
+  /** A manual page: on a phone the sheet takes 92 % of the screen from the start, whatever is loaded yet.
+   *  A sheet sized by its content was header and buttons only while the page image was not in (iPhone). */
+  tall?: boolean
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
@@ -124,7 +128,7 @@ export function Sheet({
     <dialog
       ref={ref}
       tabIndex={-1}
-      className="sheet"
+      className={tall ? 'sheet sheet-tall' : 'sheet'}
       onClose={onClose}
       onClick={(e) => {
         if (e.target !== ref.current) {
@@ -178,7 +182,9 @@ export function Sheet({
           </svg>
         </button>
       </header>
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      {/* flex-auto, not flex-1: Safari sizes a column of unset height by the flex basis, and a basis of 0 %
+          left the content area of a sheet with no height at all. */}
+      <div ref={scroller} className="min-h-0 flex-auto overflow-y-auto overscroll-contain">
         {children}
       </div>
       {footer && (

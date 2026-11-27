@@ -88,6 +88,14 @@ dialog.sheet[open] {
   flex-direction: column;
   animation: sheet-up 150ms ease-out;
 }
+/* A manual page on a phone: almost the whole screen at once, so the page is never a strip of header and
+   buttons under Safari's bottom bar. vh first for a Safari without dvh. */
+@media (max-width: 899.98px) {
+  dialog.sheet.sheet-tall {
+    height: 92vh;
+    height: 92dvh;
+  }
+}
 @keyframes sheet-up {
   from {
     transform: translateY(16px);
