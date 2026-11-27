@@ -99,3 +99,59 @@ def complete(text: str, action: str, nearest: str | None) -> tuple[str, list[str
     if not added:
         return text, []
     return f"{text.rstrip()}\n\n" + "\n".join(added), added
+
+
+# Правило заказчика (приёмщик 27.11): часть ответа без ссылки на руководство — не нумерованный шаг. «5. Уточнить …»,
+# «5. … нужна дефектовка» выглядят как шаг процедуры руководства. Такие строки — одной строкой «Что сделать: …» без
+# номера после списка; шаги со ссылкой [R…] остаются шагами, номера после вынутых сдвигаются.
+_NUMBERED = re.compile(r"^(\s*)(\d+)([.)]\s+)(.*)$")
+_GAP = re.compile(
+    REFUSAL.pattern + r"|уточн\w*|не из руководств|мнение помощника|дефектовк|производител|не нашёл|не нашел",
+    re.I,
+)
+ACTION_LABEL = "Что сделать: "
+
+
+def unnumber_gaps(text: str, label: str = ACTION_LABEL) -> tuple[str, int]:
+    """Нумерованный шаг без [R…] о пробеле руководства или общем совете (дефектовка, уточнить, «не нашёл») —
+    из списка в строку «Что сделать: …» сразу после списка. В отказе без единой ссылки — все шаги: ни один из них
+    не из руководства. → (текст, сколько шагов вынуто)."""
+    every = is_refusal(text) and not _REF.search(text)
+    out: list[str] = []
+    pulled: list[str] = []
+    shift = 0
+    total = 0
+
+    def flush() -> None:
+        nonlocal pulled
+        if pulled:
+            body = " ".join(p if p.rstrip()[-1:] in ".!?" else f"{p.rstrip()}." for p in pulled)
+            if not label or body.lower().startswith(label.strip().lower()):
+                line = body
+            else:
+                lower = body[1:2].islower()  # «ЯМЗ…», «ТНВД…» — аббревиатуру не трогаем
+                line = label + (body[:1].lower() + body[1:] if lower else body)
+            if out and out[-1].strip():
+                out.append("")  # иначе Markdown приклеит строку к последнему пункту списка
+            out.append(line)
+            pulled = []
+
+    for line in text.split("\n"):
+        m = _NUMBERED.match(line)
+        if m and not _REF.search(line) and (every or _GAP.search(m.group(4))):
+            pulled.append(m.group(4).strip())
+            shift += 1
+            total += 1
+            continue
+        if m:
+            if shift:
+                line = f"{m.group(1)}{int(m.group(2)) - shift}{m.group(3)}{m.group(4)}"
+            out.append(line)
+            continue
+        if line.strip() and line[:1].isspace() and out and _NUMBERED.match(out[-1]):
+            out.append(line)  # продолжение шага с отступом
+            continue
+        flush()
+        out.append(line)
+    flush()
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip(), total

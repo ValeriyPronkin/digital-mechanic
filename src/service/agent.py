@@ -849,6 +849,10 @@ class Agent:
         if refusal_cleaned:
             notes.append(clean_refusal.NOTE)
         final, _ = clean_refusal.drop_specialist(final)  # механик сам специалист (правило заказчика 27.11)
+        label = clean_refusal.ACTION_LABEL if target == "ru" else ""  # «Что сделать:» — только в русском ответе
+        final, unnumbered = clean_refusal.unnumber_gaps(final, label)  # совет без [R…] — не шаг руководства
+        if unnumbered:
+            conv.passport["unnumbered_steps"] = unnumbered
         final, cited = self._drive_verdict(conv, question, final, cited)
         final, cited = self._complete_refusal(conv, question, final, cited)
         if conv.card is not None and conv.card.trend and _CARD_ASK.search(question) and conv.card.trend not in final:

@@ -61,6 +61,26 @@ _UZ_LAT = re.compile(
 )
 _EN = re.compile(r"\b(?:the|what|how|is|are|of|engine|valve|torque|can|should|which|check)\b", re.I)
 _KY_WORDS = re.compile(r"\b(?:кандай|канча|кайсы|болот|керек|эмне|кантип|менен|үчүн|жана)\b", re.I)
+# Таджикский и узбекская кириллица делят ҳ қ ғ: без ӣ ӯ ҷ (только таджикский) и ў (только узбекский) решают слова.
+# Таджикский пишут и без особых букв (нет раскладки): «чи», «хаст», «мухаррик» — поэтому варианты без них.
+_TG_WORDS = re.compile(
+    r"(?<![\wӣӯҷҳқғ])(?:аст|мешавад|мешаванд|шавад|барои|бо|ки|ҳаст|хаст|чӣ|чи|дар|аз|ба|кадом|чанд|бояд|лозим|нест|"
+    r"метавонам|метавонад|мекунад|мекунам|кунам|кардан|карда|агар|ман|шумо|ин|ҳамин|хамин|чаро|баъд|пеш|мошин|"
+    r"мошинро|муҳаррик\w*|мухаррик\w*|дошта|ронам|рондан|ҳоло|холо|чӣ\s*тавр|чи\s*тавр)(?![\wӣӯҷҳқғ])",
+    re.I,
+)
+_UZ_CYRL_WORDS = re.compile(
+    r"(?<![\wўҳқғ])(?:ва|учун|билан|керак|йўқ|йук|нима|қандай|қанча|қайси|бу|эмас|қилиш|бўлади|булади|бўлса|"
+    r"мумкинми|двигател\w*|машина\w*|ҳам|лекин|агар\s+\w+са|қачон|нечта|юриш\w*|текшир\w*|алмаштир\w*)"
+    r"(?![\wўҳқғ])",
+    re.I,
+)
+
+
+def _tg_by_words(text: str, letters: bool) -> bool:
+    """Таджикских слов больше, чем узбекских (с общими буквами ҳ қ ғ хватит одного, без них — нужно два)."""
+    tg, uz = len(_TG_WORDS.findall(text)), len(_UZ_CYRL_WORDS.findall(text))
+    return tg > uz and tg >= (1 if letters else 2)
 
 
 def normalize(code: str | None) -> str | None:
@@ -93,15 +113,18 @@ def detect(text: str) -> str | None:
         if english >= 2:
             return "en"
         return None
-    if _TG.search(text):
+    if _TG.search(text):  # ӣ ӯ ҷ — только в таджикском
         return "tg"
-    if _UZ_CYRL.search(text):
+    if _UZ_CYRL.search(text):  # ў — только в узбекском
         return "uz-cyrl"
     if _KK.search(text):
         return "kk"
     if _KY_KK.search(text):
         return "kk" if _TG_UZ.search(text) else "ky"
-    if _TG_UZ.search(text):
+    shared = bool(_TG_UZ.search(text))  # ҳ қ ғ — и таджикские, и узбекские
+    if _tg_by_words(text, shared):
+        return "tg"
+    if shared:
         return "uz-cyrl"
     if _KY_WORDS.search(text):
         return "ky"
