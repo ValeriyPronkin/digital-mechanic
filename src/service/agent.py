@@ -1767,8 +1767,16 @@ class Agent:
         return out
 
     def _search_many(self, queries: list[str], engine: str, k: int) -> list[Any]:
-        """Несколько запросов → одна выдача: по очереди лучшие из каждого, без повторов страниц."""
-        lists = [self.searcher.search(q, engine, k=k) for q in dict.fromkeys(queries) if q]
+        """Несколько запросов → одна выдача: по очереди лучшие из каждого, без повторов страниц.
+        Запросы — одновременно: на стенде каждый ждёт эмбеддинг Yandex (≈0,1 с), подряд четыре — ≈0,4 с."""
+        unique = [q for q in dict.fromkeys(queries) if q]
+        if len(unique) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(len(unique)) as pool:  # порядок выдачи — порядок запросов, как раньше
+                lists = list(pool.map(lambda q: self.searcher.search(q, engine, k=k), unique))
+        else:
+            lists = [self.searcher.search(q, engine, k=k) for q in unique]
         merged: list[Any] = []
         seen: set[tuple[str, int]] = set()
         for rank in range(k):
