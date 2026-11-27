@@ -1,3 +1,4 @@
+import { Fragment } from 'react'
 import type { PartsOffers as Offers } from '../api'
 import { copy } from '../copy'
 import { offerFacts, shownOffers, silentSuppliers, stockTone, webUrl } from '../lib/offers'
@@ -26,10 +27,10 @@ export function PartsOffers({ offers, removed }: { offers: Offers | null | undef
                       <span className="block">{o.name ?? o.designation ?? item.query}</span>
                       <span className="block text-dim">
                         {facts.map((f, j) => (
-                          <span key={j} className={f === o.available ? stockTone(o.in_stock) : undefined}>
+                          <Fragment key={j}>
                             {j > 0 && ' · '}
-                            {f}
-                          </span>
+                            <span className={f === o.available ? stockTone(o.in_stock) : undefined}>{f}</span>
+                          </Fragment>
                         ))}
                         {o.supplier && (
                           <>
