@@ -35,8 +35,9 @@ LANGS: dict[str, Lang] = {
     "kk": Lang("kk", "казахский (кириллица)", "Қазақша", "kk-KZ", "amira", "kk-KZ"),
     "ky": Lang("ky", "киргизский (кириллица)", "Кыргызча", None, None),
     "en": Lang("en", "английский", "English", "en-US", "john", "en-US"),
+    "hi": Lang("hi", "хинди", "हिन्दी", None, None),  # решение Валерия 27.11: текстом; голоса у SpeechKit нет
 }
-ALIASES = {"tj": "tg", "kz": "kk", "kg": "ky", "uzb": "uz", "uz-latn": "uz", "rus": "ru", "eng": "en"}
+ALIASES = {"tj": "tg", "kz": "kk", "kg": "ky", "uzb": "uz", "uz-latn": "uz", "rus": "ru", "eng": "en", "hin": "hi"}
 
 # Буквы, которых нет в русском: по ним язык кириллического текста узнаётся почти наверняка.
 _TG = re.compile(r"[ӣӯҷҶӢӮ]")
@@ -46,6 +47,13 @@ _KY_KK = re.compile(r"[өӨүҮңҢ]")
 _TG_UZ = re.compile(r"[ҳҲқҚғҒ]")
 _CYR = re.compile(r"[А-Яа-яЁёЎўҚқҒғҲҳӢӣӮӯҶҷӘәӨөҮүҰұҢңІі]")
 _LAT = re.compile(r"[A-Za-z]")
+_DEVA = re.compile(r"[\u0900-\u097F]")
+# хинглиш — хинди латиницей: служебные слова, которых нет в английском
+_HINGLISH = re.compile(
+    r"\b(?:hai|hain|kya|kaise|kaisa|kitna|kitni|kitne|kare|karna|karein|karu|mein|ka|ki|ke|ko|nahi|nahin|bhai|"
+    r"aur|se|kab|kaun|kahan|chahiye|wala|wali|abhi|yeh|ye|woh|matlab)\b",
+    re.I,
+)
 _UZ_LAT = re.compile(
     r"\b(?:va|bu|qancha|qanday|qaysi|nima|kerak|bo['‘ʻ’]?l|dvigatel\w*|uchun|bilan|emas|mumkin|qilish|"
     r"o['‘ʻ’]rnat\w*|tekshir\w*|almashtir\w*|moment\w*|tortish|mashina\w*|yurish|necha|qachon)\b|[oOgG]['‘ʻ’]",
@@ -73,11 +81,16 @@ def detect(text: str) -> str | None:
     Ломаный русский — русский: ответ ему по-русски."""
     if not text.strip():
         return None
-    cyr, lat = len(_CYR.findall(text)), len(_LAT.findall(text))
+    cyr, lat, deva = len(_CYR.findall(text)), len(_LAT.findall(text)), len(_DEVA.findall(text))
+    if deva > cyr and deva >= lat:
+        return "hi"
     if lat > cyr:
         if len(_UZ_LAT.findall(text)) >= 2:
             return "uz"
-        if len(_EN.findall(text)) >= 2:
+        hinglish, english = len(_HINGLISH.findall(text)), len(_EN.findall(text))
+        if hinglish >= 2 and hinglish > english:  # хинглиш — хинди, если явно не английский
+            return "hi"
+        if english >= 2:
             return "en"
         return None
     if _TG.search(text):
@@ -100,7 +113,7 @@ def instruction(code: str) -> str:
     if code == "ru" or code not in LANGS:
         return ""
     name = LANGS[code].name
-    script = " Пиши латиницей." if code == "uz" else (" Пиши кириллицей." if code != "en" else "")
+    script = {"uz": " Пиши латиницей.", "en": "", "hi": " Пиши деванагари."}.get(code, " Пиши кириллицей.")
     return (
         f"Язык ответа: {name}. Весь ответ — на этом языке, включая шаги и строки «Понадобится», «Безопасность» "
         f"(их тоже переведи).{script} Без изменений, как в руководстве: числа, диапазоны, единицы измерения, "
@@ -115,6 +128,8 @@ def matches(answer: str, code: str) -> bool:
         return True
     body = re.sub(r"«[^»]*»|\[R\d+\]", " ", answer)  # цитаты руководства — по-русски, это нормально
     cyr, lat = len(_CYR.findall(body)), len(_LAT.findall(body))
+    if code == "hi":
+        return len(_DEVA.findall(body)) > cyr
     if code in ("uz", "en"):
         return lat > cyr
     if cyr <= lat:
