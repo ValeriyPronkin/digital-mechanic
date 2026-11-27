@@ -74,6 +74,10 @@ SEARCH_PLAN_PROMPT = """Ты готовишь поиск по руководст
 Код неисправности проверки в запросы не добавляй, если вопрос не о ней."""
 _TICKET_ASK = re.compile(r"заявк|оформ|отправ", re.I)
 
+TICKET_NOT_ASKED = (
+    "Механик не просил заявку. Сначала ответь на его вопрос (если спрашивает, можно ли ехать, — первой строкой "
+    "«можно» или «нельзя» со ссылкой [R…]); заявку можно предложить одной строкой в конце."
+)
 SILENT_NOTE = "В руководстве этого двигателя нет порядка работ по этому узлу — нужна дефектовка."
 
 SYSTEM_PROMPT = """Ты — «Цифровой механик», помощник механика автопарка. Механик читает ответ с телефона и может быть \
@@ -458,8 +462,15 @@ def _quote_label(q: Any) -> str:
 GUIDE_ATTACHED = int(os.environ.get("GUIDE_ATTACHED", "3"))
 READ_PAGE_CHARS = 6000  # текст страницы в источнике R… для проверки цифр
 _DRIVE_ASK = re.compile(
-    r"можно ли (?:ехать|ездить|эксплуат)|своим ходом|доехать|перегнать|ехать дальше|можно ездить", re.I
-)
+    r"можно\b[^.?!]{0,25}?\b(?:ехать|ездить|эксплуатир\w*|двигаться|катать\w*)|своим ходом|доехать|доеду|перегнать|"
+    r"ехать дальше|ездить (?:пока|ещё|еще|дальше)|продолжать эксплуат|не опасно ехать|опасно ли ехать",
+    re.I,
+)  # Q37 «Можно пока ездить?» не попадал в прежний шаблон (приёмщик 27.11)
+# Механик просит заявку (или соглашается на предложенную): иначе draft_ticket не строит черновик (Q37: на вопрос
+# «можно ли ехать» модель сразу собрала черновик вместо ответа «нельзя» со страницей руководства)
+_TICKET_REQUEST = re.compile(r"заявк|оформ|отправ|черновик|дефектовк|созда[йт]|подготов", re.I)
+_YES = re.compile(r"^\W*(?:да|давай|ок|окей|хорошо|согласен|оформляй|делай|готовь|конечно)\b", re.I)
+_VERDICT = re.compile(r"нельзя|не эксплуатир|можно|не рекоменд|запрещ|не допуска|допускается|не ехать|не ездить", re.I)
 OPINION_MARK = "(мнение помощника, не из руководства)"
 # Утверждение о причине или диагнозе (#28, проверка с телефона): без ссылки [R…] — рассуждение модели
 _DIAG = re.compile(
@@ -828,6 +839,7 @@ class Agent:
         if refusal_cleaned:
             notes.append(clean_refusal.NOTE)
         final, _ = clean_refusal.drop_specialist(final)  # механик сам специалист (правило заказчика 27.11)
+        final, cited = self._drive_verdict(conv, question, final, cited)
         final, cited = self._complete_refusal(conv, question, final, cited)
         if conv.card is not None and conv.card.trend and _CARD_ASK.search(question) and conv.card.trend not in final:
             final = f"{final.rstrip()}\n\n📈 {conv.card.trend}"  # тенденция по истории ТС — кодом (#40 п. 4)
@@ -1308,6 +1320,8 @@ class Agent:
                 res = self._read_pages(conv, args)
                 return res, bool(res.get("pages"))
             if name == "draft_ticket":
+                if not self._ticket_requested(conv):
+                    return {"refused": TICKET_NOT_ASKED}, False
                 res = self._draft_ticket(conv, args)
                 return res, "refused" not in res
             if name == "fleet_summary":
@@ -1753,6 +1767,89 @@ class Agent:
         plan["queries"] = [mask_pii(q) for q in plan["queries"]]
         conv.passport["plan"] = {"lang": plan["lang"], "question_ru": plan["question_ru"], "queries": plan["queries"]}
         return plan
+
+    @staticmethod
+    def _ticket_requested(conv: Conversation) -> bool:
+        """Черновик — только по просьбе механика (правило 5 промпта, теперь кодом): в вопросе есть просьба о заявке,
+        или механик коротко согласился («да», «давай»), когда помощник предложил её прошлым ответом."""
+        question = _last_question(conv)
+        if _TICKET_REQUEST.search(question):
+            return True
+        if conv.draft is not None and not _DRIVE_ASK.search(question):
+            return True  # черновик уже показан — механик правит его состав («Поменяй работы»)
+        if not _YES.search(question) or len(question) > 60:
+            return False
+        last_user = max((i for i, m in enumerate(conv.messages) if m.get("role") == "user"), default=-1)
+        before = [m for m in conv.messages[:last_user] if m.get("role") == "assistant" and m.get("content")]
+        return bool(before) and bool(re.search(r"заявк|черновик", str(before[-1].get("content")), re.I))
+
+    def _drive_verdict(
+        self, conv: Conversation, question: str, text: str, cited: list[Source]
+    ) -> tuple[str, list[Source]]:
+        """«Можно ли ехать» — первым ответ «да/нет» со страницей руководства (приёмщик 27.11, Q37). Нет вердикта —
+        строка кода по результату проверки (правило срочности, D-6); нет ссылки на руководство в первом абзаце —
+        страница ограничений эксплуатации этого двигателя (реестр Никиты), та, где больше слов вопроса."""
+        if not _DRIVE_ASK.search(question) or (conv.passport.get("answer_lang") or "ru") != "ru":
+            return text, cited  # ответ не по-русски — строку кода по-русски не вставляем (указание модели — то же)
+        paras = text.split("\n\n")
+        k = next((i for i, p in enumerate(paras) if p.strip()), 0)
+        first = paras[k] if paras else ""
+        has_verdict, has_ref = bool(_VERDICT.search(first)), bool(_REF.search(first))
+        if has_verdict and has_ref:
+            return text, cited
+        limit_src = self._limit_source(conv, question)
+        tail = ""
+        if limit_src is not None:
+            tail = f" Ограничения эксплуатации в руководстве — стр. {limit_src.pdf_page} [{limit_src.ref}]."
+        if limit_src is not None and limit_src not in cited:
+            cited = [*cited, limit_src]
+        if has_verdict:
+            if not tail:
+                return text, cited
+            paras[k] = first.rstrip() + tail
+            conv.passport["drive_page_by_code"] = True
+            return "\n\n".join(paras), cited
+        card = conv.card
+        if card is None or card.status == "check_failed":
+            line = "**Решить по проверке нельзя:** запись не годится — повторите проверку; до неё следите за приборами."
+        elif card.status == "normal":
+            line = "**По проверке — можно:** двигатель в норме."
+        elif card.urgency == "high":
+            line = "**Ездить нельзя:** срочность по проверке высокая — до дефектовки машину не эксплуатировать."
+        else:
+            line = (
+                "**Однозначного «можно» нет:** по проверке нужна дефектовка в ближайшее время — ехать только до "
+                "места ремонта, следя за приборами."
+            )
+        conv.passport["drive_verdict_by_code"] = True
+        return f"{line}{tail}\n\n{text}".strip(), cited
+
+    def _limit_source(self, conv: Conversation, question: str) -> Source | None:
+        """Страница ограничений эксплуатации руководства этого двигателя — источником разговора."""
+        page_text = getattr(self.searcher, "page_text", None)
+        if page_text is None:
+            return None
+        engine = canonical_engine(conv.vehicle.engine_model) or conv.vehicle.engine_model
+        want = set(tokenize(question))
+        best: tuple[int, int, Any, str] | None = None
+        for n, limit in enumerate(nk_coverage.limits_for(engine)):
+            full = str(page_text(limit.manual, limit.page) or "")
+            if not full:
+                continue
+            score = len(want.intersection(tokenize(full)))
+            if best is None or score > best[0]:
+                best = (score, n, limit, full)
+        if best is None:
+            return None
+        _, _, limit, full = best
+        src = next((s for s in conv.sources.values() if s.manual_id == limit.manual and s.pdf_page == limit.page), None)
+        if src is None:
+            doc = DOCS_BY_ID.get(limit.manual)
+            name = doc.designation if doc else limit.manual
+            src = Source(ref=next_ref(conv), manual_id=limit.manual, manual=name, pdf_page=limit.page,
+                         section="", text=full[:6000])  # fmt: skip
+            conv.sources[src.ref] = src
+        return src
 
     def _draft_ticket(self, conv: Conversation, args: dict[str, Any]) -> dict[str, Any]:
         conv.draft = None
