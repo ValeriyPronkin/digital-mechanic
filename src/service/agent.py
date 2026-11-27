@@ -2230,7 +2230,12 @@ class Agent:
         if conv.contradiction is None:
             # блок — только под ответом на вопрос о спорной теме (зазоры), а не под диагнозом или «можно ли ехать»
             k = contradictions.match_answer(conv.vehicle.engine_model, text)
-            if k is not None and not k.topic.search(_last_question(conv)):
+            question = _last_question(conv)
+            # ответ не о спорной теме: объяснение карточки и прочие вопросы — полный блок с формулировками и эскалацией
+            # (снимок Валерия 27.11: в «Что проверить» было «Безопасное правило» простым текстом, без блока и «№ N»);
+            # «можно ли ехать» и просьба о заявке — только правило вместо одной формулировки, без блока
+            off_topic = _DRIVE_ASK.search(question) or _TICKET_REQUEST.search(question)
+            if k is not None and not k.topic.search(question) and off_topic:
                 # ответ не о спорной теме, но называет спорный срок или значение (B418HK98, текст к черновику заявки:
                 # «не позднее 15 минут после остановки [S2]») — без блока, но вместо одной формулировки — правило
                 page_text = getattr(self.searcher, "page_text", None)
