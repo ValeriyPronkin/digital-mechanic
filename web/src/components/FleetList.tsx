@@ -292,7 +292,12 @@ export function FleetList({
             <summary className="-my-3 flex min-h-11 cursor-pointer list-none items-center text-accent [&::-webkit-details-marker]:hidden">
               {copy.chief.legendTitle}
             </summary>
-            <p className="pt-3">{copy.chief.legend}</p>
+            <ul className="space-y-1 pt-3">
+              {copy.chief.legend.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            <p className="pt-1.5">{copy.chief.legendNote}</p>
           </details>
         )}
 

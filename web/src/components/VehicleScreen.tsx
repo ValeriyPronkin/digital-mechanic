@@ -35,6 +35,7 @@ import { TicketCard } from './TicketCard'
 import { TicketSheet } from './TicketSheet'
 import { VerdictCard } from './VerdictCard'
 import { queueHref } from '../lib/contradictions'
+import { Explain } from './Explain'
 
 function SessionPicker({
   sessions,
@@ -180,6 +181,9 @@ function AssistantBlock({
                 {copy.level.shorter}
               </button>
             )}
+            <Explain label={copy.level.explain} icon>
+              <p>{copy.level.explainText}</p>
+            </Explain>
           </div>
         )
       })()}
