@@ -30,6 +30,7 @@ import numpy as np
 from service import language
 from service.agent import Source, numbers
 from service.clients import ServiceError
+from service.sentences import SENTENCE_END
 
 STT_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
 TTS_URL = "https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize"
@@ -205,7 +206,7 @@ _NOT_FOUND = re.compile(
     r"не\s+наш[её]л|нет\s+в\s+руководств|руководств\w*[^.!?\n]{0,160}?\b(?:нет|не\s+приводится|не\s+указан\w*)\b",
     re.IGNORECASE,
 )
-_SENT = re.compile(r"(?<=[.!?])\s+|\n+")
+_SENT = re.compile(SENTENCE_END + r"|\n+")  # не перед строчной и не после «св.» (#90)
 
 
 @dataclass(frozen=True)

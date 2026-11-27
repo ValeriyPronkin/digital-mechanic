@@ -28,6 +28,7 @@ from typing import Any
 
 from service.fault_matrix import normalize
 from service.manuals.catalog import DOCS_BY_ID, canonical_engine
+from service.sentences import SPLIT
 
 PATH = Path(__file__).resolve().parents[2] / "data" / "contradictions.json"
 HEADER = "⚠ Противоречие в документации"
@@ -106,7 +107,7 @@ def match_answer(engine: str, answer: str) -> Known | None:
     return None
 
 
-_SENT = re.compile(r"(?<=[.!?])\s+")
+_SENT = SPLIT  # не перед строчной и не после «св.», «п.» (#90)
 _LIST_PREFIX = re.compile(r"^(\s*(?:\d+[.)]|[-*•])\s+)")
 _NO_CONTRADICTION = re.compile(r"противоречи\w* (?:в документации )?нет", re.I)
 _ADVICE_DUP = re.compile(
