@@ -352,7 +352,6 @@ export function TicketSheet({
         {(chosen?.action ?? pending.urgency.action) && (
           <p className="mt-2 text-[13px]" aria-live="polite">
             {chosen?.action ?? pending.urgency.action}
-            <span className="block text-mute">{copy.verdict.recommendation}</span>
           </p>
         )}
         <p className="mt-2 text-[13px] text-dim">{copy.ticket.proposedWhy(pending.urgency.word)}</p>

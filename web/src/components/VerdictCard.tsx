@@ -79,12 +79,7 @@ export function VerdictCard({ verdict: v }: { verdict: VerdictBlock }) {
               <span className="hidden text-[13px] text-accent group-open:inline [@media(hover:hover)]:[summary:hover_&]:underline">
                 {copy.verdict.hide}
               </span>
-              {v.urgency.action && (
-                <span className="basis-full pb-2">
-                  {v.urgency.action}
-                  <span className="block text-[13px] text-mute">{copy.verdict.recommendation}</span>
-                </span>
-              )}
+              {v.urgency.action && <span className="basis-full pb-2">{v.urgency.action}</span>}
             </summary>
             <ul className="mt-1 list-disc space-y-1 pl-5 text-[13px] text-dim marker:text-mute">
               {v.urgency.reasons.map((r) => (
