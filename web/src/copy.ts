@@ -203,6 +203,8 @@ export const copy = {
   lang: {
     label: 'Язык ответа',
     auto: 'Как в вопросе',
+    autoInline: 'как в вопросе', // after «Язык ответа:» in the folded line
+    change: 'изменить',
     voiceRu: 'голосом — по-русски',
     showRu: 'Показать по-русски',
   },
