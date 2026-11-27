@@ -156,8 +156,8 @@ def test_figure_table_and_item_numbers_are_references(ml: MLClient, toir: ToirCl
 
 
 def test_engine_variant_and_position_lists_are_labels(ml: MLClient, toir: ToirClient) -> None:
-    """Eval 27.11: «ЯМЗ-53642-20: 1130 Н·м» снималось за «42» и «20» из обозначения, «гайки поз. 11 и 12 — 24,5…29,4 Н·м»
-    — за номер позиции «12». Величина после перечня («по рис. 5 и 20 Н·м») по-прежнему проверяется."""
+    """Eval 27.11: «ЯМЗ-53642-20: 1130 Н·м» снималось за «42» и «20» из обозначения, «гайки поз. 11 и 12 —
+    24,5…29,4 Н·м» — за номер позиции «12». Величина после перечня («по рис. 5 и 20 Н·м») по-прежнему проверяется."""
     ag, conv = _conv(ml, toir)
     conv.sources["R5"] = Source(ref="R5", manual_id="yamz-236-rk", manual="РК", pdf_page=130, section="",
                                 text="Максимальный крутящий момент 1130 (115). Гайки 24,5…29,4 Н·м")  # fmt: skip
