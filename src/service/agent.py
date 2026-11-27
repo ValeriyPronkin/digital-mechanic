@@ -1414,7 +1414,7 @@ class Agent:
             if name == "draft_ticket":
                 if not self._ticket_requested(conv):
                     return {"refused": TICKET_NOT_ASKED}, False
-                res = self._draft_ticket(conv, args)
+                res = self._draft_ticket_or_matrix(conv, args)
                 return res, "refused" not in res
             if name == "fleet_summary":
                 result = self._fleet_summary()
@@ -2066,6 +2066,28 @@ class Agent:
             "urgency_reason": why,
             "status": "Черновик показан механику. Отправит он сам кнопкой «Отправить».",
         }
+
+    def _confirmed_cell(self, conv: Conversation) -> bool:
+        matrix = self._manual_matrix(conv)
+        return bool(matrix and matrix.get("status") == "confirmed")
+
+    def _card_conclusion(self, conv: Conversation) -> str:
+        card = conv.card
+        title = (card.fault_title if card else None) or "неисправность"
+        return f"По результату акустической проверки: {title}."
+
+    def _draft_ticket_or_matrix(self, conv: Conversation, args: dict[str, Any]) -> dict[str, Any]:
+        """Подтверждённая ячейка «код × двигатель»: работы модели не прошли проверку (ссылка мимо найденного,
+        цифра не из фрагмента) — черновик из матрицы, а не отказ. Аудит стенда 27.11: одна и та же просьба то
+        давала черновик, то отказ. Ячейка «в руководстве нет» — как раньше, черновик код не придумывает."""
+        res = self._draft_ticket(conv, args)
+        if "refused" not in res or not self._confirmed_cell(conv):
+            return res
+        for conclusion in (str(args.get("conclusion") or ""), self._card_conclusion(conv)):
+            retry = self._draft_ticket(conv, {"conclusion": conclusion} if conclusion else {})
+            if "refused" not in retry:
+                return {**retry, "note": "Работы и страницы — из проверенной матрицы руководства этого двигателя."}
+        return res
 
     @staticmethod
     def _ticket_refusal(diag: Diagnosis, card: VerdictCard) -> str | None:
