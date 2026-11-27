@@ -29,7 +29,7 @@ from service import (
     stand_log,
 )
 from service import parts_supplier as parts_supplier_mod
-from service.agent import Agent, Level
+from service.agent import Agent, LevelChoice
 from service.clients import MLClient, ServiceError, ToirClient
 from service.fault_matrix import card_explanation
 from service.fleet import fleet
@@ -351,7 +351,7 @@ class ChatIn(BaseModel):
     vehicle_id: str = Field(min_length=1)
     session_id: str = Field(min_length=1)
     message: str = Field(min_length=1, max_length=2000)
-    level: Level = "steps"  # уровень механика (#17): «Опытный» / «Пошагово»
+    level: LevelChoice = "auto"  # уровень механика: auto — по вопросу; novice | mechanic | master; expert | steps
     stt_id: int | None = None  # вопрос голосом: запись журнала распознавания (#31 — паспорт запроса)
     lang: str | None = Field(default=None, max_length=10)  # язык ответа: ru, uz, uz-cyrl, tg, kk, ky, en; нет — вопроса
     state: str | None = Field(default=None, max_length=400_000)  # подписанное состояние разговора
@@ -381,7 +381,8 @@ def chat(req: ChatIn, request: Request) -> dict[str, Any]:
         by_voice=stt is not None,
         stt=stt,
         speech_text=spoken.text,
-        level=req.level,
+        level=reply.level_used,
+        level_reason=reply.level_reason,
     )
     slog = journal()
     passport.write(pp, time.time(), put=slog.put if slog is not None else None)  # журнал стенда (#27)
