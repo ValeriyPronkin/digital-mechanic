@@ -37,6 +37,13 @@ STAND_URL ?= https://bbab8qkqhuhg3ere9dam.containers.yandexcloud.net/
 engineer-pack: install
 	uv run python scripts/engineer_pack.py $(STAND_URL) $(PACK_ARGS)
 
+## Сцены видео в браузере (Playwright): телефон WebKit 390×664 и ноутбук Chromium → reports/e2e/<метка>/report.md
+## По умолчанию — make run-local (:8010); стенд или превью — E2E_URL=…; E2E_ARGS="--only phone --send-ticket --break-images"
+E2E_URL ?= http://127.0.0.1:$(PORT_LOCAL)
+e2e: install
+	uv run python -m playwright install webkit chromium
+	uv run $(if $(wildcard .env),--env-file .env,) python scripts/e2e.py $(E2E_URL) $(E2E_ARGS)
+
 demo-check: install  ## сценарий видео на стенде /v2 перед дублем: таблица шагов, код 0 = готово (заявку не шлёт)
 	uv run python scripts/demo_check.py $(or $(STAND),$(STAND_URL)) $(ARGS)
 
