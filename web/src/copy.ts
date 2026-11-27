@@ -305,7 +305,7 @@ export const copy = {
     legend: { part: 'запчасти', tool: 'инструмент' },
     legendTitle: 'Цветом в ответе',
     designation: 'обозначение',
-    page: (n: number) => `стр. ${n}`,
+    page: (n: number) => `стр. ${n}`,
     open: 'Открыть страницу',
     noDetails: 'без обозначения и страницы',
   },
