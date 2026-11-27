@@ -1,0 +1,472 @@
+{
+ "label": "main69-ml-1",
+ "at": "2026-11-27 14:51",
+ "passed": 15,
+ "total": 22,
+ "page_found": 20,
+ "values_in_answer": 18,
+ "answerable": 21,
+ "foreign": 0,
+ "lang_ok": 18,
+ "lang_total": 22,
+ "rub_per_question": 0.1591,
+ "median_ms": 8696,
+ "results": [
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    31,
+    33,
+    269,
+    276
+   ],
+   "ms": 8949,
+   "id": "M01",
+   "type": "Ч",
+   "tags": [
+    "разговорный"
+   ],
+   "rub": 0.2204,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": false,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    272,
+    302,
+    320,
+    584
+   ],
+   "ms": 6341,
+   "id": "M02",
+   "type": "Ч",
+   "tags": [
+    "тз"
+   ],
+   "rub": 0.1463,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    192,
+    209,
+    581,
+    585
+   ],
+   "ms": 6476,
+   "id": "M03",
+   "type": "З",
+   "tags": [],
+   "rub": 0.1679,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    4
+   ],
+   "ms": 7299,
+   "id": "M04",
+   "type": "О",
+   "tags": [
+    "тз",
+    "своим_ходом"
+   ],
+   "rub": 0.1189,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    31,
+    33,
+    269,
+    270
+   ],
+   "ms": 9156,
+   "id": "M05",
+   "type": "И",
+   "tags": [],
+   "rub": 0.1598,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    20,
+    21,
+    129
+   ],
+   "ms": 12299,
+   "id": "M06",
+   "type": "П",
+   "tags": [],
+   "rub": 0.1847,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": false,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    117,
+    118,
+    137
+   ],
+   "ms": 7376,
+   "id": "M07",
+   "type": "Ч",
+   "tags": [
+    "тз"
+   ],
+   "rub": 0.1847,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    43,
+    135,
+    136,
+    139
+   ],
+   "ms": 7231,
+   "id": "M08",
+   "type": "И",
+   "tags": [
+    "разговорный"
+   ],
+   "rub": 0.1173,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    91,
+    107,
+    116,
+    139
+   ],
+   "ms": 10326,
+   "id": "M09",
+   "type": "О",
+   "tags": [],
+   "rub": 0.1929,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": null,
+   "values": null,
+   "foreign": false,
+   "refused": true,
+   "lang": true,
+   "ms": 3620,
+   "id": "M10",
+   "type": "Н",
+   "tags": [],
+   "rub": 0.0691,
+   "level": "mechanic",
+   "calls": 1
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    272,
+    320,
+    584
+   ],
+   "ms": 3693,
+   "id": "M11",
+   "type": "Ч",
+   "tags": [
+    "тз"
+   ],
+   "rub": 0.0814,
+   "level": "mechanic",
+   "calls": 2
+  },
+  {
+   "ok": false,
+   "page": false,
+   "values": false,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    113,
+    162,
+    180,
+    231
+   ],
+   "ms": 6674,
+   "id": "M12",
+   "type": "З",
+   "tags": [],
+   "rub": 0.1649,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    173,
+    411,
+    416
+   ],
+   "ms": 9166,
+   "id": "M13",
+   "type": "Ч",
+   "tags": [
+    "язык:uz"
+   ],
+   "rub": 0.1465,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    39,
+    164,
+    230
+   ],
+   "ms": 6014,
+   "id": "M14",
+   "type": "Ч",
+   "tags": [
+    "язык:tj",
+    "тз"
+   ],
+   "rub": 0.1479,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    272,
+    302,
+    320,
+    584
+   ],
+   "ms": 5684,
+   "id": "H01",
+   "type": "Ч",
+   "tags": [
+    "тз"
+   ],
+   "rub": 0.1227,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    31,
+    34,
+    269,
+    270
+   ],
+   "ms": 8984,
+   "id": "H02",
+   "type": "Ч",
+   "tags": [
+    "разговорный"
+   ],
+   "rub": 0.1876,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    20,
+    21,
+    129
+   ],
+   "ms": 9072,
+   "id": "H03",
+   "type": "П",
+   "tags": [],
+   "rub": 0.1932,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": true,
+   "found_pages": [
+    117,
+    118,
+    137
+   ],
+   "ms": 8605,
+   "id": "H04",
+   "type": "Ч",
+   "tags": [
+    "тз"
+   ],
+   "rub": 0.17,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": false,
+   "found_pages": [
+    10,
+    272,
+    302,
+    584
+   ],
+   "ms": 10283,
+   "id": "T01",
+   "type": "Ч",
+   "tags": [
+    "таджикский",
+    "общие буквы ҳ қ ғ"
+   ],
+   "rub": 0.1478,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": false,
+   "found_pages": [
+    117,
+    118,
+    137
+   ],
+   "ms": 11904,
+   "id": "T02",
+   "type": "Ч",
+   "tags": [
+    "таджикский",
+    "общие буквы ҳ қ ғ"
+   ],
+   "rub": 0.2005,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": false,
+   "found_pages": [
+    4
+   ],
+   "ms": 17604,
+   "id": "T03",
+   "type": "О",
+   "tags": [
+    "таджикский",
+    "общие буквы ҳ қ ғ"
+   ],
+   "rub": 0.1722,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": false,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": false,
+   "found_pages": [
+    20,
+    21,
+    129
+   ],
+   "ms": 8787,
+   "id": "T04",
+   "type": "П",
+   "tags": [
+    "таджикский",
+    "общие буквы ҳ қ ғ"
+   ],
+   "rub": 0.2027,
+   "level": "mechanic",
+   "calls": 3
+  }
+ ]
+}

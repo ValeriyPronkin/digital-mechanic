@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from service.clean_refusal import NOTE, clean, complete, drop_specialist, is_refusal
+from service.clean_refusal import NOTE, clean, complete, drop_specialist, is_refusal, unnumber_gaps
 from service.clients import MLClient, ToirClient
 from test_agent import ANOMALY, make_agent, say
 
@@ -45,7 +45,8 @@ def test_agent_refusal_is_clean(ml: MLClient, toir: ToirClient) -> None:
     answer = "В руководстве не нашёл момент для этой гайки. Есть давление масла 0,4–0,7 МПа [R1].\n\n1. На дефектовку."
     ag, _ = make_agent([say(answer)], ml, toir)
     reply = ag.ask(ag.start("B418HK98", "S-0007"), "Какой момент гайки?")
-    assert "МПа" not in reply.text and "1. На дефектовку." in reply.text and NOTE in reply.notes
+    assert "МПа" not in reply.text and "Что сделать: на дефектовку." in reply.text and NOTE in reply.notes
+    assert "1. " not in reply.text  # шаг без ссылки на руководство — не нумерованный
 
 
 def test_specialist_advice_dropped_but_manual_quote_kept() -> None:
@@ -82,3 +83,38 @@ def test_refusal_off_card_question_names_question_node(ml: MLClient, toir: ToirC
     ag, _ = make_agent([say("В руководстве на этот двигатель этого нет.")], ml, toir)
     reply = ag.ask(ag.start(*ANOMALY), "Какой момент затяжки гайки шкива?")
     assert "Что сделать: дефектовка узла, о котором вопрос." in reply.text and "F02" not in reply.text
+
+
+# ---------- совет без ссылки — не нумерованный шаг (приёмщик 27.11) ----------
+
+
+def test_gap_steps_leave_numbering() -> None:
+    text = (
+        "Ездить нельзя [R1].\n\n1. Заглушить двигатель [R1].\n2. Проверить уровень масла [R2].\n"
+        "3. Для болтов коренных примечания нет — уточните у производителя двигателя.\n4. Затянуть болты [R2].\n"
+        "5. Порядка работ по этому узлу в руководстве нет — нужна дефектовка.\n\nПонадобится: щуп."
+    )
+    out, n = unnumber_gaps(text)
+    assert n == 2
+    assert "1. Заглушить двигатель [R1].\n2. Проверить уровень масла [R2].\n3. Затянуть болты [R2].\n\n" in out
+    assert "\nЧто сделать: для болтов коренных примечания нет — уточните у производителя двигателя." in out
+    assert "4. " not in out and "5. " not in out and out.endswith("Понадобится: щуп.")
+
+
+def test_steps_with_refs_and_plain_steps_kept() -> None:
+    text = "Зазор 0,25 мм [R1].\n\n1. Снять крышки.\n2. Провернуть коленвал [R1]."
+    assert unnumber_gaps(text) == (text, 0)  # шаг процедуры без пробела руководства — остаётся шагом
+
+
+def test_full_refusal_without_refs_has_no_numbered_steps() -> None:
+    text = "В руководстве порядка нет.\n\n1. Заглушите двигатель.\n2. Организуйте перевозку на базу."
+    out, n = unnumber_gaps(text)
+    assert n == 2
+    assert out == "В руководстве порядка нет.\n\nЧто сделать: заглушите двигатель. Организуйте перевозку на базу."
+
+
+def test_no_label_for_other_language_and_abbreviation_kept() -> None:
+    out, _ = unnumber_gaps("Жавоб [R1].\n\n1. Қадам [R1].\n2. «в руководстве не нашёл» — дефектовка.", label="")
+    assert out.endswith("1. Қадам [R1].\n\n«в руководстве не нашёл» — дефектовка.")
+    out, _ = unnumber_gaps("Ответ [R1].\n\n1. ТНВД — уточните у производителя.")
+    assert out.endswith("Что сделать: ТНВД — уточните у производителя.")
