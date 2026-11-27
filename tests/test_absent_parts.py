@@ -9,7 +9,6 @@ from typing import Any
 
 import pytest
 
-from matrix_fixture import needs_matrix
 from service.absent_parts import NOT_APPLICABLE, items, verified
 from service.agent import bench_context
 from service.clients import MLClient, ToirClient
@@ -105,7 +104,6 @@ def test_bench_page_marked_in_answer_and_sources(ml: MLClient, toir: ToirClient)
     assert "испытания на стенде" in str(tool["content"])
 
 
-@needs_matrix
 def test_matrix_cell_answers_absent_node(ml: MLClient, toir: ToirClient) -> None:
     """Ячейка матрицы «узла нет» (F12 × ЯМЗ-236М2: дизель, зажигания нет) — факт о конструкции с цитатой."""
     reply, llm = _ask(ml, toir, ("B418HK98", "S-0007"), "Как проверить свечи зажигания?")

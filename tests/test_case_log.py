@@ -63,7 +63,6 @@ def _events(r: Any) -> list[dict[str, Any]]:
     return [json.loads(x[6:]) for x in r.text.split("\n") if x.startswith("data: ")]
 
 
-@pytest.mark.usefixtures("without_matrix")  # сценарий C1 из фикстуры поиска — как в CI, без матрицы
 def test_long_session_through_v2(ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GIT_SHA", "0123456789abcdef0123456789abcdef01234567")
     steps = [

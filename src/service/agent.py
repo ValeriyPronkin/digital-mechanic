@@ -36,7 +36,7 @@ from service.clients import (
     TicketResponse,
     ToirClient,
 )
-from service.fault_matrix import cell_for, matrix_path
+from service.fault_matrix import MATRIX_PATH, cell_for
 from service.fleet import Fleet, Vehicle
 from service.fleet_status import summary as fleet_summary
 from service.llm import DEADLINE, LLMError, LLMProvider, LLMReply, Message, ToolCall, ToolSpec, plan_temperature
@@ -617,7 +617,7 @@ def _file_stamp(path: str, mtime: float) -> str:
 def knowledge_version() -> str:
     """Версия знаний для кэша ответов: пересобрали индекс или матрицу — старые ответы не используются."""
     stamps = []
-    for path in (Path(os.environ.get("INDEX_DIR", ".index")) / "passport.json", matrix_path()):
+    for path in (Path(os.environ.get("INDEX_DIR", ".index")) / "passport.json", MATRIX_PATH):
         stamps.append(_file_stamp(str(path), path.stat().st_mtime) if path.exists() else "-")
     return "/".join(stamps)
 

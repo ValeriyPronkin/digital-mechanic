@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from matrix_fixture import needs_matrix
 from service import api_v2, main
 from service.clients import MLClient, TicketRequest, ToirClient
 from service.fault_matrix import cell_for
@@ -51,7 +50,6 @@ def ask(c: TestClient, vid: str, sid: str, message: str, new: bool = False) -> l
     return events(c.post("/api/v2/chat", json=body))
 
 
-@pytest.mark.usefixtures("without_matrix")  # сценарий C1 из фикстуры поиска — как в CI, без матрицы
 def test_each_work_carries_its_page_and_the_toir_body_does_not(
     ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -91,7 +89,6 @@ def test_each_work_carries_its_page_and_the_toir_body_does_not(
     assert c.get(f"/api/v2/vehicles/{vid}/tickets").json()[0]["lines"] is None
 
 
-@needs_matrix  # работы и запчасти — из настоящей матрицы, её в git нет (#102)
 def test_works_and_parts_from_the_matrix_carry_their_pages(
     ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -126,7 +123,6 @@ def test_works_and_parts_from_the_matrix_carry_their_pages(
     assert view["lines"]["operations"] == ops[:1]  # оставлена только первая работа (keep_operations=[0])
 
 
-@pytest.mark.usefixtures("without_matrix")  # сценарий C1 из фикстуры поиска — как в CI, без матрицы
 def test_the_register_lists_every_ticket_of_the_fleet(
     ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -7,7 +7,6 @@ from typing import Any
 
 import httpx
 
-from matrix_fixture import needs_matrix
 from service.agent import _page_window
 from service.clients import MLClient, ToirClient
 from service.llm import DeepSeekProvider, LLMReply
@@ -149,7 +148,6 @@ def test_plain_steps_without_diagnosis_are_not_marked(ml: MLClient, toir: ToirCl
     assert OPINION not in text
 
 
-@pytest.mark.usefixtures("without_matrix")  # сценарий C1 из фикстуры поиска — как в CI, без матрицы
 def test_no_link_card_line_is_dropped(ml: MLClient, toir: ToirClient) -> None:
     """Связь с карточкой — только если она есть: строка «к этому не относится» из ответа убирается кодом."""
     for line in (
@@ -200,17 +198,6 @@ def _ask_b418(ml: MLClient, toir: ToirClient, page: tuple[str, int, str], answer
     return ag.ask(ag.start("B418HK98", "S-0008"), question)
 
 
-@pytest.fixture
-def synthetic_matrix(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """Синтетическая матрица (цитаты выдуманы): ячейка F01 × ЯМЗ-236М2 подтверждена, текста руководств нет."""
-    from matrix_fixture import write_synthetic
-    from service import fault_matrix
-
-    path = write_synthetic(tmp_path / "fault_matrix.json")
-    monkeypatch.setattr(fault_matrix, "matrix_path", lambda: path)
-
-
-@pytest.mark.usefixtures("synthetic_matrix")
 def test_unrelated_question_has_no_raw_matrix_tail(ml: MLClient, toir: ToirClient) -> None:
     """K961TH198 / S-0039 (приёмка 27.11): в конец ответа о ремне код дописывал «К найденной неисправности это не
     относится. По руководству при «Коробка передач»: …*** Неи…» — сырой текст таблицы, обрезанный посреди слова.
@@ -218,11 +205,9 @@ def test_unrelated_question_has_no_raw_matrix_tail(ml: MLClient, toir: ToirClien
     reply = _ask_b418(ml, toir, BELT, "Прогиб 7–12 мм при усилии 40 Н [R1].", "Как проверить натяжение ремня")
     assert "К найденной неисправности" not in reply.text and "По руководству при" not in reply.text
     assert "Прогиб 7–12 мм при усилии 40 Н" in reply.text
-    assert "деталь а" not in reply.text.lower()  # работы ячейки — не в ответ на чужой вопрос
     assert reply.followup is not None  # кнопка к проверке по неисправности остаётся (прежний интерфейс)
 
 
-@needs_matrix
 def test_unrelated_question_gets_button_without_matrix_line(ml: MLClient, toir: ToirClient) -> None:
     reply = _ask_b418(ml, toir, BELT, "Прогиб 7–12 мм при усилии 40 Н [R1].", "Как проверить натяжение ремня")
     assert "К найденной неисправности" not in reply.text  # приёмка 27.11: сырой текст ячейки не дописываем
@@ -242,7 +227,6 @@ def test_card_question_has_no_link_line(ml: MLClient, toir: ToirClient) -> None:
     assert "К найденной неисправности" not in reply.text and reply.followup is None
 
 
-@needs_matrix
 def test_link_button_survives_answer_cache(ml: MLClient, toir: ToirClient) -> None:
     ag, _ = make_agent([_cite("Прогиб 7–12 мм при усилии 40 Н [R1].")], ml, toir, OnePage(BELT))
     ag.ask(ag.start("B418HK98", "S-0008"), "Как проверить натяжение ремня")
@@ -251,7 +235,6 @@ def test_link_button_survives_answer_cache(ml: MLClient, toir: ToirClient) -> No
     assert "К найденной неисправности" not in hit.text
 
 
-@needs_matrix
 def test_model_no_link_sentence_inside_sourced_line_is_dropped(ml: MLClient, toir: ToirClient) -> None:
     answer = (
         "Прогиб 7–12 мм при усилии 40 Н [R1]. По карточке проверки — неисправность клапанного механизма, "
@@ -262,14 +245,12 @@ def test_model_no_link_sentence_inside_sourced_line_is_dropped(ml: MLClient, toi
     assert "К найденной неисправности" not in reply.text
 
 
-@needs_matrix
 def test_any_unsourced_card_sentence_is_dropped(ml: MLClient, toir: ToirClient) -> None:
     answer = "Прогиб 7–12 мм [R1].\n\nПо карточке: отклонение по клапанному механизму, к ремням связи не даёт."
     reply = _ask_b418(ml, toir, BELT, answer, "Как проверить натяжение ремня")
     assert "связи не даёт" not in reply.text and "К найденной неисправности" not in reply.text
 
 
-@pytest.mark.usefixtures("without_matrix")  # сценарий C1 из фикстуры поиска — как в CI, без матрицы
 def test_opinion_with_work_part_or_number_is_cut(ml: MLClient, toir: ToirClient) -> None:
     """Приёмка v2: под пометкой «мнение» — советы по деталям и цифры. Остаётся один общий совет."""
     answer = ("Нажать на ветвь с усилием 40 Н [R1].\n"

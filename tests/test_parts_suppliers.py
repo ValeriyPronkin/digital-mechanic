@@ -11,7 +11,6 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from matrix_fixture import needs_matrix
 from service import api_v2, main
 from service.clients import MLClient, ToirClient
 from service.parts_supplier import (
@@ -154,7 +153,6 @@ def test_designation_only_from_manual_else_by_name(monkeypatch: pytest.MonkeyPat
     }
 
 
-@needs_matrix
 def test_manual_designations_come_from_matrix() -> None:
     from service.fleet import fleet
 
@@ -164,7 +162,6 @@ def test_manual_designations_come_from_matrix() -> None:
     assert got["Втулка коромысла (236-1007118), стр. 169"] == "236-1007118"
 
 
-@pytest.mark.usefixtures("without_matrix")  # сценарий C1 из фикстуры поиска — как в CI, без матрицы
 def test_v2_ticket_pending_carries_parts_offers(
     ml: MLClient, toir: ToirClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

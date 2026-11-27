@@ -15,8 +15,6 @@ from service.agent import Agent
 from service.clients import MLClient, ToirClient
 from test_agent import FAILED, FixtureSearch, make_agent, say
 
-pytestmark = pytest.mark.usefixtures("without_matrix")
-
 BUTTON = "Получить результат диагностики"
 NORMAL = ("C808CM178", "S-0145")
 VERDICT_ON_ENGINE = re.compile(r"двигатель\s+(?:в\s+норме|исправен)", re.I)

@@ -1,6 +1,6 @@
 """Матрица «код неисправности × двигатель» по руководствам (issue #10, D-10).
 
-`fault_matrix.json` — 14 кодов × 5 моделей. Каждый вывод в ячейке — дословная цитата со страницей PDF:
+`data/fault_matrix.json` — 14 кодов × 5 моделей. Каждый вывод в ячейке — дословная цитата со страницей PDF:
 применимость узла (`applicable` + `basis`), страницы с проверкой/ремонтом, работы, запчасти, предупреждения.
 
 Код, а не модель, решает:
@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -23,15 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from service.manuals.catalog import DOCS_BY_ID, canonical_engine, documents_for_engine
-from service.manuals.index import index_dir
 
-log = logging.getLogger(__name__)
-
-# Матрица — текстовый индекс по руководствам (450 цитат), поэтому в git её нет (#96, шаг 2). Она лежит рядом с
-# индексом в INDEX_DIR: стенд скачивает её из бакета вместе с индексом (`kb_store.FILES`). Локально — ещё и в data/.
-MATRIX_FILE = "fault_matrix.json"
-DATA_MATRIX_PATH = Path(__file__).resolve().parents[2] / "data" / MATRIX_FILE
-SOURCE_PATH = DATA_MATRIX_PATH.with_name("fault_matrix.src.json")  # ручные решения о применимости, в git
+MATRIX_PATH = Path(__file__).resolve().parents[2] / "data" / "fault_matrix.json"
 APPLICABLE = ("true", "false", "unknown")
 STATUSES = ("confirmed", "not_applicable", "silent", "unknown")
 
@@ -242,50 +234,9 @@ def verify_cell(cell: Cell, page_text: PageText | None = None) -> tuple[Cell, li
 # ---------- загрузка для сервиса ----------
 
 
-def matrix_path() -> Path:
-    """Откуда читать матрицу: из каталога индекса (INDEX_DIR), если она там есть, иначе из data/ (локально).
-    Единственное место, где решается путь: читают через него сервис, скрипты и тесты."""
-    own = index_dir() / MATRIX_FILE
-    return own if own.is_file() else DATA_MATRIX_PATH
-
-
-def matrix_targets() -> list[Path]:
-    """Куда пишут сборка и дополнение матрицы: data/ (локально) и каталог индекса, если он есть, — чтобы
-    `kb_store.publish_index` выложил матрицу вместе с индексом."""
-    out = [DATA_MATRIX_PATH]
-    if index_dir().is_dir() and index_dir().resolve() != DATA_MATRIX_PATH.parent.resolve():
-        out.append(index_dir() / MATRIX_FILE)
-    return out
-
-
-def save_matrix(data: dict[str, Any]) -> list[Path]:
-    text = json.dumps(data, ensure_ascii=False, indent=1) + "\n"
-    targets = matrix_targets()
-    for path in targets:
-        path.write_text(text, encoding="utf-8")
-    return targets
-
-
-_missing_logged: set[str] = set()
-
-
-def _load(path: Path | None = None) -> dict[tuple[str, str], Cell]:
-    """Ячейки матрицы. Файла нет (стенд без опубликованной матрицы, CI) — пустая матрица, а не падение: совместимость
-    «не ясно», у карточки нет пояснения из руководства, в `get_diagnosis` нет ячейки; причина — в журнале и /health."""
-    path = path or matrix_path()
-    try:
-        stamp = path.stat().st_mtime_ns
-    except FileNotFoundError:
-        if str(path) not in _missing_logged:
-            _missing_logged.add(str(path))
-            log.warning("матрица «код × двигатель» не найдена (%s): работаем без неё", path)
-        return {}
-    return _parse(str(path), stamp)
-
-
-@lru_cache(maxsize=2)
-def _parse(path: str, _stamp: int) -> dict[tuple[str, str], Cell]:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+@lru_cache(maxsize=1)
+def _load(path: Path = MATRIX_PATH) -> dict[tuple[str, str], Cell]:
+    data = json.loads(path.read_text(encoding="utf-8"))
     cells: dict[tuple[str, str], Cell] = {}
     for d in data["cells"]:
         # При загрузке — проверка без текста страниц: документ этого двигателя и номер страницы.
@@ -293,57 +244,6 @@ def _parse(path: str, _stamp: int) -> dict[tuple[str, str], Cell]:
         cell, _ = verify_cell(Cell.from_json(d))
         cells[(cell.code, cell.engine)] = cell
     return cells
-
-
-def matrix_status() -> dict[str, Any]:
-    """Для /health: загружена ли матрица у экземпляра и откуда (index — из бакета с индексом, data — локально)."""
-    path = matrix_path()
-    cells = _load(path)
-    if not cells:
-        return {"present": False}
-    source = "data" if path == DATA_MATRIX_PATH else "index"
-    confirmed = sum(c.status == "confirmed" for c in cells.values())
-    return {"present": True, "source": source, "cells": len(cells), "confirmed": confirmed}
-
-
-def matrix_loaded() -> bool:
-    return bool(_load())
-
-
-@lru_cache(maxsize=1)
-def _source_applicability() -> dict[tuple[str, str], Cell]:
-    """Только применимость узла из источника матрицы (`fault_matrix.src.json`, в git): без страниц, работ и
-    запчастей. Сборка берёт применимость отсюда же, поэтому «узла нет» совпадает с собранной матрицей."""
-    src = json.loads(SOURCE_PATH.read_text(encoding="utf-8"))
-    out: dict[tuple[str, str], Cell] = {}
-    for code, spec in src["codes"].items():
-        for group, d in spec["cells"].items():
-            for engine in src["groups"][group]:
-                cell = Cell(
-                    code=code,
-                    engine=engine,
-                    applicable=str(d["applicable"]),
-                    basis=Ref.from_json(d["basis"]) if d.get("basis") else None,
-                    why=str(d.get("why", "")),
-                    inference=bool(d.get("inference", False)),
-                )
-                cell, _ = verify_cell(cell)
-                out[(code, engine)] = cell
-    return out
-
-
-def applicability_for(code: str, engine: str) -> Cell | None:
-    """Для правила 5 (совместимость): ячейка матрицы, а без матрицы — решение о применимости из источника.
-    Так «узла нет» и без опубликованной матрицы не пропускает заявку на несуществующий узел."""
-    if matrix_loaded():
-        return cell_for(code, engine)
-    canon = canonical_engine(engine)
-    return None if canon is None else _source_applicability().get((code, canon))
-
-
-def applicability_cells() -> list[Cell]:
-    """Все ячейки для вывода «узла нет»: из матрицы, а без неё — из источника (страниц и работ в них нет)."""
-    return all_cells() if matrix_loaded() else list(_source_applicability().values())
 
 
 def all_cells() -> list[Cell]:

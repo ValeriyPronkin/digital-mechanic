@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import pytest
 
-from matrix_fixture import needs_matrix
 from service.agent import _DRIVE_ASK, TICKET_NOT_ASKED
 from service.clients import MLClient, ToirClient
 from service.manual_search import ManualHit
@@ -52,7 +51,6 @@ def test_yes_after_offer_builds_draft(ml: MLClient, toir: ToirClient) -> None:
     assert ag.ask(conv, "Да").draft is not None  # согласие на предложенную заявку — просьба
 
 
-@needs_matrix  # R1 — страница ячейки матрицы ЗМЗ-40905.10 × F14; матрицы в git нет (#102)
 def test_explicit_request_builds_draft(ml: MLClient, toir: ToirClient) -> None:
     ag, _ = make_agent([call("draft_ticket", **DRAFT), say("Черновик готов [R1].")], ml, toir)
     assert ag.ask(ag.start(*Q37), "Оформи заявку на дефектовку").draft is not None

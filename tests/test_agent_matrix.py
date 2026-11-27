@@ -5,17 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import pytest
-
-from matrix_fixture import NO_MATRIX
 from service.clients import MLClient, ToirClient
-from service.fault_matrix import cell_for, matrix_loaded
+from service.fault_matrix import cell_for
 from service.llm import Message
 from service.manuals.catalog import documents_for_engine
 from test_agent import EmptySearch, call, first, make_agent, say
-
-if not matrix_loaded():  # ниже на импорте ищутся проверки с подтверждённой и «молчащей» ячейкой
-    pytest.skip(NO_MATRIX, allow_module_level=True)
 
 
 def _status(v: object, s: object, status: str) -> bool:

@@ -9,15 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from matrix_fixture import needs_matrix, write_synthetic
-from service import fault_matrix
 from service.compat import check, is_compatible
-from service.fault_matrix import Cell, Ref, matrix_loaded, matrix_path, normalize, verify_cell
+from service.fault_matrix import MATRIX_PATH, Cell, Ref, normalize, verify_cell
 from service.manuals.catalog import ENGINES, documents_for_engine
 
 ROOT = Path(__file__).resolve().parents[1]
-# Настоящая матрица — вне git (#96): в CI её нет, тесты её содержания пропускаются (needs_matrix).
-DATA = json.loads(matrix_path().read_text(encoding="utf-8")) if matrix_loaded() else {"cells": []}
+DATA = json.loads(MATRIX_PATH.read_text(encoding="utf-8"))
 CELLS = [Cell.from_json(c) for c in DATA["cells"]]
 CODES = [f["code"] for f in json.loads((ROOT / "data" / "fault_types.json").read_text(encoding="utf-8"))]
 SRC = json.loads((ROOT / "data" / "fault_matrix.src.json").read_text(encoding="utf-8"))
@@ -44,7 +41,6 @@ def anomalies() -> list[tuple[str, str, str]]:
     ]
 
 
-@needs_matrix
 def test_all_70_cells_have_status() -> None:
     assert len(CODES) == 14 and len(ENGINES) == 5
     assert {(c.code, c.engine) for c in CELLS} == {(c, e) for c in CODES for e in ENGINES}
@@ -52,7 +48,6 @@ def test_all_70_cells_have_status() -> None:
     assert all(c.status in ("confirmed", "not_applicable", "silent", "unknown") for c in CELLS)
 
 
-@needs_matrix
 def test_every_reference_is_this_engine_and_existing_page() -> None:
     """Без текста страниц: документ — руководство этого двигателя, страница в 1..число страниц PDF."""
     for c in CELLS:
@@ -61,7 +56,6 @@ def test_every_reference_is_this_engine_and_existing_page() -> None:
         assert checked.status == c.status
 
 
-@needs_matrix
 def test_conclusions_have_evidence() -> None:
     for c in CELLS:
         if c.applicable in ("true", "false"):
@@ -75,7 +69,6 @@ def test_conclusions_have_evidence() -> None:
             assert not c.operations and not c.spare_parts, (c.code, c.engine)
 
 
-@needs_matrix
 def test_matrix_follows_source_decisions() -> None:
     """Сборка не меняет ручных решений о применимости (кроме понижения до unknown — его быть не должно)."""
     decided = {
@@ -95,7 +88,6 @@ def test_exactly_seven_impossible_checks_in_data() -> None:
         assert compat.why and compat.source  # механику — почему и где в руководстве
 
 
-@needs_matrix
 def test_compatible_anomalies_link_only_to_own_engine_manuals() -> None:
     by = {(c.code, c.engine): c for c in CELLS}
     for _, code, eng in anomalies():
@@ -172,7 +164,6 @@ def test_normalize_ignores_layout() -> None:
 INDEX = Path(os.environ.get("INDEX_DIR", ".index"))
 
 
-@needs_matrix
 @pytest.mark.skipif(not (INDEX / "fragments.jsonl").exists(), reason="индекс не собран (make index)")
 def test_every_quote_is_on_its_page() -> None:
     from service.manuals.index import load_fragments
@@ -191,7 +182,6 @@ def test_every_quote_is_on_its_page() -> None:
         assert checked.status == c.status
 
 
-@needs_matrix
 def test_card_explanation_has_pages_for_confirmed_cell() -> None:
     from service.fault_matrix import _load, card_explanation
 
@@ -199,55 +189,3 @@ def test_card_explanation_has_pages_for_confirmed_cell() -> None:
     exp = card_explanation(cell.code, cell.engine)
     assert exp is not None and exp["pages"]
     assert {p["pdf_page"] for p in exp["pages"]} == {r.page for r in cell.pages}
-
-
-# ---------- где лежит матрица (#96, шаг 2): в INDEX_DIR рядом с индексом, иначе data/ ----------
-
-
-def test_impossible_checks_hold_without_matrix(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Правило 5 не зависит от того, опубликована ли матрица: без неё «узла нет» — из источника матрицы (в git)."""
-    monkeypatch.setattr(fault_matrix, "DATA_MATRIX_PATH", tmp_path / "нет.json")
-    monkeypatch.setenv("INDEX_DIR", str(tmp_path / "index"))
-    assert not matrix_loaded()
-    found = {(sid, code, eng) for sid, code, eng in anomalies() if not is_compatible(code, eng)}
-    assert found == IMPOSSIBLE
-    for _, code, eng in IMPOSSIBLE:
-        assert check(code, eng).why and check(code, eng).source
-    assert fault_matrix.cell_for("F01", "ЯМЗ-236М2") is None  # работ и страниц без матрицы нет — не выдумываем
-    assert fault_matrix.card_explanation("F01", "ЯМЗ-236М2") is None
-    assert fault_matrix.matrix_status() == {"present": False}
-
-
-def test_matrix_from_index_dir_wins_over_data(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    index = tmp_path / "index"
-    monkeypatch.setenv("INDEX_DIR", str(index))
-    monkeypatch.setattr(fault_matrix, "DATA_MATRIX_PATH", write_synthetic(tmp_path / "data" / "fault_matrix.json"))
-    assert matrix_path() == tmp_path / "data" / "fault_matrix.json"
-    assert fault_matrix.matrix_status()["source"] == "data"
-    write_synthetic(index / "fault_matrix.json")
-    assert matrix_path() == index / "fault_matrix.json"
-    assert fault_matrix.matrix_status() == {"present": True, "source": "index", "cells": 2, "confirmed": 1}
-
-
-def test_synthetic_matrix_drives_card_and_compat(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("INDEX_DIR", str(tmp_path / "index"))
-    monkeypatch.setattr(fault_matrix, "DATA_MATRIX_PATH", write_synthetic(tmp_path / "fault_matrix.json"))
-    exp = fault_matrix.card_explanation("F01", "ЯМЗ-236М2")
-    assert exp is not None and exp["status"] == "confirmed"
-    assert [s["pdf_page"] for s in exp["steps"]] == [11] and exp["steps"][0]["tools"] == ["ключ"]
-    assert exp["parts"][0]["designation"] == "000-0000000"
-    assert not is_compatible("F09", "ЗМЗ-5234.10") and check("F09", "ЗМЗ-5234.10").source == "zmz-5234-rk, стр. 3"
-    assert is_compatible("F02", "ЯМЗ-236М2")  # ячейки нет в матрице — заявку не блокирует, как и раньше
-
-
-def test_save_matrix_writes_data_and_index(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Сборка пишет матрицу и в data/, и в INDEX_DIR — оттуда её выкладывает kb_store.publish_index."""
-    data = tmp_path / "data" / "fault_matrix.json"
-    data.parent.mkdir()
-    monkeypatch.setattr(fault_matrix, "DATA_MATRIX_PATH", data)
-    monkeypatch.setenv("INDEX_DIR", str(tmp_path / "нет-индекса"))
-    assert fault_matrix.save_matrix({"cells": []}) == [data]
-    (tmp_path / "index").mkdir()
-    monkeypatch.setenv("INDEX_DIR", str(tmp_path / "index"))
-    assert fault_matrix.save_matrix({"cells": []}) == [data, tmp_path / "index" / "fault_matrix.json"]
-    assert (tmp_path / "index" / "fault_matrix.json").read_text(encoding="utf-8") == data.read_text(encoding="utf-8")
