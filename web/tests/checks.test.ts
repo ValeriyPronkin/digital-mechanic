@@ -83,3 +83,18 @@ test('the flag decides only when it says «does not fit»', () => {
     word: 'запись непригодна',
   })
 })
+
+test('«Создать заявку» only for an anomaly the engine can have', async () => {
+  const { ticketFits } = await import('../src/lib/checks.ts')
+  const anomaly = { status: 'anomaly', case: 'anomaly' } as const
+  assert.equal(ticketFits(anomaly, { fits_engine: true }, 'covered'), true)
+  assert.equal(ticketFits(anomaly, undefined, undefined), true) // an older server: no field, no guide
+  assert.equal(ticketFits({ status: 'anomaly', case: 'preliminary' }, undefined, undefined), true)
+  // C808CM178 / S-0144: a turbo fault on a carburettor engine
+  assert.equal(ticketFits({ status: 'anomaly', case: 'mismatch' }, undefined, undefined), false)
+  assert.equal(ticketFits(anomaly, { fits_engine: false }, undefined), false)
+  assert.equal(ticketFits(anomaly, undefined, 'not_covered'), false)
+  assert.equal(ticketFits({ status: 'normal', case: 'normal' }, undefined, undefined), false)
+  assert.equal(ticketFits({ status: 'check_failed', case: 'failed' }, undefined, undefined), false)
+  assert.equal(ticketFits(undefined, undefined, undefined), false)
+})
