@@ -210,6 +210,16 @@ export const copy = {
     earlier: 'Заявки по машине',
     failed: 'Не получилось отправить. Попробуйте ещё раз',
   },
+  // the sheet a sent ticket prints on, for the defect inspection (TicketPrint)
+  print: {
+    action: 'Распечатать',
+    ticketOf: (date: string) => `Заявка от ${date}`,
+    checkOf: (id: string, date: string | null) => (date ? `проверка ${id} от ${date}` : `проверка ${id}`),
+    result: 'Результат дефектовки:',
+    outcome: { confirmed: 'подтвердилось', not_confirmed: 'не подтвердилось', other_fault: 'другая неисправность' },
+    date: 'Дата',
+    signature: 'Подпись',
+  },
   tool: {
     get_diagnosis: 'Запрос диагностики',
     get_vehicle_history: 'История машины',

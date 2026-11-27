@@ -95,7 +95,11 @@ export function sheetLines(
       const source = lineSource(line)
       return {
         text: line.text,
-        page: line.manual && line.pdf_page ? sourceLabel({ short: line.manual, pdf_page: line.pdf_page }) : null,
+        // the manual by its short name, as on a chip: «РК ЯМЗ-236М2, стр. 269» keeps a work and its page on one line
+        page:
+          line.manual && line.pdf_page
+            ? sourceLabel({ short: line.short || line.manual, pdf_page: line.pdf_page })
+            : null,
         scanned: line.scanned,
         ...(source ? { source } : {}),
       }
@@ -112,4 +116,12 @@ export function sheetLines(
     parts: payload.spare_parts.map((text) => ({ text, page: null, scanned: false })),
     pages: works.some((w) => w.page) ? [] : pagesByManual(payload.references),
   }
+}
+
+/** The conclusion cut after its first word when that word is the verdict: «Вероятно», «Предварительно».
+ *  The printed sheet sets the word in bold, so a preliminary result is seen as one before the sentence is
+ *  read. A conclusion that does not start so comes back whole, with no word to mark. */
+export function verdictWord(conclusion: string): [word: string, rest: string] {
+  const m = conclusion.match(/^(\p{Lu}\p{Ll}+):\s+(.*)$/su)
+  return m ? [m[1], m[2]] : ['', conclusion]
 }
