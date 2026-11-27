@@ -1,13 +1,14 @@
-# Превью-деплой каждого PR в Yandex Cloud Serverless Containers .
-# Открыт/обновлён PR → образ в Container Registry → ревизия контейнера pr-<номер> → проверка /health
-# → комментарий со ссылкой (один на PR, обновляется). Закрыт/слит PR → контейнер удаляется.
+# Превью-деплой PR с меткой `preview` в Yandex Cloud Serverless Containers.
+# Только по метке (решение Валерия, 27.11): лимит облака — 10 контейнеров, открытых PR — десятки.
+# Метка поставлена / push в PR с меткой → образ в Container Registry → ревизия контейнера pr-<номер> → проверка
+# /health → комментарий со ссылкой (один на PR, обновляется). PR закрыт/слит или метка снята → контейнер удаляется.
 # Без переменной YC_REGISTRY_ID (Yandex Cloud не настроен) jobs пропускаются, CI не краснеет.
 # Ключ сервисного аккаунта — только из секрета во временный файл (chmod 600); set -x не включать.
 name: Preview
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, synchronize, reopened, closed, labeled, unlabeled]
     # PR только с документацией превью не нужен: меньше писем и трат.
     paths-ignore:
       - "**/*.md"
@@ -33,8 +34,14 @@ env:
 jobs:
   deploy:
     name: Превью — деплой
+    # Только PR с меткой preview: при её постановке или push в такой PR (другие метки не передеплоивают).
+    # opened не нужен: PR, открытый сразу с меткой, присылает и labeled — иначе две сборки подряд.
     # PR из форков секретов не получают — пропускаем.
-    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository && vars.YC_REGISTRY_ID != ''
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository && vars.YC_REGISTRY_ID != '' && (
+        (github.event.action == 'labeled' && github.event.label.name == 'preview') ||
+        (contains(fromJSON('["synchronize","reopened"]'), github.event.action) &&
+         contains(github.event.pull_request.labels.*.name, 'preview')))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -139,7 +146,7 @@ jobs:
             echo
             echo "Ответ \`/health\` при деплое: \`${HEALTH_JSON}\`"
             echo
-            echo "_Обновляется при каждом push; контейнер удаляется при закрытии PR._"
+            echo "_Обновляется при каждом push; контейнер удаляется при закрытии PR или снятии метки \`preview\`._"
           } > "$BODY_FILE"
           jq -Rs '{body: .}' "$BODY_FILE" > "$BODY_FILE.json"
           COMMENT_ID=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
@@ -158,7 +165,11 @@ jobs:
 
   cleanup:
     name: Превью — удаление
-    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository && vars.YC_REGISTRY_ID != ''
+    # Закрытие — всегда (контейнер мог остаться с тех пор, когда превью делалось без метки); снятие метки preview.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository && vars.YC_REGISTRY_ID != '' && (
+        github.event.action == 'closed' ||
+        (github.event.action == 'unlabeled' && github.event.label.name == 'preview'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -197,6 +208,7 @@ jobs:
       - name: Отметить в комментарии PR
         env:
           GH_TOKEN: ${{ github.token }}
+          ACTION: ${{ github.event.action }}
         run: |
           set -eu
           COMMENT_ID=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
@@ -205,8 +217,9 @@ jobs:
             echo "Комментария превью нет"
             exit 0
           fi
-          printf '%s\n### 🔎 Превью PR #%s\n\nPR закрыт — контейнер `%s` удалён.\n' \
-            "$COMMENT_MARKER" "$PR_NUMBER" "$CONTAINER_NAME" | jq -Rs '{body: .}' > "$RUNNER_TEMP/body.json"
+          if [ "$ACTION" = "closed" ]; then WHY="PR закрыт"; else WHY="Метка \`preview\` снята"; fi
+          printf '%s\n### 🔎 Превью PR #%s\n\n%s — контейнер `%s` удалён.\n' \
+            "$COMMENT_MARKER" "$PR_NUMBER" "$WHY" "$CONTAINER_NAME" | jq -Rs '{body: .}' > "$RUNNER_TEMP/body.json"
           gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" --input "$RUNNER_TEMP/body.json" >/dev/null
           echo "Комментарий обновлён: $COMMENT_ID"
 
