@@ -1,0 +1,232 @@
+{
+ "label": "pt-parts-1",
+ "at": "2026-11-27 18:34",
+ "passed": 8,
+ "total": 10,
+ "page_found": 8,
+ "values_in_answer": 10,
+ "answerable": 10,
+ "foreign": 0,
+ "lang_ok": 0,
+ "lang_total": 0,
+ "rub_per_question": 0.1155,
+ "median_ms": 3889,
+ "results": [
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": null,
+   "found_pages": [
+    135,
+    137,
+    138,
+    139
+   ],
+   "ms": 6132,
+   "id": "P01",
+   "type": "И",
+   "tags": [
+    "инструмент"
+   ],
+   "rub": 0.1962,
+   "level": "novice",
+   "calls": 4
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": null,
+   "found_pages": [
+    152,
+    209,
+    393,
+    585
+   ],
+   "ms": 3908,
+   "id": "P02",
+   "type": "З",
+   "tags": [
+    "запчасти"
+   ],
+   "rub": 0.1109,
+   "level": "mechanic",
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": null,
+   "found_pages": [
+    81,
+    85,
+    106,
+    118,
+    126
+   ],
+   "ms": 3871,
+   "id": "P03",
+   "type": "И",
+   "tags": [
+    "инструмент"
+   ],
+   "rub": 0.1148,
+   "level": "novice",
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": null,
+   "found_pages": [
+    31,
+    33,
+    43,
+    269,
+    270,
+    276
+   ],
+   "ms": 4490,
+   "id": "P04",
+   "type": "И",
+   "tags": [
+    "инструмент"
+   ],
+   "rub": 0.1264,
+   "level": "novice",
+   "calls": 2
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": null,
+   "found_pages": [
+    119,
+    169
+   ],
+   "ms": 3849,
+   "id": "P05",
+   "type": "З",
+   "tags": [
+    "запчасти"
+   ],
+   "rub": 0.0863,
+   "level": "master",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": null,
+   "found_pages": [
+    46,
+    104,
+    107
+   ],
+   "ms": 3681,
+   "id": "P06",
+   "type": "З",
+   "tags": [
+    "запчасти"
+   ],
+   "rub": 0.102,
+   "level": "master",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": null,
+   "found_pages": [
+    90,
+    153,
+    154,
+    222,
+    386,
+    459
+   ],
+   "ms": 2626,
+   "id": "P07",
+   "type": "З",
+   "tags": [
+    "запчасти"
+   ],
+   "rub": 0.0706,
+   "level": "master",
+   "calls": 2
+  },
+  {
+   "ok": false,
+   "page": false,
+   "values": true,
+   "foreign": false,
+   "lang": null,
+   "found_pages": [
+    115,
+    204
+   ],
+   "ms": 3588,
+   "id": "P08",
+   "type": "И",
+   "tags": [
+    "инструмент"
+   ],
+   "rub": 0.0863,
+   "level": "mechanic",
+   "calls": 2
+  },
+  {
+   "ok": false,
+   "page": false,
+   "values": true,
+   "foreign": false,
+   "lang": null,
+   "found_pages": [
+    60,
+    261
+   ],
+   "ms": 4338,
+   "id": "P09",
+   "type": "И",
+   "tags": [
+    "инструмент"
+   ],
+   "rub": 0.124,
+   "level": "mechanic",
+   "calls": 3
+  },
+  {
+   "ok": true,
+   "page": true,
+   "values": true,
+   "foreign": false,
+   "lang": null,
+   "found_pages": [
+    20,
+    21
+   ],
+   "ms": 5087,
+   "id": "P10",
+   "type": "И",
+   "tags": [
+    "инструмент"
+   ],
+   "rub": 0.1378,
+   "level": "novice",
+   "calls": 3
+  }
+ ]
+}

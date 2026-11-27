@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { VerdictBlock } from '../api'
 import { copy } from '../copy'
+import { Explain } from './Explain'
 import { checkData, confidenceLine } from '../lib/checks'
 import { dateTimeRu, num } from '../lib/format'
 
@@ -65,6 +66,16 @@ export function VerdictCard({ verdict: v }: { verdict: VerdictBlock }) {
         {!mismatch && threshold && (
           <p className={`text-[13px] ${threshold.below ? 'text-warn' : 'text-dim'}`}>{threshold.text}</p>
         )}
+        {/* «понятно с листа»: what the three figures mean, one line each, behind one link */}
+        {!mismatch && v.anomaly_score !== null && v.confidence !== null && (
+          <div className="flex flex-wrap gap-y-1.5">
+            <Explain label={copy.verdict.explain}>
+              <p>{copy.verdict.explainLines.score}</p>
+              <p>{copy.verdict.explainLines.confidence}</p>
+              <p>{copy.verdict.explainLines.recording}</p>
+            </Explain>
+          </div>
+        )}
 
         {v.urgency && (
           <details className="group border-t border-line pt-3">
@@ -81,6 +92,7 @@ export function VerdictCard({ verdict: v }: { verdict: VerdictBlock }) {
               </span>
               {v.urgency.action && <span className="basis-full pb-2">{v.urgency.action}</span>}
             </summary>
+            <p className="mt-1 text-[13px] text-dim">{copy.verdict.urgencyHint}</p>
             <ul className="mt-1 list-disc space-y-1 pl-5 text-[13px] text-dim marker:text-mute">
               {v.urgency.reasons.map((r) => (
                 <li key={r}>{r}</li>

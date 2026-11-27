@@ -69,6 +69,23 @@ def handle(ref: str) -> str:
     return "S" + ref[1:] if ref.startswith("R") else ref
 
 
+def answer_spans(conv: Conversation, reply: AgentReply, text: str) -> list[dict[str, Any]]:
+    """Запчасти и инструмент в тексте ответа — по реестру руководств (`parts_tools.spans`), для раскраски в web/:
+    {type: part|tool, text, start, end, name, designation, page, manual_id, ref}. Смещения — в символах Unicode."""
+    from service import parts_tools
+
+    cited: dict[tuple[str, int], str] = {}
+    for s in reply.sources:
+        doc = str(s.get("url") or "").removeprefix("/manuals/").split("#", 1)[0]
+        if doc:
+            cited[(doc, int(s["pdf_page"]))] = handle(str(s["ref"]))
+    try:
+        return parts_tools.spans(conv.vehicle.engine_model, text, cited)
+    except Exception:  # разметка — украшение: сбой не рвёт ответ
+        log.exception("разметка запчастей и инструмента")
+        return []
+
+
 def to_handles(text: str) -> str:
     return _REF.sub(lambda m: f"[S{m.group(1)}]", text)
 
@@ -490,7 +507,9 @@ def tool_events(reply: AgentReply, conv: Conversation, verdict_sent: bool) -> tu
         name = s.get("tool") or s.get("name", "")
         tid = f"t{n}"
         block = None
-        if name == "get_diagnosis" and not verdict_sent:
+        if name == "get_diagnosis" and verdict_sent:
+            continue  # карточка уже на экране — второй раз шаг «Результат проверки» не показываем
+        if name == "get_diagnosis":
             block = verdict_block(conv)
             verdict_sent = block is not None
         events.append(
@@ -1055,7 +1074,8 @@ def build_router(
                 "level_word": LEVEL_WORD[reply.level_used],  # type: ignore[index]
                 "level_reason": reply.level_reason,
             }
-            yield _sse({"type": "text", "text": text, "round": 1, **level_info})
+            spans = answer_spans(conv, reply, text)  # запчасти и инструмент — для раскраски в web/
+            yield _sse({"type": "text", "text": text, "round": 1, **level_info, "spans": spans})
             ver = verification(reply, text)
             yield _sse(ver)
             # «Показать по-русски» — вслед за ответом, механик его не ждёт; цифры проверены guard
@@ -1233,7 +1253,21 @@ def build_router(
     # ---------- противоречия: очередь главного механика (эскалация) ----------
 
     def queue() -> Any:
-        return get_agent().escalation
+        """Очередь противоречий; в ней всегда весь реестр известных (`known`) — главный механик видит всё сразу."""
+        from service import contradictions
+
+        ag = get_agent()
+        q = ag.escalation
+        page_text = getattr(ag.searcher, "page_text", None)
+        registry = [
+            (k, contradictions.verified_quotes(k, page_text) or list(k.quotes), ", ".join(k.engines))
+            for k in contradictions.known()
+        ]
+        try:
+            q.seed(registry)
+        except Exception as exc:  # бакет недоступен — список из того, что уже записано
+            log.warning("реестр противоречий не внесён в очередь: %s", type(exc).__name__)
+        return q
 
     def item_or_404(number: int) -> dict[str, Any]:
         item = queue().get(number)
@@ -1242,8 +1276,11 @@ def build_router(
         return dict(item)
 
     @router.get("/contradictions")
-    def contradictions_queue(status: Literal["open", "sent", "resolved", "all"] = "open") -> list[dict[str, Any]]:
-        """Очередь главного механика: что, двигатель, обе формулировки со страницами, сколько раз всплывало."""
+    def contradictions_queue(
+        status: Literal["known", "open", "sent", "resolved", "all"] = "open",
+    ) -> list[dict[str, Any]]:
+        """Очередь главного механика: что, двигатель, обе формулировки со страницами, сколько раз всплывало
+        (`count` — «в ответах N»). `all` — весь список, включая известные из реестра, о которых ещё не спрашивали."""
         return [dict(i) for i in queue().items(status)]
 
     @router.get("/contradictions/journal")

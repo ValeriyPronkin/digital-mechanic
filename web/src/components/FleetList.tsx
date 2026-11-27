@@ -14,6 +14,7 @@ import { dateRu, plateKey } from '../lib/format'
 import { CHECKED, nextChoice, PRESSED_STATUS } from '../lib/ui'
 import { QueueRow } from './ContradictionQueue'
 import { REGISTER } from './TicketRegister'
+import { ThemeSelect } from './ThemeSelect'
 
 export type Role = 'mechanic' | 'chief'
 
@@ -250,7 +251,10 @@ export function FleetList({
           320×568. */}
       <div className="space-y-3 border-b border-line px-4 py-3">
         <div className="space-y-2">
-          <p className="text-[13px] leading-none text-dim">{copy.product}</p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[13px] leading-none text-dim">{copy.product}</p>
+            <ThemeSelect />
+          </div>
           <div className="flex items-center justify-between gap-3">
             <h1 className="text-[22px] leading-[1.15] font-semibold">{copy.fleet.title}</h1>
             <RoleSwitch role={role} onRole={onRole} />
@@ -288,7 +292,12 @@ export function FleetList({
             <summary className="-my-3 flex min-h-11 cursor-pointer list-none items-center text-accent [&::-webkit-details-marker]:hidden">
               {copy.chief.legendTitle}
             </summary>
-            <p className="pt-3">{copy.chief.legend}</p>
+            <ul className="space-y-1 pt-3">
+              {copy.chief.legend.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            <p className="pt-1.5">{copy.chief.legendNote}</p>
           </details>
         )}
 

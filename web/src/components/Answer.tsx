@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { SourceItem, Verification } from '../api'
 import { copy } from '../copy'
 import {
@@ -162,22 +162,29 @@ function Pages({ docs, verified, scanned, onOpen }: Marks & { docs: CitedDoc[]; 
   )
 }
 
-/** From 900 px the thread is wide and the answer is read whole: «Подробнее» starts open there. */
+/** From 900 px the thread is wide and the answer is read whole: «Весь ответ» starts open there. */
 const wide = () => typeof window !== 'undefined' && window.matchMedia('(min-width: 900px)').matches
 
-/** The agent's text, compact: «Коротко» — the first paragraph, larger; the rest under «Подробнее»; small
+/** The agent's text, compact: «Коротко» — the first paragraph, larger; the rest under «Весь ответ»; small
  *  numbered marks after claims instead of chips; one list of the manual's pages under the answer, without
  *  repeats. The server's text is drawn as it came: nothing is rewritten, only laid out.
  *  `verification` is the server's check of that text: the claims it withdrew and the counts under the answer.
  *  Model-written text wraps anywhere when it has to: one long token must not push the thread sideways.
- *  «Подробнее» is a button, not a `<details>`: the scenes of the video (scripts/e2e.py) count `<details>`
+ *  «Весь ответ» is a button, not a `<details>`: the scenes of the video (scripts/e2e.py) count `<details>`
  *  to see that an answer is finished. */
 export function Answer({
   text,
   verification,
+  afterLead,
   onOpen,
   ...marks
-}: { text: string; verification?: Verification } & Props) {
+}: {
+  text: string
+  verification?: Verification
+  // Always in sight, never folded under «Весь ответ»: right under «Коротко» (the manuals disagree, D-20 —
+  // Валерий, 27.11: folded, it was not seen). Without a lead, at the top of the answer.
+  afterLead?: ReactNode
+} & Props) {
   const [more, setMore] = useState(wide)
   const withClaims = attachWithdrawn(parseAnswer(text), verification?.withdrawn)
   const withRuns = markRepeats(withClaims, (handle) => marks.sources[handle]?.manual_id)
@@ -195,6 +202,7 @@ export function Answer({
           <div className="text-[18px] leading-[1.4] font-medium">
             <Blocks nodes={[lead]} {...line} />
           </div>
+          {afterLead}
           {more && <Blocks nodes={rest} {...line} />}
           <button
             type="button"
@@ -220,7 +228,10 @@ export function Answer({
           </button>
         </>
       ) : (
-        <Blocks nodes={rest} {...line} />
+        <>
+          {afterLead}
+          <Blocks nodes={rest} {...line} />
+        </>
       )}
       <Pages docs={docs} {...marks} onOpen={open} />
       <CheckSummary verification={verification} />
