@@ -76,6 +76,7 @@ def vehicle_status(v: Vehicle, fault_titles: dict[str, str] | None = None) -> Ve
                 "quarantine", [f"{name}: {compat.why} — результату верить нельзя, нужна повторная проверка"], last
             )
         urgency, why = urgency_for(last)
+        why = why.split(". Чем грозит")[0]  # строка парка — только основание; угроза — на карточке
         why = _ru(why.removeprefix(f"{code}: "))
         why = why[:1].lower() + why[1:]  # «Клапанный механизм: оценка отклонения 0,93, …» — одна строка
         if urgency == "high":

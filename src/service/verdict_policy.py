@@ -50,7 +50,14 @@ def _num(x: float) -> str:
     return f"{x:.2f}".replace(".", ",")
 
 
-def urgency_for(diag: Diagnosis) -> tuple[Urgency, str]:
+def risk_line(code: str) -> str:
+    """Чем грозит неисправность — по классу опасности (data/danger_classes.json). Это оценка инженера, а не текст
+    руководства, поэтому так и подписано; запрета эксплуатации здесь нет."""
+    basis = _DANGER["classes"].get(code, {}).get("basis")
+    return f"Чем грозит (оценка инженера, не из руководства): {basis}" if basis else ""
+
+
+def _urgency_rule(diag: Diagnosis) -> tuple[Urgency, str]:
     """Срочность — правило в коде, с основанием простыми словами: на чём основан предложенный приоритет.
     Одно и то же для карточки, заявки и сводки парка (issue #40 п. 1). Название неисправности здесь не
     повторяется: оно стоит рядом, в заголовке карточки и в строке парка."""
@@ -69,6 +76,14 @@ def urgency_for(diag: Diagnosis) -> tuple[Urgency, str]:
     if cls == 1:
         return "low", f"Оценка отклонения {_num(score)} ниже порога {_num(SCORE_HIGH)}, двигателю узел не грозит"
     return "medium", f"Оценка отклонения {_num(score)} ниже порога {_num(SCORE_HIGH)}"
+
+
+def urgency_for(diag: Diagnosis) -> tuple[Urgency, str]:
+    """Приоритет и его основание; кроме класса 3 (там угроза уже в основании) — ещё и чем грозит неисправность."""
+    urgency, reason = _urgency_rule(diag)
+    code = diag.anomaly_type or ""
+    risk = risk_line(code) if danger_class(code) != 3 else ""
+    return urgency, f"{reason}. {risk}" if risk else reason
 
 
 def trend_for(history: list[Any], session_id: str) -> str | None:
@@ -251,7 +266,7 @@ def _build_card(diag: Diagnosis, fault_titles: dict[str, str], engine: str | Non
     return VerdictCard(
         status="anomaly",
         color="red",
-        title=f"Вероятно: {title}" if known else "Неисправность неизвестного типа",
+        title=f"Вероятно: {title[:1].lower()}{title[1:]}" if known and title else "Неисправность неизвестного типа",
         action=URGENCY_ACTION[urgency]
         if urgency
         else "Тип неисправности не распознан. Повторите проверку; заявку по такому результату не оформляем.",

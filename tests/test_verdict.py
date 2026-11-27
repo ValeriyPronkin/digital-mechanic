@@ -73,7 +73,7 @@ def test_early_recheck_banner(ml: MLClient) -> None:
 def test_title_from_reference_not_from_response(ml: MLClient) -> None:
     diag = ml.diagnose("M333YK47", "S-0005").model_copy(update={"anomaly_title": "Двигатель исправен"})
     card = build_card(diag, fleet().fault_titles)
-    assert card.title == "Вероятно: Дизельная топливоподача"
+    assert card.title == "Вероятно: дизельная топливоподача"
 
 
 @pytest.mark.parametrize("injection", INJECTIONS)
