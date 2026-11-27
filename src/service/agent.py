@@ -47,6 +47,7 @@ from service.nikita import copy as nk_copy
 from service.nikita import coverage as nk_coverage
 from service.nikita import pages as nk_pages
 from service.nikita import read as nk_read
+from service.sentences import SENTENCE_END
 from service.spend import SpendLedger
 from service.store import Store
 from service.verdict_policy import CRITICAL_CODES, Urgency, VerdictCard, build_card, urgency_for  # noqa: F401
@@ -58,6 +59,11 @@ PREFETCH_K = 4  # страниц, которые код находит до вы
 FRAGMENT_CHARS = 450  # столько знаков фрагмента видит модель: предложения, где есть слова запроса
 WIDE_HITS = 2  # лучшим попаданиям — окно страницы: цифра часто в соседнем фрагменте той же страницы (#28)
 WIDE_CHARS = 1800
+FINAL_NOTE = (
+    "[Код сервиса: шаги поиска кончились. Ответь сейчас по уже найденным фрагментам, без новых вызовов "
+    "инструментов; чего в них нет — так и скажи.]"
+)
+NO_TIME = "Не успел собрать ответ. Переформулируйте вопрос короче."
 
 SEARCH_PLAN_PROMPT = """Ты готовишь поиск по руководству по эксплуатации и ремонту двигателя. Вопрос механика может \
 быть разговорным или не на русском. Верни только JSON без пояснений:
@@ -383,7 +389,11 @@ def next_ref(conv: Conversation) -> str:
     return f"R{max(used, default=0) + 1}"
 
 
-_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n")
+# Конец фразы — точка, «!» или «?» перед заглавной буквой (или кавычкой, скобкой с ней) и перевод строки. После
+# сокращений («рис.», «стр.», «св.», «п.», «т. е.») фраза не кончается: иначе guard снимал «6 [R1]» из «по рис. 6 [R1]»
+# и оставлял обрывок без ссылки (#90, 27.11: «у гаек поз.», «св. Поэтому…»).
+SENTENCE_SPLIT = re.compile(SENTENCE_END + r"|\n")
+_SENTENCE = SENTENCE_SPLIT
 
 
 def _norm_num(s: str) -> str:
@@ -833,7 +843,7 @@ class Agent:
                     }
                 )
         else:
-            text = "Не успел собрать ответ. Переформулируйте вопрос короче."
+            text = self._final_without_tools(conv, request_id, steps, LEVEL_MAX_TOKENS[level])
             conv.messages.append({"role": "assistant", "content": text})
 
         if target is None:  # код не узнал язык — берём язык из плана поиска (модель)
@@ -1136,6 +1146,27 @@ class Agent:
             trace=trace,
             followup=followup,
         )
+
+    def _final_without_tools(
+        self, conv: Conversation, request_id: str, steps: list[dict[str, Any]], max_tokens: int
+    ) -> str:
+        """Шаги кончились, а модель всё ещё ищет (отчёт приёмщика: «Не успел собрать ответ») — ещё один вызов
+        без инструментов: ответ по уже найденному. Проверка цифр та же (guard). Сбой — прежняя фраза.
+        Перенесено из #90 (общее исправление, без подтягивания страниц-продолжений)."""
+        msgs: list[Message] = [*conv.messages, {"role": "user", "content": FINAL_NOTE}]
+        try:
+            self.check_budget()
+            t0 = time.monotonic()
+            reply = self.provider.chat(msgs, [], max_tokens=max_tokens)
+            ms = int((time.monotonic() - t0) * 1000)
+        except (LLMError, BudgetExceededError):
+            return NO_TIME
+        cost = self._spend(request_id, MAX_STEPS + 1, reply, ms)
+        steps.append({"step": MAX_STEPS + 1, "kind": "llm", "name": reply.model + " (ответ по найденному)",
+                      "tokens_in": reply.tokens_in, "tokens_out": reply.tokens_out,
+                      "tokens_cached": reply.tokens_cached, "cost_rub": round(cost, 4), "ms": ms})  # fmt: skip
+        conv.passport["final_without_tools"] = True
+        return reply.content.strip() if reply.content.strip() and not reply.tool_calls else NO_TIME
 
     def _spend(self, request_id: str, step: int, reply: LLMReply, ms: int) -> float:
         """Каждый вызов модели — в журнал экземпляра и в общий счётчик стенда (#11): одна точка учёта расхода."""

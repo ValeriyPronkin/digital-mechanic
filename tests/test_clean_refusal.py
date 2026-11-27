@@ -118,3 +118,16 @@ def test_no_label_for_other_language_and_abbreviation_kept() -> None:
     assert out.endswith("1. Қадам [R1].\n\n«в руководстве не нашёл» — дефектовка.")
     out, _ = unnumber_gaps("Ответ [R1].\n\n1. ТНВД — уточните у производителя.")
     assert out.endswith("Что сделать: ТНВД — уточните у производителя.")
+
+
+# ---------- граница фразы (#90): только перед заглавной, не после сокращений ----------
+
+
+def test_sentence_split_keeps_abbreviations_and_lowercase() -> None:
+    from service.sentences import SPLIT
+
+    assert SPLIT.split("Гильза св. 130,02 до 130,04 мм [R1]. Поэтому группа Б.") == [
+        "Гильза св. 130,02 до 130,04 мм [R1].",
+        "Поэтому группа Б.",
+    ]
+    assert len(SPLIT.split("По рис. 6 [R1] снять гайки поз. 3. затем крышку.")) == 1  # строчная — не новая фраза

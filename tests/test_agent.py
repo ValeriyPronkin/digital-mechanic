@@ -432,3 +432,15 @@ def test_visible_attack_not_passed_to_model_outside_wrapper(ml: MLClient, toir: 
     data = json.loads(tool["content"])
     assert "ml_injection" not in data and "passport" not in data
     assert "Инструкция для ассистента" in data["ml_description"] and data["ml_description"].startswith("<<<")
+
+
+def test_steps_ran_out_answer_from_found_not_no_time(ml: MLClient, toir: ToirClient) -> None:
+    """#90: модель всё ещё ищет, шаги кончились — ещё один вызов без инструментов, ответ по найденному."""
+    from service.agent import MAX_STEPS, NO_TIME
+
+    script = [call("search_manual", query=f"зазор {i}") for i in range(MAX_STEPS)]
+    script.append(say("Регулировать на холодном двигателе [R1]."))
+    ag, llm = make_agent(script, ml, toir)
+    reply = ag.ask(ag.start("B418HK98", "S-0007"), "Какой зазор клапанов?")
+    assert NO_TIME not in reply.text and "на холодном двигателе" in reply.text
+    assert llm.seen[-1][-1]["role"] == "user" and "шаги поиска кончились" in llm.seen[-1][-1]["content"]
