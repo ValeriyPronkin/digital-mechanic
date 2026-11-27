@@ -81,6 +81,10 @@ export const copy = {
     show: 'Показать',
     hide: 'Скрыть',
     model: 'модель',
+    // the confidence against the server's threshold, as numbers: «Уверенность 0,58 — ниже порога 0,60: вывод предварительный»
+    belowThreshold: (confidence: string, threshold: string) =>
+      `Уверенность ${confidence} — ниже порога ${threshold}: вывод предварительный`,
+    atThreshold: (confidence: string, threshold: string) => `Уверенность ${confidence} — не ниже порога ${threshold}`,
   },
   guide: {
     word: {

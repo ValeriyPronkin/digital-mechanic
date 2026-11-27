@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { copy } from '../src/copy.ts'
-import { checkData, checkLook, lineRuns, rowBadges } from '../src/lib/checks.ts'
+import { checkData, checkLook, confidenceLine, lineRuns, rowBadges } from '../src/lib/checks.ts'
 
 const places = (runs: { i: number }[][]) => runs.map((run) => run.map((p) => p.i))
 
@@ -82,4 +82,19 @@ test('the flag decides only when it says «does not fit»', () => {
     dot: 'bg-mute',
     word: 'запись непригодна',
   })
+})
+
+test('the confidence is shown against the server’s threshold, as numbers', () => {
+  assert.deepEqual(confidenceLine({ confidence: 0.58, confidence_threshold: 0.6 }), {
+    text: 'Уверенность 0,58 — ниже порога 0,60: вывод предварительный',
+    below: true,
+  })
+  assert.deepEqual(confidenceLine({ confidence: 0.6, confidence_threshold: 0.6 }), {
+    text: 'Уверенность 0,60 — не ниже порога 0,60',
+    below: false,
+  })
+  // no threshold from the server, or no confidence (a failed recording): nothing is said
+  assert.equal(confidenceLine({ confidence: 0.58 }), null)
+  assert.equal(confidenceLine({ confidence: 0.58, confidence_threshold: null }), null)
+  assert.equal(confidenceLine({ confidence: null, confidence_threshold: 0.6 }), null)
 })

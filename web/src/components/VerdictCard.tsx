@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { VerdictBlock } from '../api'
 import { copy } from '../copy'
-import { checkData } from '../lib/checks'
+import { checkData, confidenceLine } from '../lib/checks'
 import { dateTimeRu, num } from '../lib/format'
 
 const tone = (v: VerdictBlock): { bar: string; text: string } => {
@@ -33,6 +33,7 @@ export function VerdictCard({ verdict: v }: { verdict: VerdictBlock }) {
   const [showForeign, setShowForeign] = useState(false)
   const t = tone(v)
   const mismatch = v.case === 'mismatch'
+  const threshold = confidenceLine(v)
   return (
     <section className="relative overflow-hidden rounded-xl border border-line bg-surface">
       <div className={`absolute inset-y-0 left-0 w-1 ${t.bar}`} aria-hidden />
@@ -59,6 +60,10 @@ export function VerdictCard({ verdict: v }: { verdict: VerdictBlock }) {
             <Fact label={copy.verdict.confidence} value={v.confidence_word ?? ''} note={num(v.confidence)} />
             <Fact label={copy.verdict.recording} value={copy.quality[v.signal_quality]} />
           </dl>
+        )}
+        {/* the threshold of the server's rule, as a number: why the result is or is not preliminary */}
+        {!mismatch && threshold && (
+          <p className={`text-[13px] ${threshold.below ? 'text-warn' : 'text-dim'}`}>{threshold.text}</p>
         )}
 
         {v.urgency && (
