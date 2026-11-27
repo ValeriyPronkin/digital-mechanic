@@ -121,18 +121,22 @@ class Screen:
         self.page.wait_for_load_state("networkidle", timeout=120_000)
         self.level_question()
         self.page.get_by_text(vehicle_id).first.click()
-        self.page.wait_for_timeout(1000)
+        self.page.wait_for_load_state("networkidle", timeout=120_000)  # машина и её прежний разговор загружены
+        self.page.wait_for_timeout(500)
         self.level_question()
-        restart = self.page.get_by_role("button", name="Начать заново")
-        if restart.count() and restart.first.is_visible():  # нить по машине общая: начать с чистого листа
-            restart.first.click()
-            self.page.wait_for_timeout(1000)
         radios = self.page.get_by_role("radio")
         for i in range(radios.count()):
             if norm(radios.nth(i).inner_text()).startswith(label):
                 radios.nth(i).click()
                 break
-        self.page.get_by_role("button", name=DIAG).click()
+        # Нить по машине общая: при прежнем разговоре — «Начать заново» (сама просит результат выбранной
+        # проверки в новой нити), иначе — «Получить результат диагностики». Не оба: второй запрос — лишний.
+        restart = self.page.get_by_role("button", name="Начать заново")
+        if restart.count() and restart.first.is_visible():
+            restart.first.click()
+        else:
+            self.page.get_by_role("button", name=DIAG).click()
+        self.ready()
         self.idle()
 
     def idle(self) -> None:
@@ -141,11 +145,21 @@ class Screen:
         self.page.wait_for_function(f"() => !document.body.innerText.includes({BUSY!r})", timeout=ANSWER_S * 1000)
         self.page.wait_for_timeout(800)
 
+    def ready(self) -> None:
+        """Прежний ответ дописан: кнопка «Получить результат диагностики» снова доступна. Карточка приходит
+        раньше ответа, а вопрос, отправленный пока ответ пишется, интерфейс не принимает."""
+        self.page.wait_for_function(
+            "() => [...document.querySelectorAll('button')]"
+            f".some(b => b.textContent.trim() === {DIAG!r} && !b.disabled)",
+            timeout=ANSWER_S * 1000,
+        )
+
     def logs(self) -> int:
         return int(self.page.locator("details").count())
 
     def ask(self, question: str) -> float:
         """Вопрос текстом; ответ дописан, когда под ним появился журнал действий."""
+        self.ready()
         before, t0 = self.logs(), time.monotonic()
         box = self.page.get_by_placeholder(ASK)
         box.fill(question)
