@@ -316,18 +316,28 @@ def contradiction_block(conv: Conversation, text: str) -> tuple[dict[str, Any] |
         return None, text
     end = start + 1
     item_lines: list[str] = []
-    while end < len(lines) and lines[end].startswith("- "):
-        item_lines.append(lines[end])
+    while end < len(lines) and (lines[end].startswith("- ") or not lines[end].strip()):
+        if lines[end].strip():
+            item_lines.append(lines[end])
         end += 1
     last = lines[end] if end < len(lines) else ""
-    if not last.startswith(contradictions.RULE) or len(item_lines) != len(quotes):
+    if not last.startswith(contradictions.RULE) or not item_lines:
+        return None, text
+    # формулировок в тексте может быть меньше, чем цитат (guard снял строку): блок — по тем, что есть, а служебная
+    # строка правила уходит из текста в блок (скрытая 27.11: «Безопасное правило: …» оставалось в ответе)
+    by_line = []
+    for line in item_lines:
+        q = next((q for q in quotes if q.quote[:40] in line), None)
+        if q is not None:
+            by_line.append((q, line))
+    if not by_line:
         return None, text
     # под правилом — строка эскалации (если очередь её дала)
     esc_at = end + 1 if end + 1 < len(lines) and contradictions.ESCALATION.match(lines[end + 1]) else None
     pages = {(q.doc, q.page) for q in quotes}
     refs = {(s.manual_id, s.pdf_page): s.ref for s in conv.sources.values() if (s.manual_id, s.pdf_page) in pages}
     items = []
-    for q, line in zip(quotes, item_lines, strict=True):
+    for q, line in by_line:
         ref = refs.get((q.doc, q.page))
         tail = line.split(f"[{ref}]", 1)[1] if ref and f"[{ref}]" in line else line.split("»", 1)[-1]
         items.append(

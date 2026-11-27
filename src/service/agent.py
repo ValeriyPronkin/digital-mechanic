@@ -1721,6 +1721,10 @@ class Agent:
                     "handles": handles,
                 }
             )
+            if (conv.passport.get("answer_lang") or "ru") != "ru":
+                # ответ не по-русски: русская пометка — служебная вставка в чужом языке (скрытая 27.11, узбекский);
+                # снятое утверждение — только в событии verification (`withdrawn`), в тексте его просто нет
+                return ""
             return note + "".join(f" [{r}]" for r in handles)
 
         for line in text.split("\n"):
@@ -1750,11 +1754,14 @@ class Agent:
                     good.append(withdraw(part, own, "unverified", "other_row", set()))
                     continue
                 good.append(part)
+            good = [g for g in good if g.strip()]  # снятое без пометки (ответ не по-русски) — пустая часть
             if good:
                 kept.append(_unmask(prefix + " ".join(good), labels))
             elif not line.strip():
                 kept.append("")
         text = "\n".join(kept).strip()
+        if withdrawn and (conv.passport.get("answer_lang") or "ru") != "ru":
+            text = clean_refusal.renumber(text)  # шаг снят целиком — номера подряд
         text = _fill_sources(text, cited)
         text = _drop_no_link_card_lines(text)
         text, opinions = _mark_opinions(text)

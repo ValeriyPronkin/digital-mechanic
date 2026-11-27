@@ -83,3 +83,21 @@ def test_number_from_another_table_row_is_withdrawn_with_its_reason(ml: MLClient
     text, *_ = ag.guard(conv, "Гайки распылителей затянуть 200-220 Н·м [R1].")
     assert "200-220" not in text and "другой строке таблицы. Сверьте со страницей. [R1]" in text
     assert conv.withdrawn[0]["reason"] == "other_row"
+
+
+UZ_ANSWER = (
+    "Moy bosimi 0,4–0,7 МПа bo'lishi kerak [R1].\n\n"
+    "1. Dvigatelni qizdiring [R1].\n"
+    "2. Probkani 45 Н·м moment bilan torting [R1].\n"
+    "3. Bosimni ko'rsatkich bo'yicha tekshiring [R1]."
+)
+
+
+def test_non_russian_answer_has_no_russian_service_mark(ml: MLClient, toir: ToirClient) -> None:
+    """Скрытая 27.11: в узбекский ответ код вставлял «Утверждение снято: …» по-русски. Не по-русски — снятое
+    утверждение только в событии verification, номера шагов подряд."""
+    ag, _ = make_agent([say(UZ_ANSWER)] * 3, ml, toir, OnePage())
+    reply = ag.ask(ag.start(*ANOMALY), "Moy bosimi qancha bo'lishi kerak?", lang="uz")
+    assert "Утверждение снято" not in reply.text and "45" not in reply.text
+    assert "1. Dvigatelni qizdiring [R1].\n2. Bosimni" in reply.text
+    assert len(reply.withdrawn) == 1 and reply.withdrawn[0]["missing"] == ["45"]
