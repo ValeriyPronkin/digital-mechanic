@@ -90,3 +90,17 @@ def test_session_id_empty_source_and_first_person_not_shown() -> None:
 
     text = plain_words("Проверка S-0009 показала F01.\nЯ не нашёл в руководстве нормы.\n\nИсточник:.", "Клапаны")
     assert text == "Проверка показала «Клапаны».\nНе найдено в руководстве нормы."
+
+
+def test_prompt_sections_match_the_interface() -> None:
+    """Заголовки разделов — ровно как `sections` в web/src/copy.ts, иначе интерфейс рисует их простым текстом;
+    «Чем это грозит» обязателен (ТЗ F3, С1)."""
+    import re
+    from pathlib import Path
+
+    copy = Path(__file__).resolve().parents[1].joinpath("web", "src", "copy.ts").read_text(encoding="utf-8")
+    block = copy[copy.index("sections: [") : copy.index("]", copy.index("sections: ["))]
+    names = re.findall(r"'([^']+)'", block)
+    assert "Чем это грозит" in names
+    for name in names:
+        assert f"«{name}" in SYSTEM_PROMPT or f"{name}»" in SYSTEM_PROMPT or f" {name} " in SYSTEM_PROMPT, name
