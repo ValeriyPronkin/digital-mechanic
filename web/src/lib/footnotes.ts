@@ -1,4 +1,4 @@
-// The compact answer: a short lead, the rest under «Подробнее», small numbered marks in the text instead of
+// The compact answer: a short lead, the rest under «Весь ответ», small numbered marks in the text instead of
 // chips, and one list of the manual's pages under it — each page once, by document. The server's text is
 // not changed: this is only how it is drawn. Tested in web/tests/footnotes.test.ts.
 import type { SourceItem } from '../api.ts'
@@ -71,7 +71,7 @@ export function withoutSources(nodes: readonly Node[]): Node[] {
 }
 
 /** «Коротко»: the first paragraph, which the server puts first (the answer itself); the rest goes under
- *  «Подробнее». An answer of one block, or one that starts with a section title or a list, is not split. */
+ *  «Весь ответ». An answer of one block, or one that starts with a section title or a list, is not split. */
 export function splitLead(nodes: readonly Node[]): { lead: Node | null; rest: Node[] } {
   const [first, ...rest] = nodes
   if (first?.kind !== 'paragraph' || rest.length === 0) return { lead: null, rest: [...nodes] }

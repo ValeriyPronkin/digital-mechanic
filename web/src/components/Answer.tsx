@@ -162,15 +162,15 @@ function Pages({ docs, verified, scanned, onOpen }: Marks & { docs: CitedDoc[]; 
   )
 }
 
-/** From 900 px the thread is wide and the answer is read whole: «Подробнее» starts open there. */
+/** From 900 px the thread is wide and the answer is read whole: «Весь ответ» starts open there. */
 const wide = () => typeof window !== 'undefined' && window.matchMedia('(min-width: 900px)').matches
 
-/** The agent's text, compact: «Коротко» — the first paragraph, larger; the rest under «Подробнее»; small
+/** The agent's text, compact: «Коротко» — the first paragraph, larger; the rest under «Весь ответ»; small
  *  numbered marks after claims instead of chips; one list of the manual's pages under the answer, without
  *  repeats. The server's text is drawn as it came: nothing is rewritten, only laid out.
  *  `verification` is the server's check of that text: the claims it withdrew and the counts under the answer.
  *  Model-written text wraps anywhere when it has to: one long token must not push the thread sideways.
- *  «Подробнее» is a button, not a `<details>`: the scenes of the video (scripts/e2e.py) count `<details>`
+ *  «Весь ответ» is a button, not a `<details>`: the scenes of the video (scripts/e2e.py) count `<details>`
  *  to see that an answer is finished. */
 export function Answer({
   text,
