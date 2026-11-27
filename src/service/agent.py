@@ -642,7 +642,26 @@ _DIAG = re.compile(
 
 
 _CARD_ASK = re.compile(
-    r"что с двигател|что делать|что случил|что (?:это )?значит|почему|неисправност|диагноз|карточк", re.I
+    r"что с двигател|что делать|что случил|что (?:это )?значит|почему|неисправност|диагноз|карточк|"
+    r"результат (?:диагностики|проверки)",  # кнопка «Получить результат диагностики» (verify_explain 27.11)
+    re.I,
+)
+# Разделы ответа о неисправности из карточки — ровно как `sections` в web/src/copy.ts
+SECTIONS = ("Что слышно", "Что это может быть", "Чем это грозит", "Предположения, не из руководства", "Что проверить",
+            "Возможный ремонт", "Источники", "Ограничения")  # fmt: skip
+NO_CONSEQUENCE = "Прямого указания о последствиях в руководстве нет."
+ENGINEER_MARK = "(оценка инженера, не из руководства)"
+# Указание модели на вопрос о неисправности из карточки (аномалия): разделы — при любом уровне механика. Без него
+# кнопка «Получить результат диагностики» на подтверждённой ячейке матрицы давала голый порядок регулировки
+# (B418HK98, verify_explain 27.11), а у A427MA78 в «Что это может быть» стояли последствия.
+CARD_FORMAT = (
+    "Это вопрос о неисправности из карточки — ответ разделами, при любом уровне механика (уровень меняет только длину "
+    "пунктов). Каждый заголовок — отдельной строкой, ровно так: «Что слышно», «Что это может быть», «Чем это грозит», "
+    "«Что проверить», «Возможный ремонт», «Источники». «Что это может быть» — причины из руководства (таблица "
+    "неисправностей и их причин) с ссылкой [R…], а не последствия. «Чем это грозит» — последствия из руководства со "
+    f"ссылкой [R…]; если их там нет — «{NO_CONSEQUENCE}», а оценку инженера из карточки — только с пометкой "
+    f"«{ENGINEER_MARK[1:-1]}», без чисел. «Что проверить» — проверки и порядок работ из руководства со ссылками; "
+    "регулировка — здесь, а не вместо разделов."
 )
 # Кнопка «Получить результат диагностики» и вопросы о карточке без своих слов: в тексте нечего искать.
 _DIAG_ASK = re.compile(
@@ -822,6 +841,46 @@ def plain_words(text: str, fault_title: str | None) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     text = re.sub(r"[ \t]{2,}", " ", text)
     return re.sub(r"[ \t]+([.,;:])", r"\1", text)
+
+
+_HEAD_INLINE = re.compile(
+    r"^(\s*)(?:#+\s*)?\**(" + "|".join(re.escape(x) for x in SECTIONS) + r")\**\s*:?\s*\**\s*:?\s*(.*)$", re.I
+)
+
+
+def section_heads(text: str) -> str:
+    """Заголовок раздела — отдельной строкой, как его читает интерфейс v2 (`parseAnswer`): «**Что слышно:** стук…»
+    → «Что слышно» и «стук…» строкой ниже."""
+    out: list[str] = []
+    for line in text.split("\n"):
+        m = _HEAD_INLINE.match(line)
+        if not m:
+            out.append(line)
+            continue
+        name = next(x for x in SECTIONS if x.lower() == m.group(2).lower())
+        out.append(name)
+        rest = m.group(3).strip().strip("*").strip()
+        if rest:
+            out.append(rest)
+    return "\n".join(out)
+
+
+def mark_risk(text: str) -> str:
+    """Раздел «Чем это грозит»: строка без ссылки [R…] и без пометки «не из руководства» — оценка инженера или своё
+    рассуждение, а не руководство: получает пометку (инвариант 4: последствие — со страницей или с пометкой)."""
+    out: list[str] = []
+    inside = False
+    for line in text.split("\n"):
+        bare = line.strip()
+        if bare in SECTIONS:
+            inside = bare == "Чем это грозит"
+            out.append(line)
+            continue
+        if inside and bare and not _REF.search(bare) and "не из руководства" not in bare.lower():
+            if not bare.lower().startswith("прямого указания"):
+                line = f"{line.rstrip().rstrip('.')} {ENGINEER_MARK}."
+        out.append(line)
+    return "\n".join(out)
 
 
 OPINION_GENERIC = f"Точную причину покажет дефектовка этого узла {OPINION_MARK}."
@@ -1053,6 +1112,8 @@ class Agent:
         prefix = f"[{LEVEL_PROMPT[level]}]"
         if target and (hint := language.instruction(target)):
             prefix += f"\n[{hint}]"
+        if self._card_question(conv, question):
+            prefix += f"\n[{CARD_FORMAT}]"
         conv.messages.append({"role": "user", "content": f"{prefix}\n\n{mask_pii(question)}"})
         self._note_contradiction(conv, question)
         other = self._other_engine_reply(conv, question, request_id)
@@ -1149,6 +1210,7 @@ class Agent:
         final, cited = self._drive_verdict(conv, question, final, cited)
         final, _ = clean_refusal.drop_unsourced_steps(final)  # отказ — без порядка работ не из руководства
         final = plain_words(final, conv.card.fault_title if conv.card else None)  # без служебных слов и кодов
+        final = mark_risk(section_heads(final))  # заголовки — строкой; последствие без страницы — с пометкой
         final, bans = unsourced_bans(final, conv.card.urgency if conv.card else None)  # запрет — только со страницей
         if bans:
             notes.append("Запрет эксплуатации без страницы руководства заменён рекомендацией по срочности.")
@@ -1263,7 +1325,7 @@ class Agent:
         about_card = bool(_CARD_ASK.search(question) or _DRIVE_ASK.search(question))
         if about_card and card is not None and card.status == "anomaly" and card.compatible and card.fault_code:
             title = card.fault_title or card.fault_code
-            action = f"Что сделать: дефектовка узла по неисправности «{title}» ({card.fault_code})."
+            action = f"Что сделать: дефектовка узла по неисправности «{title}»."
         else:
             action = "Что сделать: дефектовка узла, о котором вопрос."
         before = conv.passport.get("refs_before") or set()
@@ -1357,6 +1419,16 @@ class Agent:
         followup = {"label": f"Проверка по «{title}»",
                     "question": f"Что проверить по неисправности {card.fault_code} «{title}»?"}  # fmt: skip
         return f"{text.rstrip()}\n\n{line}", followup
+
+    def _card_question(self, conv: Conversation, question: str) -> bool:
+        """Вопрос о неисправности из карточки при аномалии совместимого кода — ответ разделами (`CARD_FORMAT`)."""
+        if not _CARD_ASK.search(question):
+            return False
+        try:
+            _, card = self._ensure_diag(conv)
+        except ServiceError:
+            return False
+        return card.status == "anomaly" and card.compatible
 
     # ---- кэш ответов (issue #16) ----
     def _answer_cache_key(
