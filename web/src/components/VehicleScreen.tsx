@@ -509,8 +509,6 @@ export function VehicleScreen({
             </p>
             <ScoreChart sessions={vehicle.sessions} selected={sessionId} onSelect={pick} trend={vehicle.trend} />
             <SessionPicker sessions={vehicle.sessions} selected={sessionId} onSelect={pick} />
-            {/* set once on the device, so it scrolls away with the vehicle details */}
-            <LanguageSwitch />
             <button
               type="button"
               disabled={thread.busy}
@@ -678,6 +676,8 @@ export function VehicleScreen({
               </button>
             )}
           </form>
+          {/* the answer language is a setting of the question, so it sits with the question, not above the check */}
+          <LanguageSwitch />
         </div>
       </footer>
 

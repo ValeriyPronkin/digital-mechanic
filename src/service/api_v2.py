@@ -41,7 +41,14 @@ from service.fleet_status import STATUS_LABEL, trend, vehicle_status
 from service.manuals.catalog import DOCS_BY_ID, documents_for_engine
 from service.parts_supplier import offers_for_parts
 from service.store import Store
-from service.verdict_policy import CONFIDENCE_LOW, URGENCY_ACTION, VerdictCard, heard_text, urgency_for
+from service.verdict_policy import (
+    CONFIDENCE_LOW,
+    URGENCY_ACTION,
+    VerdictCard,
+    heard_text,
+    reason_items,
+    urgency_for,
+)
 from service.voice import speech_for, speech_lang
 
 log = logging.getLogger(__name__)
@@ -264,7 +271,7 @@ def urgency_view(card: VerdictCard) -> dict[str, Any] | None:
         "level": card.urgency,
         "word": URGENCY_WORD[card.urgency],
         "action": URGENCY_ACTION[card.urgency],
-        "reasons": [r for r in [card.urgency_reason, card.trend] if r],
+        "reasons": [*reason_items(card.urgency_reason), *([card.trend] if card.trend else [])],
     }
 
 
@@ -625,7 +632,7 @@ def ticket_pending(conv: Conversation, parts: Any | None = None) -> dict[str, An
             "level": level,
             "word": URGENCY_WORD[level],
             "action": URGENCY_ACTION[level],
-            "reasons": [d.urgency_reason],
+            "reasons": reason_items(d.urgency_reason),
         },
         # Приоритет предлагает правило кода (D-6); механик может выбрать другой (решение Валерия, #60) —
         # выбор и предложенное правилом пишутся в заявку и паспорт (`urgency_note`).

@@ -50,11 +50,14 @@ def _num(x: float) -> str:
     return f"{x:.2f}".replace(".", ",")
 
 
+RISK_PREFIX = "Чем грозит (оценка инженера, не из руководства): "
+
+
 def risk_line(code: str) -> str:
     """Чем грозит неисправность — по классу опасности (data/danger_classes.json). Это оценка инженера, а не текст
     руководства, поэтому так и подписано; запрета эксплуатации здесь нет."""
     basis = _DANGER["classes"].get(code, {}).get("basis")
-    return f"Чем грозит (оценка инженера, не из руководства): {basis}" if basis else ""
+    return f"{RISK_PREFIX}{basis}" if basis else ""
 
 
 def preliminary(diag: Diagnosis) -> bool:
@@ -88,6 +91,14 @@ def _urgency_rule(diag: Diagnosis) -> tuple[Urgency, str]:
         cap = ", для этого класса не выше среднего" if cls == 1 else ""
         return level, f"Оценка отклонения {_num(score)}, порог {_num(SCORE_HIGH)}: на ступень выше{cap}"
     return _STEPS[base], f"Оценка отклонения {_num(score)} ниже порога {_num(SCORE_HIGH)}"
+
+
+def reason_items(reason: str | None) -> list[str]:
+    """Основание приоритета и угроза — отдельными строками для списка на карточке и в заявке."""
+    if not reason:
+        return []
+    basis, sep, risk = reason.partition(". " + RISK_PREFIX)
+    return [basis, RISK_PREFIX + risk] if sep else [reason]
 
 
 def urgency_for(diag: Diagnosis) -> tuple[Urgency, str]:
@@ -247,7 +258,7 @@ def _build_card(diag: Diagnosis, fault_titles: dict[str, str], engine: str | Non
         return VerdictCard(
             status="normal",
             color="yellow" if early else "green",
-            title="Двигатель в норме",
+            title="Отклонений не найдено",
             action="Можно продолжать работу. Заявка не нужна."
             + (" Сделайте повторную проверку раньше планового срока." if early else ""),
             banners=banners,
