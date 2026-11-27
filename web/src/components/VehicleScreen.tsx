@@ -25,6 +25,7 @@ import { GuideCard } from './GuideCard'
 import { PageSheet } from './PageSheet'
 import { SpeakButton } from './SpeakButton'
 import { LEVEL_EVENT, REDO, getLevel, otherLevel, redoLevel, setLevel, type Level } from '../lib/level'
+import { anchoringWhile } from '../lib/scroll'
 import { ScoreChart } from './ScoreChart'
 import { TicketCard } from './TicketCard'
 import { TicketSheet } from './TicketSheet'
@@ -278,6 +279,9 @@ export function VehicleScreen({
 
   // A new question goes to the top of the view, so the verdict and the start of the answer stay in
   // sight while the rest streams in below. The view never chases the stream.
+  // The browser would chase it for us: once the thread has been scrolled, its scroll anchoring moves the
+  // view down with every piece of the answer, and the question ends far above the view. So anchoring
+  // is off for the thread while an answer runs (`anchoringWhile` on the scroll area below), and only then.
   const turnCount = thread.turns.length
   useEffect(() => {
     lastUser.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
@@ -407,7 +411,7 @@ export function VehicleScreen({
       </Header>
 
       {/* A size container: the last exchange below takes its height from this view (.last-exchange). */}
-      <div className="min-h-0 flex-1 overflow-y-auto [container-type:size]">
+      <div className={`min-h-0 flex-1 overflow-y-auto [container-type:size] ${anchoringWhile(thread.busy)}`}>
         <div className="mx-auto max-w-3xl space-y-5 p-4">
           <section className="space-y-3">
             <p className="text-[13px] text-dim">
