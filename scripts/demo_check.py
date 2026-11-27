@@ -246,7 +246,8 @@ class Phone:
             ok = self.http.get(f"{self.base}{view['image']}").status_code == 200
         where = f"{s.get('chip') or s['manual_id']} стр. {s['pdf_page']}"
         what = "картинка и рамка на строке" if ok else ("нет рамки" if view.get("image") else "нет картинки")
-        line = f" «{quotes[h][:60]}»" if ok and quotes.get(h) else ""
+        # цитата — и при «нет рамки»: без неё причину не найти (стр. 269, 27.11)
+        line = f" «{quotes[h][:60]}»" if quotes.get(h) else " (цитаты для страницы нет)"
         return ok, f"{where}: {what}{line}", time.monotonic() - t0
 
     def first_page(self, vehicle: str, turn: Turn) -> tuple[bool, str, float]:

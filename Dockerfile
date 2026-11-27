@@ -15,6 +15,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 COPY data ./data
+# Реестры поиска Никиты (покрытие, глоссарий, страницы) — их читает сервис: без них «можно ли ехать» падал на стенде
+COPY registry ./registry
 # Парк и справочник — материалы задачи, не в git: до сборки — make fetch-materials (TASK_MATERIALS_URL)
 RUN test -f data/vehicles.json && test -f data/fault_types.json \
     || { echo "нет data/vehicles.json или data/fault_types.json — сначала make fetch-materials" >&2; exit 1; }

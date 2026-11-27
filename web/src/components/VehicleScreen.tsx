@@ -23,6 +23,7 @@ import { ActionLog } from './ActionLog'
 import { Answer } from './Answer'
 import { ContradictionCard } from './ContradictionCard'
 import { GuideCard } from './GuideCard'
+import { ThreadHistory } from './ThreadHistory'
 import { PageSheet } from './PageSheet'
 import { SpeakButton } from './SpeakButton'
 import { levelOf, moreDetail, redoLevel, shorter, type Level } from '../lib/level'
@@ -33,6 +34,7 @@ import { offersRussian } from '../lib/lang'
 import { TicketCard } from './TicketCard'
 import { TicketSheet } from './TicketSheet'
 import { VerdictCard } from './VerdictCard'
+import { queueHref } from '../lib/contradictions'
 
 function SessionPicker({
   sessions,
@@ -192,6 +194,9 @@ function AssistantBlock({
             block={b as ContradictionBlock}
             sources={sources}
             onOpen={(s, quote) => onOpenSource(s, quote)}
+            onQueue={(n) => {
+              window.location.hash = queueHref({ view: 'item', number: n })
+            }}
           />
         ))}
       {turn.progress && (
@@ -319,6 +324,19 @@ export function VehicleScreen({
   const pick = (id: string) => {
     picked.current = true
     setSessionId(id)
+  }
+  // «Обращения по машине»: asked again when an answer ends (a new conversation may have started)
+  const [historyTick, setHistoryTick] = useState(0)
+  const wasBusy = useRef(false)
+  useEffect(() => {
+    if (wasBusy.current && !thread.busy) setHistoryTick((n) => n + 1)
+    wasBusy.current = thread.busy
+  }, [thread.busy])
+  // An earlier conversation continued: the screen loads it as the current one, on its own check.
+  const resumed = () => {
+    picked.current = false
+    setHistoryTick((n) => n + 1)
+    setAttempt((n) => n + 1)
   }
   const restored = thread.sessionId
   useEffect(() => {
@@ -520,6 +538,13 @@ export function VehicleScreen({
               {copy.vehicle.diagnose}
             </button>
           </section>
+          <ThreadHistory
+            vehicleId={vehicleId}
+            currentId={thread.threadId}
+            refresh={historyTick}
+            disabled={thread.busy}
+            onResumed={resumed}
+          />
           {earlier.length > 0 && (
             <section className="space-y-3">
               <p className="text-[13px] text-dim">{copy.ticket.earlier}</p>

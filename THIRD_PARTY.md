@@ -15,6 +15,7 @@
 | mypy | >=1.11 | MIT | dev: проверка типов |
 | pytest | >=8.3 | MIT | dev: тесты |
 | ruff | >=0.6 | MIT | dev: линтер и форматтер |
+| playwright | >=1.65.2 | Apache-2.0 | dev: e2e сцен видео в браузере (`make e2e`; WebKit и Chromium ставит `playwright install`) |
 | numpy | >=2.4.6 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | векторы эмбеддингов, косинусная близость |
 | pdfplumber | >=0.11.11 | MIT | таблицы из PDF (в т.ч. таблицы неисправностей) |
 | pillow | >=13.0.0 | MIT-CMU | рендер страницы PDF в JPEG для OCR |
