@@ -32,8 +32,9 @@ def test_no_draft_on_drive_question(ml: MLClient, toir: ToirClient) -> None:
     assert refused and TICKET_NOT_ASKED in str(refused[0]["content"])
     first = reply.text.split("\n\n")[0]
     # вердикт кода — первым, но рекомендация, а не запрет: запрет — только словами руководства с его страницей
-    assert first.startswith("**Прямого запрета эксплуатации") and "дефектовка до выпуска в рейс" in first
+    assert first.startswith("**Прямого запрета эксплуатации") and "Срочность по проверке — высокая" in first
     assert "нельзя" not in first and "не эксплуатировать" not in first
+    assert reply.text.split("\n\n")[1].startswith("Что сделать: дефектовка до выпуска в рейс")
 
 
 def test_model_verdict_kept(ml: MLClient, toir: ToirClient) -> None:
@@ -89,3 +90,41 @@ def test_no_verdict_gets_manual_words_not_no_ban_line(ml: MLClient, toir: ToirCl
     first = reply.text.split("\n\n")[0]
     assert first.startswith("**По руководству, стр. 91 [R") and "не эксплуатировать" in first
     assert "Прямого запрета" not in reply.text
+
+
+MODEL_LONG = (
+    "Прямого запрета ехать своим ходом в найденных фрагментах нет. Рекомендация по срочности: дефектовка до рейса.\n\n"
+    "Понадобится: ключ для болтов осей коромысел, набор щупов [R1].\n\n"
+    "Безопасное правило: регулировать зазоры на холодном двигателе.\n\n"
+    "1. Выключить подачу топлива [R1].\n2. Снять крышки головок [R1].\n\n"
+    "Проверка результата: пустить двигатель и прослушать [R1]."
+)
+
+
+def test_drive_answer_is_verdict_and_one_action(ml: MLClient, toir: ToirClient) -> None:
+    """Снимок Валерия (стенд a664351, B418HK98 / S-0009): после вердикта кода модель повторяла вердикт, писала
+    «Понадобится», блок противоречия о зазорах и порядок регулировки. Теперь — вердикт и одно действие."""
+    ag, _ = make_agent([say(MODEL_LONG)] * 2, ml, toir)
+    reply = ag.ask(ag.start(*Q37), QUESTION)
+    paras = reply.text.split("\n\n")
+    assert len(paras) == 2 and paras[1].startswith("Что сделать:")
+    for junk in ("Понадобится", "Безопасное правило", "1. ", "Проверка результата", "Прямого запрета ехать"):
+        assert junk not in reply.text, junk
+
+
+def test_drive_answer_full_on_more_detail(ml: MLClient, toir: ToirClient) -> None:
+    """«Подробнее» — уровень выбран механиком: полный ответ, а не два абзаца."""
+    ag, _ = make_agent([say(MODEL_LONG)] * 2, ml, toir)
+    reply = ag.ask(ag.start(*Q37), QUESTION, level="novice")
+    assert "1. Выключить подачу топлива" in reply.text
+
+
+def test_service_ban_is_not_a_drive_verdict() -> None:
+    """«Запрещается промывать коробку керосином» и буксировка — не ответ на «можно ли ехать» (K961TH198)."""
+    from service.agent import _DRIVE_CONTEXT, _SERVICE_ONLY
+
+    wash = "Категорически запрещается промывать коробку передач керосином во избежание отказа насоса."
+    assert not _DRIVE_CONTEXT.search(wash) or _SERVICE_ONLY.search(wash)
+    assert _SERVICE_ONLY.search("Буксировка автомобиля с включенной передачей не допускается.")
+    oil = "Допускается работа двигателя при давлении масла не ниже 300 кПа."
+    assert _DRIVE_CONTEXT.search(oil) and not _SERVICE_ONLY.search(oil)

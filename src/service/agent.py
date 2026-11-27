@@ -399,6 +399,7 @@ class Conversation:
     fact_numbers: set[str] = field(default_factory=set)  # цифры из ответов кода (сводка парка) — факты, не выдумка
     # Паспорт запроса (#31): данные текущего вопроса — план поиска, итоги guard. Не сериализуется в состояние.
     passport: dict[str, Any] = field(default_factory=dict)
+    level_reason: str = ""  # почему такой уровень у текущего вопроса; passport пересоздаётся на каждом вопросе
     contradiction: Any = None  # известное противоречие в руководствах для текущего вопроса: (Known, [Quote])
     # снятые guard утверждения последнего ответа (см. `Agent.guard`): {text, state, missing, reason, handles}
     withdrawn: list[dict[str, Any]] = field(default_factory=list)
@@ -814,6 +815,14 @@ _LIMIT_WORDS = re.compile(
 )
 _BAN_RULE = re.compile(r"не эксплуатир|запрещ|не допуска|немедленно|заглушить|остановить двигатель", re.I)
 _OPERATION_RULE = re.compile(r"эксплуатац|допускается работ", re.I)  # предел для работы, а не норма проверки
+# фраза о езде и работе двигателя, а не о действии при обслуживании: «запрещается промывать коробку керосином» —
+# не вердикт на «можно ли ехать» (K961TH198, 27.11)
+_DRIVE_CONTEXT = re.compile(
+    r"эксплуат|работ\w*\s+двигател|двигател\w*\s+(?:не\s+)?работ|езд|движени|в пути|заглуш|остановить|пуск|"
+    r"режим|нагрузк|температур|давлени",
+    re.I,
+)
+_SERVICE_ONLY = re.compile(r"промыва|промыть|заправля|хранени|транспортир|консервац|упаковк|буксир", re.I)
 _LEMMA_ALIAS = {"стучать": "стук", "стучит": "стук", "шуметь": "шум", "низкий": "давление"}
 _DRIVE_STOP = {"можно", "пока", "ездить", "ехать", "машина", "двигатель", "база", "свой", "ход", "перегнать",
                "дальше", "ещё", "еще", "доехать", "работа", "время"}  # fmt: skip
@@ -1117,6 +1126,7 @@ class Agent:
         """`level` — выбор механика (novice | mechanic | master, прежние expert | steps) или auto — по вопросу,
         на каждый вопрос заново; за механиком не запоминается."""
         used, why = resolve_level(question, level)
+        conv.level_reason = why  # до ответа: «можно ли ехать» коротко, если уровень не выбран механиком
         reply = self._ask_in_time(conv, question, used, lang, back_translate)
         reply.level_used, reply.level_reason = used, why
         conv.passport["level_reason"] = why
@@ -1278,6 +1288,7 @@ class Agent:
         if bans:
             notes.append("Запрет эксплуатации без страницы руководства заменён рекомендацией по срочности.")
         final, cited = self._complete_refusal(conv, question, final, cited)
+        final = self._drive_short(conv, question, final)  # «можно ли ехать»: вердикт кода и одно действие
         if conv.card is not None and conv.card.trend and _CARD_ASK.search(question) and conv.card.trend not in final:
             final = f"{final.rstrip()}\n\n📈 {conv.card.trend}"  # тенденция по истории ТС — кодом (#40 п. 4)
         cited = [c for c in cited if f"[{c.ref}]" in final]  # источник — только страница, на которую ссылается текст
@@ -1466,8 +1477,8 @@ class Agent:
         card = conv.card
         if card is None or card.status != "anomaly" or not card.compatible or not card.fault_code or not cited:
             return text, None
-        if _CARD_ASK.search(question) or _TICKET_ASK.search(question):
-            return text, None
+        if _CARD_ASK.search(question) or _TICKET_ASK.search(question) or _DRIVE_ASK.search(question):
+            return text, None  # «можно ли ехать» — вердикт по проверке строит код (`_drive_verdict`), его не снимаем
         cell = cell_for(card.fault_code, conv.vehicle.engine_model)
         if cell is None or cell.status != "confirmed":
             return text, None
@@ -2552,12 +2563,52 @@ class Agent:
             line += " " + RECOMMEND.get(card.urgency or "", RECOMMEND["medium"])
             tail = ""
             conv.passport["drive_rule"] = rule[0].ref
-        elif card.urgency == "high":
-            line = f"**{NO_BAN_LINE}** Срочность по проверке высокая: {RECOMMEND['high'].split(': ', 1)[1]}"
+        elif card.urgency in ("high", "medium", "low"):
+            word = {"high": "высокая", "medium": "средняя", "low": "низкая"}[card.urgency]
+            basis = (card.urgency_reason or "").split(". ")[0].rstrip(".")  # правило срочности, без «чем грозит»
+            why = f" ({basis[:1].lower()}{basis[1:]})" if basis else ""
+            line = f"**{NO_BAN_LINE}** Срочность по проверке — {word}{why}."  # что делать — строкой ниже
         else:
             line = f"**{NO_BAN_LINE}** По проверке нужна дефектовка в ближайшее время."
         conv.passport["drive_verdict_by_code"] = True
         return f"{line}{tail}\n\n{text}".strip(), cited
+
+    def _drive_short(self, conv: Conversation, question: str, text: str) -> str:
+        """«Можно ли ехать / своим ходом / перегнать» — первым абзацем вердикт (`_drive_verdict`: запрет словами
+        руководства со страницей или «прямого запрета нет» и срочность), затем одно действие «Что сделать: …». Повтор
+        вердикта моделью, порядок регулировки, «Понадобится», блоки противоречий о другом — не к вопросу (снимок
+        Валерия, стенд a664351, B418HK98 / S-0009). Полный ответ — по «Подробнее» (уровень выбран механиком)."""
+        if not _DRIVE_ASK.search(question) or (conv.passport.get("answer_lang") or "ru") != "ru":
+            return text
+        if conv.level_reason == "выбран механиком":
+            return text  # «Подробнее» — полный ответ
+        paras = [p for p in text.split("\n\n") if p.strip()]
+        if not paras:
+            return text
+        head = re.sub(r"\s*Рекомендация по проверке:[^.]*\.", "", paras[0]).strip()  # что делать — строкой ниже
+        action = self._drive_action(conv)
+        failed = conv.card is None or conv.card.status == "check_failed"
+        out = [head] if failed and re.search(r"повтор", head, re.I) else [head, action]
+        conv.passport["drive_short"] = True
+        return "\n\n".join(out)
+
+    @staticmethod
+    def _drive_action(conv: Conversation) -> str:
+        """Одно действие по результату проверки — код, не модель."""
+        card = conv.card
+        if card is None or card.status == "check_failed":
+            return f"{clean_refusal.ACTION_LABEL}повторите запись проверки; до неё следите за приборами."
+        if card.status == "normal":
+            if BANNER_EARLY_RECHECK in card.banners:
+                return f"{clean_refusal.ACTION_LABEL}повторите проверку раньше срока."
+            return f"{clean_refusal.ACTION_LABEL}следующая проверка — в обычный срок."
+        if not card.compatible:
+            return (f"{clean_refusal.ACTION_LABEL}повторите проверку: результат не подходит к этому двигателю, "
+                    "заявку по нему не оформляют.")  # fmt: skip
+        what = {"high": "дефектовка до выпуска в рейс", "medium": "дефектовка в ближайшее время"}.get(
+            card.urgency or "", "уточнить дефектовкой или повторной записью"
+        )
+        return f"{clean_refusal.ACTION_LABEL}{what} — черновик заявки кнопкой «Создать заявку»."
 
     def _limit_rule(self, conv: Conversation, question: str) -> tuple[Source, str] | None:
         """Фраза-запрет или предел со страниц ограничений эксплуатации этого двигателя (реестр Никиты), где есть слово
@@ -2576,6 +2627,8 @@ class Agent:
             for i, sent in enumerate(sents):
                 if not _LIMIT_WORDS.search(sent) or not 30 <= len(sent) <= 320:
                     continue
+                if not _DRIVE_CONTEXT.search(sent) or _SERVICE_ONLY.search(sent):
+                    continue  # не о езде и работе двигателя
                 around = f"{sents[i - 1] if i else ''} {sent}"  # о чём фраза — бывает сказано в предыдущей
                 hit = len(want & {_LEMMA_ALIAS.get(t, t) for t in tokenize(around)})
                 if hit:
