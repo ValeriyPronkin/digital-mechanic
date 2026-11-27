@@ -66,27 +66,23 @@ export function VerdictCard({ verdict: v }: { verdict: VerdictBlock }) {
           <p className={`text-[13px] ${threshold.below ? 'text-warn' : 'text-dim'}`}>{threshold.text}</p>
         )}
 
+        {/* Priority, why, and that it is a recommendation — all visible: the mechanic does not tap to learn why.
+            The action is already the card's first line, so it is not repeated here. */}
         {v.urgency && (
-          <details className="group border-t border-line pt-3">
-            <summary className="flex min-h-12 cursor-pointer list-none flex-wrap items-center justify-between gap-x-3 [&::-webkit-details-marker]:hidden">
-              <span>
-                <span className="text-dim">{copy.verdict.urgency}: </span>
-                <span className={`font-semibold ${urgencyTone[v.urgency.level]}`}>{v.urgency.word}</span>
-              </span>
-              <span className="text-[13px] text-accent group-open:hidden [@media(hover:hover)]:[summary:hover_&]:underline">
-                {copy.verdict.why}
-              </span>
-              <span className="hidden text-[13px] text-accent group-open:inline [@media(hover:hover)]:[summary:hover_&]:underline">
-                {copy.verdict.hide}
-              </span>
-              {v.urgency.action && <span className="basis-full pb-2">{v.urgency.action}</span>}
-            </summary>
-            <ul className="mt-1 list-disc space-y-1 pl-5 text-[13px] text-dim marker:text-mute">
-              {v.urgency.reasons.map((r) => (
-                <li key={r}>{r}</li>
-              ))}
-            </ul>
-          </details>
+          <div className="border-t border-line pt-3">
+            <p>
+              <span className="text-dim">{copy.verdict.urgency}: </span>
+              <span className={`font-semibold ${urgencyTone[v.urgency.level]}`}>{v.urgency.word}</span>
+            </p>
+            {v.urgency.reasons.length > 0 && (
+              <ul className="mt-1 space-y-1 text-[13px] text-dim">
+                {v.urgency.reasons.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-1 text-[13px] text-mute">{copy.verdict.recommendation}</p>
+          </div>
         )}
 
         {v.description && v.case !== 'normal' && (

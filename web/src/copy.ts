@@ -73,7 +73,9 @@ export const copy = {
     confidence: 'Уверенность',
     recording: 'Запись',
     urgency: 'Приоритет',
-    why: 'Почему такой приоритет',
+    // under the priority, always: the organizers' rule (26.11) — a ban only in the manual's words, with its page
+    recommendation:
+      'Это рекомендация, а не запрет. Запрет — только словами руководства на этот двигатель, со страницей',
     heard: 'По записи',
     // A result that does not fit the engine: the check's own figures in one small line, not as the card's facts.
     byCheck: 'По данным проверки',
