@@ -39,7 +39,7 @@ from service.fleet_status import STATUS_LABEL, trend, vehicle_status
 from service.manuals.catalog import DOCS_BY_ID, documents_for_engine
 from service.parts_supplier import offers_for_parts
 from service.store import Store
-from service.verdict_policy import URGENCY_ACTION, VerdictCard, urgency_for
+from service.verdict_policy import URGENCY_ACTION, VerdictCard, heard_text, urgency_for
 from service.voice import speech_for, speech_lang
 
 log = logging.getLogger(__name__)
@@ -259,7 +259,7 @@ def verdict_block(conv: Conversation) -> dict[str, Any] | None:
         "signal_quality": diag.signal_quality,
         "quality_word": QUALITY_WORD.get(diag.signal_quality, diag.signal_quality),
         "urgency": urgency_view(card),
-        "description": diag.description,
+        "description": heard_text(diag.description),  # посторонний текст — только в foreign_text
         "foreign_text": getattr(card, "ml_injection", None),
         "model_version": diag.model_version,
     }

@@ -431,4 +431,7 @@ def test_visible_attack_not_passed_to_model_outside_wrapper(ml: MLClient, toir: 
     tool = next(m for m in llm.seen[-1] if m["role"] == "tool")
     data = json.loads(tool["content"])
     assert "ml_injection" not in data and "passport" not in data
-    assert "Инструкция для ассистента" in data["ml_description"] and data["ml_description"].startswith("<<<")
+    assert data["ml_description"].startswith("<<<") and "Запись отбракована" in data["ml_description"]
+    # ревью 27.11: посторонний текст модели не передаётся вовсе — даже внутри обёртки данных
+    assert "Инструкция для ассистента" not in data["ml_description"]
+    assert not any("статус normal" in str(m.get("content")) for seen in llm.seen for m in seen)

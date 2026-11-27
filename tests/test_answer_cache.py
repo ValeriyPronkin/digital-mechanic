@@ -99,3 +99,46 @@ def test_cached_answer_does_not_overwrite_sources_of_this_conversation(ml: MLCli
     assert new == "R4"  # следующий после максимального, а не «число источников + 1» (= R3, занят)
     assert f"[{new}]" in reply.text and "[R3]" in reply.text  # стр. 31 уже была в разговоре — её номер
     assert next_ref(conv) == "R5"
+
+
+def _same_cell_other_vehicle() -> tuple[tuple[str, str], tuple[str, str]]:
+    """Две машины с одним двигателем, кодом и качеством записи — ключ без машины у них совпадал."""
+    from service.fleet import fleet
+
+    seen: dict[tuple[str, str | None], tuple[str, str]] = {}
+    for v in fleet().vehicles:
+        for s in v.sessions:
+            if s.status == "anomaly" and s.signal_quality == "good":
+                cell = (v.engine_model, s.anomaly_type)
+                if cell in seen and seen[cell][0] != v.vehicle_id:
+                    return seen[cell], (v.vehicle_id, s.session_id)
+                seen.setdefault(cell, (v.vehicle_id, s.session_id))
+    raise AssertionError("в данных нет двух машин с одной ячейкой")
+
+
+def test_answer_of_other_vehicle_is_not_served(ml: MLClient, toir: ToirClient) -> None:
+    """Ревью 27.11: та же ячейка «двигатель × код × запись» у другой машины отдавала чужой ответ слово в слово."""
+    a, b = _same_cell_other_vehicle()
+    _, llm, r1, r2 = _two(ml, toir, a, b)
+    assert len(llm.seen) == 2 and not r2.trace.get("cache")
+    assert r2.text != r1.text
+
+
+def test_confidence_and_trend_of_other_truck_do_not_leak(ml: MLClient, toir: ToirClient) -> None:
+    """Повтор ревью: T792HO98/S-0043 (уверенность 91 %, тенденция до 0,85), затем E549YT198/S-0011 (84 %)."""
+    ag, llm = make_agent([say("Уверенность проверки 91%. Давление масла ниже нормы [R1]."), say("Другой ответ.")],
+                         ml, toir)  # fmt: skip
+    ag.ask(ag.start("T792HO98", "S-0043"), Q)
+    r2 = ag.ask(ag.start("E549YT198", "S-0011"), Q)
+    assert len(llm.seen) == 2 and not r2.trace.get("cache")
+    assert "91" not in r2.text and "0,85" not in r2.text
+
+
+def test_new_ticket_on_vehicle_drops_cached_answer(ml: MLClient, toir: ToirClient) -> None:
+    """Ответ видит заявки машины, отправленные ранее (контекст разговора): новая заявка — новый ответ."""
+    ag, llm = make_agent([say("А [R1]."), say("Б.")], ml, toir)
+    ag.ask(ag.start(*ANOMALY), Q)
+    ag.store.remember_ticket("T-1", {"vehicle_id": ANOMALY[0], "session_id": ANOMALY[1], "anomaly_type": "F02",
+                                     "urgency": "high", "operations": [], "references": []}, "fp")  # fmt: skip
+    r = ag.ask(ag.start(*ANOMALY), Q)
+    assert len(llm.seen) == 2 and not r.trace.get("cache")
