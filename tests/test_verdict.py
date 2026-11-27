@@ -199,7 +199,7 @@ def test_trend_in_card_answer(ml: MLClient) -> None:
 
     ag, _ = make_agent([say("Отклонение по карточке.")], ml, ToirClient(http=TestClient(mock_toir_app)))
     reply = ag.ask(ag.start(v.vehicle_id, s.session_id), "Что с двигателем?")
-    assert "📈 Оценка отклонения растёт" in reply.text
+    assert "Оценка отклонения растёт" in reply.text and "📈" not in reply.text
 
 
 def test_visible_attack_only_in_three_injected_descriptions(ml: MLClient) -> None:

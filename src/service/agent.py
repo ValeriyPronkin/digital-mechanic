@@ -1254,7 +1254,7 @@ class Agent:
             notes.append("Запрет эксплуатации без страницы руководства заменён рекомендацией по срочности.")
         final, cited = self._complete_refusal(conv, question, final, cited)
         if conv.card is not None and conv.card.trend and _CARD_ASK.search(question) and conv.card.trend not in final:
-            final = f"{final.rstrip()}\n\n📈 {conv.card.trend}"  # тенденция по истории ТС — кодом (#40 п. 4)
+            final = f"{final.rstrip()}\n\n{conv.card.trend}"  # тенденция по истории ТС — кодом (#40 п. 4)
         cited = [c for c in cited if f"[{c.ref}]" in final]  # источник — только страница, на которую ссылается текст
         if cache_key and conv.draft is None and final:
             self.store.save_answer(
