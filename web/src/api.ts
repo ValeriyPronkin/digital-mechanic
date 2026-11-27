@@ -1,4 +1,5 @@
 // Shapes mirror app/schemas.py. One place for every call to the backend.
+import { getLang, voiceLang } from './lib/lang'
 
 export type Status = 'normal' | 'anomaly' | 'check_failed'
 export type SignalQuality = 'good' | 'warning' | 'bad'
@@ -309,6 +310,15 @@ export interface SpeechInfo {
   text: string
   sig: string
   url: string
+  lang?: string | null // the voice's language (PR #83); goes back to /api/voice/speak with the text
+}
+
+/** A language of the answer and what the voice can do in it (`GET /api/v2/languages`, SSE `language`). */
+export interface LanguageInfo {
+  lang: string // ru, uz, uz-cyrl, tg, kk, ky, en, hi
+  name: string // in that language: «Oʻzbekcha»
+  voice_input: boolean // speech recognition knows it; otherwise a question is said in Russian
+  voice_output: boolean
 }
 
 export type TranscriptEntry =
@@ -322,6 +332,7 @@ export type TranscriptEntry =
       verification?: Verification
       passport?: Passport
       speech?: SpeechInfo
+      back_translation?: string | null // the answer in Russian when it was given in another language
     }
   | { role: 'ticket'; ticket: TicketView }
 
@@ -364,6 +375,8 @@ export type ChatEvent =
   | ({ type: 'usage' } & UsageEvent)
   | ({ type: 'passport' } & Passport)
   | ({ type: 'speech' } & SpeechInfo)
+  | ({ type: 'language' } & LanguageInfo)
+  | { type: 'back_translation'; text: string }
   | { type: 'error'; message: string }
   | { type: 'done'; reason: string }
 
@@ -396,6 +409,7 @@ const post = (body: unknown): RequestInit => ({
 })
 
 export const getFleet = () => json<FleetView>('/api/v2/fleet')
+export const getLanguages = () => json<LanguageInfo[]>('/api/v2/languages')
 export const getVehicle = (id: string) => json<VehicleDetail>(`/api/v2/vehicles/${encodeURIComponent(id)}`)
 export const getThread = (vehicleId: string) =>
   json<ThreadView | null>(`/api/v2/threads/current?vehicle_id=${encodeURIComponent(vehicleId)}`)
@@ -406,9 +420,10 @@ export const getPage = (vehicleId: string, manualId: string, page: number, quote
       (quote ? `?quote=${encodeURIComponent(quote)}` : ''),
   )
 
-/** Voice input: the recording as the raw body, its words back. */
-export const transcribe = (audio: Blob) =>
-  json<{ text: string }>('/api/v2/transcribe', {
+/** Voice input: the recording as the raw body, its words back. `lang` is the language it is recognized in
+ *  (the mechanic's choice); the server takes Russian for one it cannot recognize. */
+export const transcribe = (audio: Blob, lang = voiceLang(getLang())) =>
+  json<{ text: string }>(`/api/v2/transcribe?lang=${encodeURIComponent(lang)}`, {
     method: 'POST',
     headers: { 'content-type': audio.type || 'audio/webm' },
     body: audio,
@@ -452,6 +467,7 @@ export async function streamChat(
     session_id?: string | null
     new_thread?: boolean
     level?: 'expert' | 'steps' // the mechanic's level (#17): form and length of the answer
+    lang?: string // the language of the answer the mechanic chose; left out, the language of the question
   },
   onEvent: (event: ChatEvent) => void,
   signal?: AbortSignal,
