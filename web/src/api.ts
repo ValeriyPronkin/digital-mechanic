@@ -434,6 +434,17 @@ export const setOutcome = (ticketPk: number, outcome: Outcome, note?: string) =>
   json<TicketView>(`/api/v2/tickets/${ticketPk}/outcome`, post({ outcome, note }))
 export const OUTCOMES_EXPORT = '/api/v2/outcomes.csv'
 
+/** A ticket in the chief mechanic's register (`GET /api/v2/tickets`): the ticket and what its row needs. */
+export interface TicketRow extends TicketView {
+  garage_no: string | null // null: the vehicle has left the fleet since
+  vehicle_name: string | null
+  engine_model: string | null
+  checked_at: string | null // when the check the ticket is for was recorded
+  fault_title: string // the name of `payload.anomaly_type`; the code if it has none
+}
+/** Every ticket of the fleet, newest first. */
+export const getAllTickets = () => json<TicketRow[]>('/api/v2/tickets')
+
 export const approveTicket = (
   pendingId: string,
   vehicleId: string,

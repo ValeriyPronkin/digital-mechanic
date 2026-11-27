@@ -1,10 +1,11 @@
 import { Fragment, useMemo, useRef, useState } from 'react'
-import { OUTCOMES_EXPORT, type FleetStatus, type FleetView, type VehicleBrief } from '../api'
+import { type FleetStatus, type FleetView, type VehicleBrief } from '../api'
 import { copy } from '../copy'
 import { rowBadges } from '../lib/checks'
 import { outcomesPlace, reasonParts } from '../lib/fleet'
 import { dateRu, plateKey } from '../lib/format'
 import { CHECKED, nextChoice, PRESSED_STATUS } from '../lib/ui'
+import { REGISTER } from './TicketRegister'
 
 export type Role = 'mechanic' | 'chief'
 
@@ -16,13 +17,13 @@ const ROLES: Role[] = ['mechanic', 'chief']
 const BADGE_LABEL = 'inline-block rounded-md border border-line px-1.5 py-px leading-none whitespace-nowrap text-dim'
 
 /** The label loop for the chief mechanic in one 48 px row: how often the inspection confirmed the acoustic
- *  check, out of how many tickets with an outcome, out of how many tickets. The row is the link to the file
- *  with every ticket and its outcome, for the owners of the model. Nothing is shown until there is a ticket. */
+ *  check, out of how many tickets with an outcome, out of how many tickets. The row opens the register of
+ *  tickets (TicketRegister), where each ticket is with its result and the file for the owners of the model.
+ *  Nothing is shown until there is a ticket. */
 function OutcomesRow({ outcomes }: { outcomes: FleetView['outcomes'] }) {
   return (
     <a
-      href={OUTCOMES_EXPORT}
-      download="outcomes.csv"
+      href={`#/${REGISTER}`}
       // `relative` keeps the screen reader's «Скачать выгрузку» inside the list: positioned against the page it
       // made the page itself scroll
       className="relative mx-4 flex min-h-12 items-center justify-between gap-3 rounded-lg border border-line px-3 py-1 text-[13px] leading-[1.25] hover:bg-surface"
@@ -45,9 +46,9 @@ function OutcomesRow({ outcomes }: { outcomes: FleetView['outcomes'] }) {
         className="shrink-0 text-accent"
         aria-hidden
       >
-        <path d="M10 3v9M6 8.5l4 4 4-4M4 16h12" />
+        <path d="M8 4l6 6-6 6" />
       </svg>
-      <span className="sr-only">{copy.chief.export}</span>
+      <span className="sr-only">{copy.chief.openRegister}</span>
     </a>
   )
 }

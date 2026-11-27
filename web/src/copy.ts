@@ -52,6 +52,7 @@ export const copy = {
     outcomesNone: 'Дефектовка: результатов пока нет',
     outcomesOf: (tickets: number, recorded: number) => `заявок: ${tickets} · с результатом: ${recorded}`,
     export: 'Скачать выгрузку',
+    openRegister: 'Открыть заявки',
     legendTitle: 'Что значат статусы',
     legend:
       'Карантин: приоритет высокий, машину ставят на дефектовку до выпуска в рейс. Требует внимания: приоритет средний или низкий. Это рекомендации по результату проверки, а не запрет на эксплуатацию',
@@ -209,6 +210,39 @@ export const copy = {
     contents: 'Работы и запчасти',
     earlier: 'Заявки по машине',
     failed: 'Не получилось отправить. Попробуйте ещё раз',
+  },
+  // the chief mechanic's register of tickets (TicketRegister), ported from Nikita's interface
+  register: {
+    title: 'Заявки',
+    loading: 'Загружаем заявки…',
+    loadFailed: 'Не получилось загрузить заявки',
+    empty: 'Заявок пока нет. Заявку создают на экране машины, по проверке с отклонением',
+    show: 'Какие заявки показать',
+    filter: { all: 'все', waiting: 'ждут дефектовки', recorded: 'с результатом' },
+    emptyFilter: { waiting: 'Заявок, которые ждут дефектовки, нет', recorded: 'Заявок с результатом пока нет' },
+    // what came of a ticket; the three outcomes are the words of the ticket card's buttons
+    state: {
+      waiting: 'ждёт дефектовки',
+      confirmed: 'подтвердилось',
+      not_confirmed: 'не подтвердилось',
+      other_fault: 'другая неисправность',
+    },
+    columns: {
+      ticket: 'Заявка',
+      vehicle: 'Машина',
+      date: 'Дата',
+      fault: 'Неисправность',
+      priority: 'Приоритет',
+      state: 'Дефектовка',
+    },
+    byFault: 'По типам неисправностей',
+    faultLine: (title: string, confirmed: number, recorded: number) =>
+      `${title}: подтвердилось ${confirmed} из ${recorded}`,
+    // shown when it is not zero: a real fault of another kind is not a false alarm
+    faultOther: (other: number) => `другая неисправность: ${other}`,
+    faultTickets: (tickets: number) => `заявок: ${tickets}`,
+    export: 'Скачать выгрузку для модели проверки',
+    exportHint: 'В файле — каждая заявка, данные её проверки и результат дефектовки',
   },
   // the sheet a sent ticket prints on, for the defect inspection (TicketPrint)
   print: {
