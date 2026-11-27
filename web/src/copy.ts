@@ -207,5 +207,35 @@ export const copy = {
     search_manual: 'Поиск в руководстве',
     read_pages: 'Чтение страниц',
     create_ticket: 'Подготовка заявки',
+    // the names of the /api/v2 agent: without them the log shows the server's first-person labels
+    vehicle_history: 'История машины',
+    draft_ticket: 'Подготовка заявки',
+    fleet_summary: 'Сводка парка',
   } as Record<string, string>,
+  // Manuals disagree (D-20): both wordings verbatim, each with its page; the line under them is the server's
+  // hand-over to the chief mechanic (#93), shown as it comes.
+  contradiction: {
+    title: (what: string) => `Противоречие в документации — ${what}`,
+    label: 'Противоречие в документации',
+  },
+  // «Прослушать» (#14): the short spoken version of the answer.
+  speech: {
+    play: 'Прослушать',
+    playLabel: 'Прослушать короткий ответ',
+    stop: 'Стоп',
+    stopLabel: 'Остановить озвучку',
+    loading: 'Готовим звук…',
+    again: 'Нажмите ещё раз, чтобы прослушать',
+    unavailable: 'Озвучка недоступна, ответ на экране',
+  },
+  // The passport of an answer (#31), at the end of the action log.
+  passport: {
+    title: 'Паспорт ответа',
+    fragments: 'Что ушло в модель из руководства',
+    used: 'в ответе',
+    unused: 'не пошло в ответ',
+    calls: 'Вызовы модели: токены на входе и на выходе',
+    rules: 'Сработавшие правила',
+    download: 'Скачать паспорт ответа',
+  },
 } as const

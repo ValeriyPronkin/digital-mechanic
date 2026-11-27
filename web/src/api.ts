@@ -126,7 +126,9 @@ export interface ContradictionBlock {
     note?: string | null
   }[]
   conclusion: string
-  advice: string
+  advice: string // since #93 the hand-over to the chief mechanic; before it, advice to ask the maker
+  // since #93: the hand-over, its number on the chief mechanic's screen, and whether it is decided
+  escalation?: { line: string; number: number; resolved: boolean } | null
 }
 
 export type Block =
