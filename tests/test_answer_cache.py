@@ -142,3 +142,15 @@ def test_new_ticket_on_vehicle_drops_cached_answer(ml: MLClient, toir: ToirClien
                                      "urgency": "high", "operations": [], "references": []}, "fp")  # fmt: skip
     r = ag.ask(ag.start(*ANOMALY), Q)
     assert len(llm.seen) == 2 and not r.trace.get("cache")
+
+
+def test_knowledge_version_follows_the_build_and_the_conflict_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Финальная проверка 27.11: правка кода или data/contradictions.json без пересборки индекса — кэш отдавал
+    прежний ответ. Теперь в версии знаний — сборка (GIT_SHA) и отметки этих файлов."""
+    from service import agent as agent_mod
+
+    monkeypatch.setenv("GIT_SHA", "aaa")
+    a = agent_mod.knowledge_version()
+    monkeypatch.setenv("GIT_SHA", "bbb")
+    assert agent_mod.knowledge_version() != a
+    assert agent_mod.knowledge_version().count("/") >= 5  # сборка + индекс, матрица, противоречия, код

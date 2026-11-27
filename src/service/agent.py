@@ -609,15 +609,24 @@ class NumberContext:
 _REF_BARE = re.compile(r"\b[RР]\d+\b")  # ссылка без скобок: «R3 — руководство…»
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=16)  # по одной отметке на файл версии знаний; новая mtime — новый ключ
 def _file_stamp(path: str, mtime: float) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:12]
 
 
 def knowledge_version() -> str:
-    """Версия знаний для кэша ответов: пересобрали индекс или матрицу — старые ответы не используются."""
-    stamps = []
-    for path in (Path(os.environ.get("INDEX_DIR", ".index")) / "passport.json", matrix_path()):
+    """Версия знаний для кэша ответов: пересобрали индекс или матрицу, поменяли противоречия или код ответа —
+    старые ответы не используются (финальная проверка 27.11: после правки текста кэш отдавал прежний ответ)."""
+    stamps = [os.environ.get("GIT_SHA", "")]  # сборка стенда; локально — отметки файлов ниже
+    code = Path(__file__).resolve().parent
+    paths = (
+        Path(os.environ.get("INDEX_DIR", ".index")) / "passport.json",
+        matrix_path(),
+        contradictions.PATH,
+        code / "agent.py",
+        code / "contradictions.py",
+    )
+    for path in paths:
         stamps.append(_file_stamp(str(path), path.stat().st_mtime) if path.exists() else "-")
     return "/".join(stamps)
 
